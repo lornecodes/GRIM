@@ -20,15 +20,18 @@ agent:
   tool_timeout_secs: 60
   max_daily_cost_cents: 1000
 
+# Path to external Kronos vault (not inside this repo)
+vault_path: "../kronos-vault"
+
 permissions:
   filesystem:
     read:
-      - "./vault/**"
+      - "../kronos-vault/**"
       - "./skills/**"
       - "./config/**"
       - "./identity/**"
     write:
-      - "./vault/**"
+      - "../kronos-vault/**"
       - "./output/**"
       - "./tmp/**"
     deny:

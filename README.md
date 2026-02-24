@@ -8,7 +8,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    YOUR LAYER (persists)                  │
 │                                                          │
-│  vault/           ─── Obsidian Kronos knowledge graph    │
+│  ../kronos-vault/ ─── Obsidian Kronos knowledge graph    │
 │  skills/          ─── GRIM personality, coding, memory   │
 │  config/          ─── GRIM-specific configuration        │
 │  identity/        ─── Personality, field state, prompts  │
@@ -28,7 +28,7 @@
 |-----------|------|-----|
 | `engine/` | IronClaw (Rust agent framework) | 25 LLM providers, 20 channels, 13 security layers, sandboxed tool execution |
 | `mcp/obsidian/` | MCP server for Obsidian | Read/write/search vault via Model Context Protocol |
-| `vault/` | Obsidian knowledge graph (Kronos) | Persistent memory as markdown + YAML frontmatter, git-backed |
+| `../kronos-vault/` | Obsidian knowledge graph (Kronos) | Master vault — external, shared across all repos, git-backed |
 | `skills/` | GRIM-specific skills | Kronos ops, Claude Code integration, repo ingestion, vault commit |
 | `identity/` | Personality layer | Field state, tone, epistemic stance — who GRIM is |
 | `config/` | GRIM configuration | Overrides for IronClaw, MCP endpoints, vault paths |
@@ -86,7 +86,7 @@ tags: []
 ---
 ```
 
-Open the `vault/` directory in Obsidian for visual graph navigation.
+The Kronos vault lives at `../kronos-vault/` (external to this repo). Open it in Obsidian for visual graph navigation.
 
 ## Lineage
 
