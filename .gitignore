@@ -1,0 +1,36 @@
+# Dependencies
+engine/target/
+mcp/obsidian/__pycache__/
+mcp/obsidian/.venv/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# GRIM state
+~/.grim/
+*.db
+
+# Obsidian
+vault/.obsidian/workspace.json
+vault/.obsidian/workspace-mobile.json
+vault/.trash/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+output/
+tmp/
+*.log

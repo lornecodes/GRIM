@@ -1,0 +1,108 @@
+# GRIM Engine Configuration
+# Overrides IronClaw defaults for GRIM personal assistant
+
+agent:
+  system_prompt: |
+    You are GRIM (General Recursive Intelligence Machine), a personal AI assistant
+    for Dawn Field Institute research. You have access to a Kronos knowledge vault
+    containing interconnected research concepts, and coding tools for working
+    across multiple repositories.
+
+    Core principles:
+    - Epistemic honesty: express confidence levels, hedge when uncertain
+    - Knowledge-first: check Kronos before speculating
+    - Research context: you understand Dawn Field Theory, PAC, SEC, infodynamics
+    - Tool-aware: delegate to Claude Code for coding, Kronos for knowledge
+
+  default_provider: "anthropic"
+  default_model: "claude-sonnet-4-6"
+  max_turns: 100
+  tool_timeout_secs: 60
+  max_daily_cost_cents: 1000
+
+permissions:
+  filesystem:
+    read:
+      - "./vault/**"
+      - "./skills/**"
+      - "./config/**"
+      - "./identity/**"
+    write:
+      - "./vault/**"
+      - "./output/**"
+      - "./tmp/**"
+    deny:
+      - "**/.env"
+      - "**/.env.*"
+      - "**/*.pem"
+      - "**/*.key"
+      - "**/secrets/**"
+      - "/proc/**"
+      - "/sys/**"
+
+  network:
+    allow_domains:
+      - "api.anthropic.com"
+      - "api.github.com"
+      - "*.github.com"
+    block_domains:
+      - "metadata.google.internal"
+      - "169.254.169.254"
+    allow_private_network: true   # needed for Obsidian Local REST API
+    max_requests_per_hour: 500
+
+  system:
+    allow_shell: true             # needed for Claude Code + Copilot CLI skills
+    require_approval_for_high_risk: true
+    max_concurrent_tools: 4
+
+sandbox:
+  backend: "docker"
+  enforce: true
+  network_policy: "allow_local"   # permit MCP connections to Obsidian
+
+memory:
+  backend: "encrypted_sqlite"
+  path: "~/.grim/memory.db"
+  encrypt_at_rest: true
+
+providers:
+  anthropic:
+    provider_type: "anthropic"
+    model: "claude-sonnet-4-6"
+    max_tokens: 8192
+    temperature: 0.7
+
+skills:
+  directory: "./skills"
+  require_signatures: false       # disable for development, enable in production
+
+# MCP servers GRIM connects to
+mcp:
+  obsidian:
+    command: "uvx"
+    args: ["mcp-obsidian"]
+    env:
+      OBSIDIAN_API_KEY: "${OBSIDIAN_API_KEY}"
+      OBSIDIAN_HOST: "127.0.0.1"
+      OBSIDIAN_PORT: "27124"
+
+# Channels
+channels:
+  cli:
+    enabled: true
+  telegram:
+    enabled: false               # enable when ready
+    # bot_token: "${TELEGRAM_BOT_TOKEN}"
+  web_ui:
+    enabled: true
+    port: 3000
+
+audit:
+  path: "~/.grim/audit.log"
+  enabled: true
+
+observability:
+  log_level: "info"
+  structured_logs: true
+  redact_pii: true
