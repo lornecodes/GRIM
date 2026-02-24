@@ -1,0 +1,20 @@
+{
+  "folders": [
+    { "path": "_meta" },
+    { "path": "ai-systems" },
+    { "path": "ai-systems/grim" },
+    { "path": "ai-systems/grim/skills" },
+    { "path": "ai-systems/kronos" },
+    { "path": "ai-systems/gaia" },
+    { "path": "ai-systems/axiom" },
+    { "path": "physics" },
+    { "path": "physics/dawn-field-theory" },
+    { "path": "physics/pac-framework" },
+    { "path": "tools" },
+    { "path": "tools/fracton" },
+    { "path": "tools/cip" },
+    { "path": "personal" },
+    { "path": "personal/dawn-field-institute" },
+    { "path": "templates" }
+  ]
+}
