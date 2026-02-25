@@ -1,0 +1,9 @@
+schema_version: "2.0"
+description: "Core source code modules"
+semantic_scope: "implementation"
+files:
+  - "[__init__.py]": "Package init"
+  - "[field_engine.py]": "RBF simulation engine"
+  - "[utils.py]": "Generic utility functions"
+proficiency_level: "research"
+estimated_context_weight: 0.9

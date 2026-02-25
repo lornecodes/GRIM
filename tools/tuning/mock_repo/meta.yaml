@@ -1,0 +1,8 @@
+schema_version: "2.0"
+name: mock-repo
+version: "1.0.0"
+description: "Synthetic repository for actualization prompt tuning"
+role: testing
+cognition:
+  complexity_score: 5.0
+  comprehension_baseline: 8.0

@@ -1,11 +1,15 @@
 # Dependencies
 engine/target/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
 mcp/obsidian/__pycache__/
 mcp/obsidian/.venv/
 
 # Secrets
 .env
-.env.*
+!.env.example
 *.pem
 *.key
 secrets/

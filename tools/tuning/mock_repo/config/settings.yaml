@@ -1,0 +1,22 @@
+# Simulation Configuration
+
+## Default Parameters
+
+simulation:
+  timestep: 0.01
+  max_steps: 10000
+  convergence_threshold: 1e-8
+
+field:
+  alpha: 1.0          # Information gradient coefficient
+  beta: 1.618         # Entropy gradient coefficient (φ)
+  xi_threshold: 1.057 # Balance operator threshold
+
+output:
+  format: json
+  directory: data/results
+  snapshots_every: 100
+
+logging:
+  level: INFO
+  file: logs/simulation.log

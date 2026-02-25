@@ -1,0 +1,13 @@
+{
+  "name": "mock-repo",
+  "version": "1.0.0",
+  "description": "Synthetic test repository",
+  "main": "index.js",
+  "scripts": {
+    "test": "pytest",
+    "lint": "ruff check .",
+    "format": "ruff format ."
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

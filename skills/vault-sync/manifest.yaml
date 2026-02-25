@@ -1,0 +1,60 @@
+name: vault-sync
+version: "1.0"
+description: >
+  Keep Kronos vault FDOs current as code evolves in source repositories.
+  The incremental complement to deep-ingest (initial ingestion).
+type: instruction-protocol
+entry_point: protocol.md
+
+permissions:
+  - vault:read
+  - vault:write
+  - filesystem:read
+  - git:read
+
+triggers:
+  - manual: "User requests vault sync after code changes"
+  - post-commit: "After meaningful commits (opt-in)"
+  - post-session: "After a coding session with structural changes"
+
+phases:
+  - name: Change Detection
+    description: "Understand what changed and categorise impact"
+    output: "Change Impact Assessment"
+    checkpoint: true
+  - name: Vault Scan
+    description: "Read affected FDOs, check for staleness"
+    output: "Staleness markers identified"
+  - name: Apply Updates
+    description: "Minimal, precise edits to bring FDOs current"
+    output: "Updated/created/archived FDOs"
+  - name: Graph Integrity
+    description: "Verify links, bidirectionality, no orphans"
+    output: "Graph validation results"
+  - name: Confirmation
+    description: "Report changes to user"
+    checkpoint: true
+    output: "Sync Report"
+
+quality_gates:
+  updated_fdo:
+    - "Only stale content was changed"
+    - "updated: date bumped"
+    - "Confidence adjustment justified"
+    - "Status transition valid (no skipping stages)"
+    - "New links are bidirectional"
+  new_fdo:
+    - "Passes all deep-ingest per-FDO gates"
+    - "At least 2 connections to existing graph"
+    - "confidence_basis present"
+  archived_fdo:
+    - "Status set to archived"
+    - "superseded_by set if applicable"
+    - "Related links preserved (not deleted)"
+    - "Archival note in Summary"
+
+change_types:
+  new_concept: "Something that didn't exist before"
+  evolution: "Existing concept changed significantly"
+  status_change: "Project status shifted"
+  deprecation: "Something removed or superseded"

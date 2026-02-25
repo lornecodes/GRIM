@@ -1,0 +1,788 @@
+{
+  "agent": "extract",
+  "last_updated": "2026-02-24T20:36:37.499946",
+  "total_iterations": 4,
+  "iterations": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-02-24T20:34:07.428992",
+      "loss": 0.115598,
+      "accuracy": 88.44,
+      "per_case": [
+        {
+          "case_id": "extract_rich_code",
+          "description": "Complex Python with domain-specific terminology",
+          "weight": 1.0,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'recursive balance field'",
+            "concepts contains 'entropy'",
+            "concepts correctly excludes 'machine learning'",
+            "concepts correctly excludes 'neural network'",
+            "concepts correctly excludes 'blockchain'",
+            "entities contains 'PAC'",
+            "entities contains 'SEC'",
+            "entities contains 'RBF'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 12"
+          ],
+          "failures": [
+            "concepts missing 'field center' (got: ['entropy-driven field balancer', 'simulation engine', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics'])",
+            "concepts missing 'golden ratio' (got: ['entropy-driven field balancer', 'simulation engine', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics'])"
+          ]
+        },
+        {
+          "case_id": "extract_simple_utils",
+          "description": "Generic utility functions \u2014 should extract minimal concepts",
+          "weight": 0.8,
+          "error": null,
+          "score": 3.0,
+          "max_score": 3.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'utility'",
+            "concepts contains 'hash'",
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'PAC'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 6 >= min 1",
+            "concepts count 6 <= max 6"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_acronyms",
+          "description": "Domain-specific acronyms \u2014 extract as-is, don't expand wrongly",
+          "weight": 1.2,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'metrics'",
+            "concepts contains 'SEC'",
+            "concepts contains 'PAC'",
+            "concepts correctly excludes 'Cardano Improvement Proposal'",
+            "concepts correctly excludes 'Content Identifier Protocol'",
+            "entities contains 'MED'",
+            "entities contains 'QPL'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        },
+        {
+          "case_id": "extract_yaml_config",
+          "description": "Configuration file \u2014 should extract parameter names",
+          "weight": 0.6,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'configuration'",
+            "concepts contains 'simulation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_docs",
+          "description": "Architecture doc with multiple concepts",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.6666666666666665,
+          "max_score": 4.0,
+          "pct": 66.66666666666666,
+          "passes": [
+            "concepts contains 'architecture'",
+            "concepts contains 'RBF'",
+            "concepts correctly excludes 'Cardano'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "concepts missing 'PAC' (got: ['architecture', 'three-layer architecture', 'field engine', 'RBF simulation', 'far-from-equilibrium dynamics'])",
+            "entities missing 'CIP' (got: ['PAC', 'RBF', 'FastAPI', 'JSON', 'HDF5'])"
+          ]
+        },
+        {
+          "case_id": "extract_tests",
+          "description": "Test file \u2014 extract what's being tested",
+          "weight": 0.8,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'field engine'",
+            "concepts contains 'PAC conservation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_experiment",
+          "description": "Research experiment with hypothesis and results",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'fibonacci'",
+            "concepts contains 'PAC'",
+            "concepts contains 'golden ratio'",
+            "concepts count 9 >= min 3",
+            "concepts count 9 <= max 10"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_near_empty",
+          "description": "Near-empty init file \u2014 should not hallucinate concepts",
+          "weight": 0.7,
+          "error": null,
+          "score": 1.5,
+          "max_score": 1.5,
+          "pct": 100.0,
+          "passes": [
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'simulation'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 0 <= max 2"
+          ],
+          "failures": []
+        }
+      ],
+      "rejected": true,
+      "optimizer": {
+        "updates_applied": {
+          "EXTRACT_RULES": {
+            "old_length": 757,
+            "new_length": 910
+          },
+          "EXTRACT_EXAMPLES": {
+            "old_length": 709,
+            "new_length": 858
+          }
+        },
+        "updates_proposed": [
+          "EXTRACT_RULES",
+          "EXTRACT_EXAMPLES"
+        ],
+        "tokens": {
+          "input": 7672,
+          "output": 681
+        },
+        "converged": false,
+        "dry_run": false
+      },
+      "rejected_changes": {
+        "EXTRACT_RULES": "**Extraction rules:**\n1. Use EXACT terms from content \u2014 never fabricate or infer beyond what's written\n2. Compound terms: \"field_center\" or \"FieldCenter\" \u2192 \"field center\" (always extract the compound)\n3. Mathematical constants: \"PHI = (1 + math.sqrt(5)) / 2\" \u2192 concepts: [\"golden ratio\"] (extract the concept, not just the variable)\n4. Functions: \"sha256()\" \u2192 concepts: [\"hash\"]\n5. File categories: config files \u2192 include \"configuration\"; utility files \u2192 include \"utility\"\n6. Standalone acronyms: Extract as BOTH concepts AND entities when they appear as key terms in text\n7. Never expand acronyms \u2014 \"CIP\" stays \"CIP\", never \"Cardano Improvement Proposal\"\n8. Framework names: \"PAC framework\" \u2192 concepts: [\"PAC\"], entities: [\"PAC\"]\n\n**Volume by file type:**\n- Utility/config/test files: 2-6 concepts max\n- Documentation: 3-8 concepts max\n- Complex domain code: 4-10 concepts max\n- Near-empty files: empty arrays",
+        "EXTRACT_EXAMPLES": "**Examples:**\n- File with `def sha256(content)` and list utilities \u2192 concepts: [\"utility\", \"hash\", \"slugify\"], entities: []\n- File mentioning \"FDO schema v1.0\" and \"CIP directory\" \u2192 concepts: [\"schema\"], entities: [\"FDO\", \"CIP\"]\n- Config with simulation params \u2192 concepts: [\"configuration\", \"simulation\", \"convergence threshold\"]\n- Code with \"DFT-PAC Metrics for SEC Phase Analysis\" \u2192 concepts: [\"metrics\", \"SEC phase analysis\", \"SEC\", \"PAC\"], entities: [\"DFT-PAC\", \"SEC\", \"MED\", \"QPL\", \"FDO\", \"CIP\"]\n- Architecture doc mentioning PAC and RBF \u2192 concepts: [\"architecture\", \"PAC\", \"RBF\"], entities: [\"PAC\", \"RBF\", \"CIP\"]\n- Code with `PHI = (1 + math.sqrt(5)) / 2` and `FieldCenter` class \u2192 concepts: [\"golden ratio\", \"field center\"], entities: [\"PHI\"]\n- Text with \"Uses the FDO schema\" and \"CIP directory index\" \u2192 concepts: [\"schema\"], entities: [\"FDO\", \"CIP\"]"
+      },
+      "rejected_accuracy": 84.64,
+      "rejected_cases": [
+        {
+          "case_id": "extract_acronyms",
+          "before": 87.5,
+          "after": 79.2,
+          "failures": [
+            "concepts missing 'PAC' (got: ['metrics', 'SEC phase analysis', 'MED depth convergence', 'QPL stability bounds', 'field snapshots'])",
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        },
+        {
+          "case_id": "extract_tests",
+          "before": 100.0,
+          "after": 75.0,
+          "failures": [
+            "too many concepts: 9 > max 8"
+          ]
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-02-24T20:34:59.166594",
+      "loss": 0.115598,
+      "accuracy": 88.44,
+      "per_case": [
+        {
+          "case_id": "extract_rich_code",
+          "description": "Complex Python with domain-specific terminology",
+          "weight": 1.0,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'recursive balance field'",
+            "concepts contains 'entropy'",
+            "concepts correctly excludes 'machine learning'",
+            "concepts correctly excludes 'neural network'",
+            "concepts correctly excludes 'blockchain'",
+            "entities contains 'PAC'",
+            "entities contains 'SEC'",
+            "entities contains 'RBF'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 12"
+          ],
+          "failures": [
+            "concepts missing 'field center' (got: ['entropy-driven field balancer', 'simulation engine', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics'])",
+            "concepts missing 'golden ratio' (got: ['entropy-driven field balancer', 'simulation engine', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics'])"
+          ]
+        },
+        {
+          "case_id": "extract_simple_utils",
+          "description": "Generic utility functions \u2014 should extract minimal concepts",
+          "weight": 0.8,
+          "error": null,
+          "score": 3.0,
+          "max_score": 3.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'utility'",
+            "concepts contains 'hash'",
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'PAC'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 6 >= min 1",
+            "concepts count 6 <= max 6"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_acronyms",
+          "description": "Domain-specific acronyms \u2014 extract as-is, don't expand wrongly",
+          "weight": 1.2,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'metrics'",
+            "concepts contains 'SEC'",
+            "concepts contains 'PAC'",
+            "concepts correctly excludes 'Cardano Improvement Proposal'",
+            "concepts correctly excludes 'Content Identifier Protocol'",
+            "entities contains 'MED'",
+            "entities contains 'QPL'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        },
+        {
+          "case_id": "extract_yaml_config",
+          "description": "Configuration file \u2014 should extract parameter names",
+          "weight": 0.6,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'configuration'",
+            "concepts contains 'simulation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_docs",
+          "description": "Architecture doc with multiple concepts",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.6666666666666665,
+          "max_score": 4.0,
+          "pct": 66.66666666666666,
+          "passes": [
+            "concepts contains 'architecture'",
+            "concepts contains 'RBF'",
+            "concepts correctly excludes 'Cardano'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "concepts missing 'PAC' (got: ['architecture', 'three-layer architecture', 'field engine', 'RBF simulation', 'far-from-equilibrium dynamics'])",
+            "entities missing 'CIP' (got: ['PAC', 'RBF', 'FastAPI', 'NumPy', 'Rich'])"
+          ]
+        },
+        {
+          "case_id": "extract_tests",
+          "description": "Test file \u2014 extract what's being tested",
+          "weight": 0.8,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'field engine'",
+            "concepts contains 'PAC conservation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_experiment",
+          "description": "Research experiment with hypothesis and results",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'fibonacci'",
+            "concepts contains 'PAC'",
+            "concepts contains 'golden ratio'",
+            "concepts count 9 >= min 3",
+            "concepts count 9 <= max 10"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_near_empty",
+          "description": "Near-empty init file \u2014 should not hallucinate concepts",
+          "weight": 0.7,
+          "error": null,
+          "score": 1.5,
+          "max_score": 1.5,
+          "pct": 100.0,
+          "passes": [
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'simulation'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 0 <= max 2"
+          ],
+          "failures": []
+        }
+      ],
+      "rejected": true,
+      "optimizer": {
+        "updates_applied": {
+          "EXTRACT_RULES": {
+            "old_length": 757,
+            "new_length": 858
+          },
+          "EXTRACT_EXAMPLES": {
+            "old_length": 709,
+            "new_length": 858
+          }
+        },
+        "updates_proposed": [
+          "EXTRACT_RULES",
+          "EXTRACT_EXAMPLES"
+        ],
+        "tokens": {
+          "input": 8436,
+          "output": 729
+        },
+        "converged": false,
+        "dry_run": false
+      },
+      "rejected_changes": {
+        "EXTRACT_RULES": "**Extraction rules:**\n1. Use EXACT terms from content \u2014 never fabricate or infer beyond what's written\n2. Compound terms: \"field_center\" or \"FieldCenter\" \u2192 \"field center\" (always extract compound terms)\n3. Mathematical constants: \"PHI = (1 + math.sqrt(5)) / 2\" \u2192 concepts: [\"golden ratio\"]\n4. Functions: \"sha256()\" \u2192 concepts: [\"hash\"]\n5. File categories: config files \u2192 include \"configuration\"; utility files \u2192 include \"utility\"\n6. Standalone acronyms: Extract as BOTH concepts AND entities if they appear prominently in text\n7. Never expand acronyms \u2014 \"CIP\" stays \"CIP\", never \"Cardano Improvement Proposal\"\n8. Extract ALL acronyms mentioned in text as entities, even if brief\n\n**Volume by file type:**\n- Utility/config/test files: 2-6 concepts max\n- Documentation: 3-8 concepts max\n- Complex domain code: 4-10 concepts max\n- Near-empty files: empty arrays",
+        "EXTRACT_EXAMPLES": "**Examples:**\n- File with `def sha256(content)` and list utilities \u2192 concepts: [\"utility\", \"hash\", \"slugify\"], entities: []\n- File mentioning \"FDO schema v1.0\" and \"CIP directory\" \u2192 concepts: [\"schema\"], entities: [\"FDO\", \"CIP\"]\n- Config with simulation params \u2192 concepts: [\"configuration\", \"simulation\", \"convergence threshold\"]\n- Code with \"DFT-PAC Metrics for SEC Phase Analysis\" \u2192 concepts: [\"metrics\", \"SEC phase analysis\", \"SEC\", \"PAC\"], entities: [\"DFT-PAC\", \"SEC\", \"MED\", \"QPL\", \"FDO\", \"CIP\"]\n- Architecture doc mentioning PAC and RBF \u2192 concepts: [\"architecture\", \"PAC\", \"RBF\"], entities: [\"PAC\", \"RBF\", \"CIP\"]\n- Code with `PHI = (1 + math.sqrt(5)) / 2` and `FieldCenter` class \u2192 concepts: [\"golden ratio\", \"field center\"], entities: [\"PHI\"]\n- Text with \"Uses the FDO schema\" and \"CIP directory index\" \u2192 concepts: [\"schema\"], entities: [\"FDO\", \"CIP\"]"
+      },
+      "rejected_accuracy": 86.54,
+      "rejected_cases": [
+        {
+          "case_id": "extract_acronyms",
+          "before": 87.5,
+          "after": 79.2,
+          "failures": [
+            "concepts missing 'PAC' (got: ['metrics', 'SEC phase analysis', 'convergence', 'stability bounds', 'compatibility layer'])",
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-02-24T20:35:50.227222",
+      "loss": 0.115598,
+      "accuracy": 88.44,
+      "per_case": [
+        {
+          "case_id": "extract_rich_code",
+          "description": "Complex Python with domain-specific terminology",
+          "weight": 1.0,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'recursive balance field'",
+            "concepts contains 'entropy'",
+            "concepts correctly excludes 'machine learning'",
+            "concepts correctly excludes 'neural network'",
+            "concepts correctly excludes 'blockchain'",
+            "entities contains 'PAC'",
+            "entities contains 'SEC'",
+            "entities contains 'RBF'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 12"
+          ],
+          "failures": [
+            "concepts missing 'field center' (got: ['entropy-driven field balancer', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics', 'PAC conservation'])",
+            "concepts missing 'golden ratio' (got: ['entropy-driven field balancer', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics', 'PAC conservation'])"
+          ]
+        },
+        {
+          "case_id": "extract_simple_utils",
+          "description": "Generic utility functions \u2014 should extract minimal concepts",
+          "weight": 0.8,
+          "error": null,
+          "score": 3.0,
+          "max_score": 3.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'utility'",
+            "concepts contains 'hash'",
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'PAC'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 6 >= min 1",
+            "concepts count 6 <= max 6"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_acronyms",
+          "description": "Domain-specific acronyms \u2014 extract as-is, don't expand wrongly",
+          "weight": 1.2,
+          "error": null,
+          "score": 3.5,
+          "max_score": 4.0,
+          "pct": 87.5,
+          "passes": [
+            "concepts contains 'metrics'",
+            "concepts contains 'SEC'",
+            "concepts contains 'PAC'",
+            "concepts correctly excludes 'Cardano Improvement Proposal'",
+            "concepts correctly excludes 'Content Identifier Protocol'",
+            "entities contains 'MED'",
+            "entities contains 'QPL'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        },
+        {
+          "case_id": "extract_yaml_config",
+          "description": "Configuration file \u2014 should extract parameter names",
+          "weight": 0.6,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'configuration'",
+            "concepts contains 'simulation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_docs",
+          "description": "Architecture doc with multiple concepts",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.6666666666666665,
+          "max_score": 4.0,
+          "pct": 66.66666666666666,
+          "passes": [
+            "concepts contains 'architecture'",
+            "concepts contains 'RBF'",
+            "concepts correctly excludes 'Cardano'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "concepts missing 'PAC' (got: ['architecture', 'three-layer architecture', 'field engine', 'RBF simulation', 'far-from-equilibrium dynamics'])",
+            "entities missing 'CIP' (got: ['PAC', 'RBF', 'FastAPI', 'JSON', 'HDF5'])"
+          ]
+        },
+        {
+          "case_id": "extract_tests",
+          "description": "Test file \u2014 extract what's being tested",
+          "weight": 0.8,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'field engine'",
+            "concepts contains 'PAC conservation'",
+            "concepts count 8 >= min 2",
+            "concepts count 8 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_experiment",
+          "description": "Research experiment with hypothesis and results",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'fibonacci'",
+            "concepts contains 'PAC'",
+            "concepts contains 'golden ratio'",
+            "concepts count 9 >= min 3",
+            "concepts count 9 <= max 10"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_near_empty",
+          "description": "Near-empty init file \u2014 should not hallucinate concepts",
+          "weight": 0.7,
+          "error": null,
+          "score": 1.5,
+          "max_score": 1.5,
+          "pct": 100.0,
+          "passes": [
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'simulation'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 0 <= max 2"
+          ],
+          "failures": []
+        }
+      ],
+      "rejected": false,
+      "optimizer": {
+        "updates_applied": {
+          "EXTRACT_RULES": {
+            "old_length": 757,
+            "new_length": 871
+          },
+          "EXTRACT_EXAMPLES": {
+            "old_length": 709,
+            "new_length": 858
+          }
+        },
+        "updates_proposed": [
+          "EXTRACT_RULES",
+          "EXTRACT_EXAMPLES"
+        ],
+        "tokens": {
+          "input": 9187,
+          "output": 687
+        },
+        "converged": false,
+        "dry_run": false
+      }
+    },
+    {
+      "iteration": 4,
+      "timestamp": "2026-02-24T20:36:37.499946",
+      "loss": 0.122724,
+      "accuracy": 87.73,
+      "per_case": [
+        {
+          "case_id": "extract_rich_code",
+          "description": "Complex Python with domain-specific terminology",
+          "weight": 1.0,
+          "error": null,
+          "score": 3.75,
+          "max_score": 4.0,
+          "pct": 93.75,
+          "passes": [
+            "concepts contains 'recursive balance field'",
+            "concepts contains 'field center'",
+            "concepts contains 'entropy'",
+            "concepts correctly excludes 'machine learning'",
+            "concepts correctly excludes 'neural network'",
+            "concepts correctly excludes 'blockchain'",
+            "entities contains 'PAC'",
+            "entities contains 'SEC'",
+            "entities contains 'RBF'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 12"
+          ],
+          "failures": [
+            "concepts missing 'golden ratio' (got: ['entropy-driven field balancer', 'recursive balance field', 'RBF algorithm', 'far-from-equilibrium dynamics', 'PAC conservation'])"
+          ]
+        },
+        {
+          "case_id": "extract_simple_utils",
+          "description": "Generic utility functions \u2014 should extract minimal concepts",
+          "weight": 0.8,
+          "error": null,
+          "score": 3.0,
+          "max_score": 3.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'utility'",
+            "concepts contains 'hash'",
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'PAC'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 6 >= min 1",
+            "concepts count 6 <= max 6"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_acronyms",
+          "description": "Domain-specific acronyms \u2014 extract as-is, don't expand wrongly",
+          "weight": 1.2,
+          "error": null,
+          "score": 3.1666666666666665,
+          "max_score": 4.0,
+          "pct": 79.16666666666666,
+          "passes": [
+            "concepts contains 'metrics'",
+            "concepts contains 'SEC'",
+            "concepts correctly excludes 'Cardano Improvement Proposal'",
+            "concepts correctly excludes 'Content Identifier Protocol'",
+            "entities contains 'MED'",
+            "entities contains 'QPL'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "concepts missing 'PAC' (got: ['metrics', 'SEC phase analysis', 'convergence', 'stability bounds', 'compatibility layer'])",
+            "entities missing 'FDO' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])",
+            "entities missing 'CIP' (got: ['DFT-PAC', 'SEC', 'RBF', 'MED', 'QPL'])"
+          ]
+        },
+        {
+          "case_id": "extract_yaml_config",
+          "description": "Configuration file \u2014 should extract parameter names",
+          "weight": 0.6,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'configuration'",
+            "concepts contains 'simulation'",
+            "concepts count 8 >= min 2",
+            "concepts count 8 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_docs",
+          "description": "Architecture doc with multiple concepts",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.6666666666666665,
+          "max_score": 4.0,
+          "pct": 66.66666666666666,
+          "passes": [
+            "concepts contains 'architecture'",
+            "concepts contains 'RBF'",
+            "concepts correctly excludes 'Cardano'",
+            "concepts count 10 >= min 3",
+            "concepts count 10 <= max 10"
+          ],
+          "failures": [
+            "concepts missing 'PAC' (got: ['architecture', 'three-layer architecture', 'field engine', 'RBF simulation', 'far-from-equilibrium dynamics'])",
+            "entities missing 'CIP' (got: ['PAC', 'RBF', 'FastAPI', 'JSON', 'HDF5'])"
+          ]
+        },
+        {
+          "case_id": "extract_tests",
+          "description": "Test file \u2014 extract what's being tested",
+          "weight": 0.8,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'field engine'",
+            "concepts contains 'PAC conservation'",
+            "concepts count 7 >= min 2",
+            "concepts count 7 <= max 8"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_experiment",
+          "description": "Research experiment with hypothesis and results",
+          "weight": 1.0,
+          "error": null,
+          "score": 2.0,
+          "max_score": 2.0,
+          "pct": 100.0,
+          "passes": [
+            "concepts contains 'fibonacci'",
+            "concepts contains 'PAC'",
+            "concepts contains 'golden ratio'",
+            "concepts count 9 >= min 3",
+            "concepts count 9 <= max 10"
+          ],
+          "failures": []
+        },
+        {
+          "case_id": "extract_near_empty",
+          "description": "Near-empty init file \u2014 should not hallucinate concepts",
+          "weight": 0.7,
+          "error": null,
+          "score": 1.5,
+          "max_score": 1.5,
+          "pct": 100.0,
+          "passes": [
+            "concepts correctly excludes 'field'",
+            "concepts correctly excludes 'entropy'",
+            "concepts correctly excludes 'simulation'",
+            "concepts correctly excludes 'quantum'",
+            "concepts count 0 <= max 2"
+          ],
+          "failures": []
+        }
+      ],
+      "rejected": false,
+      "optimizer": {
+        "updates_applied": {
+          "EXTRACT_EXAMPLES": {
+            "old_length": 858,
+            "new_length": 983
+          }
+        },
+        "updates_proposed": [
+          "EXTRACT_EXAMPLES"
+        ],
+        "tokens": {
+          "input": 9449,
+          "output": 497
+        },
+        "converged": false,
+        "dry_run": false
+      }
+    }
+  ]
+}

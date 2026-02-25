@@ -1,0 +1,75 @@
+name: deep-ingest
+version: 1.0.0
+description: >
+  Deep knowledge ingestion skill for manually creating high-quality,
+  interconnected FDOs in the Kronos vault from source material (papers,
+  repos, research). Follows a 7-phase protocol with quality gates at
+  each step.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:read
+  - vault:write
+  - filesystem:read
+
+inputs:
+  source_path:
+    type: string
+    required: true
+    description: Path to source material (repo, paper directory, etc.)
+  domain:
+    type: enum
+    values: [physics, ai-systems, tools, personal]
+    required: true
+    description: Target domain for the FDOs
+  vault_path:
+    type: string
+    default: kronos-vault/
+    description: Path to the Kronos vault
+
+outputs:
+  fdos_created: integer
+  fdos_extended: integer
+  fdos_linked: integer
+  validation_status: string
+
+phases:
+  1_survey: "Read source, identify logical units, produce ingestion plan"
+  2_dedup: "Scan vault for existing FDOs to extend or merge"
+  3_read: "Deep read each unit — extract claims, equations, evidence"
+  4_create: "Write FDOs with per-FDO quality gate"
+  5_link: "Wire bidirectional cross-links across vault"
+  6_validate: "Schema, content, and graph integrity checks"
+  7_report: "Summary report with stats and next steps"
+
+checkpoints:
+  - after: 1_survey
+    action: "Present ingestion plan to user for approval"
+  - after: 2_dedup
+    action: "If merge candidates found, ask user for decision"
+  - after: 6_validate
+    action: "Report validation results to user"
+
+quality_gates:
+  per_unit:
+    - "Can state core claim in one sentence"
+    - "Has at least one quantitative result"
+    - "Knows dependency chain"
+    - "Separates established from speculative"
+  per_fdo:
+    - "Summary is standalone"
+    - "Core claim is precise"
+    - "Evidence includes bounds"
+    - "At least 2 wikilinks"
+    - "Confidence is justified"
+    - "Tags are specific and searchable"
+    - "No fabrication"
+  final:
+    - "All frontmatter valid"
+    - "No duplicate concepts"
+    - "All wikilinks resolve"
+    - "All links bidirectional"
+    - "No orphan FDOs"
+    - "Spot check 2 random FDOs against source"

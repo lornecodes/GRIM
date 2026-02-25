@@ -1,0 +1,6 @@
+schema_version: "2.0"
+description: "Research experiments and validation"
+semantic_scope: "research"
+files:
+  - "[exp_01_fibonacci.md]": "Fibonacci convergence in PAC trees"
+proficiency_level: "research"
