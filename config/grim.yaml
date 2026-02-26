@@ -1,27 +1,50 @@
 # GRIM Engine Configuration
 # Overrides IronClaw defaults for GRIM personal assistant
+#
+# This file is loaded by the `ironclaw grim` command.
+# It contains both GRIM-specific extensions (vault_path, identity,
+# mcp_servers) and standard IronClaw engine config (agent, permissions, etc.).
+
+# ── GRIM Extensions ─────────────────────────────────────────────────────
+
+# Path to external Kronos vault (not inside this repo)
+vault_path: "../kronos-vault"
+
+# Identity layer configuration
+identity:
+  system_prompt_path: "identity/system_prompt.md"
+  personality_path: "identity/personality.yaml"
+  skills_path: "skills/"
+
+# MCP servers GRIM connects to
+mcp_servers:
+  kronos:
+    command: "python"
+    args: ["-m", "kronos_mcp"]
+    env:
+      KRONOS_VAULT_PATH: "../kronos-vault"
+    enabled: true
+    startup_timeout_secs: 15
+
+  obsidian:
+    command: "uvx"
+    args: ["mcp-obsidian"]
+    env:
+      OBSIDIAN_API_KEY: "${OBSIDIAN_API_KEY}"
+      OBSIDIAN_HOST: "127.0.0.1"
+      OBSIDIAN_PORT: "27124"
+    enabled: false    # enable when Obsidian Local REST API is running
+    startup_timeout_secs: 10
+
+# ── IronClaw Engine Config ──────────────────────────────────────────────
 
 agent:
-  system_prompt: |
-    You are GRIM (General Recursive Intelligence Machine), a personal AI assistant
-    for Dawn Field Institute research. You have access to a Kronos knowledge vault
-    containing interconnected research concepts, and coding tools for working
-    across multiple repositories.
-
-    Core principles:
-    - Epistemic honesty: express confidence levels, hedge when uncertain
-    - Knowledge-first: check Kronos before speculating
-    - Research context: you understand Dawn Field Theory, PAC, SEC, infodynamics
-    - Tool-aware: delegate to Claude Code for coding, Kronos for knowledge
-
+  system_prompt: "overridden by identity layer"
   default_provider: "anthropic"
   default_model: "claude-sonnet-4-6"
   max_turns: 100
   tool_timeout_secs: 60
   max_daily_cost_cents: 1000
-
-# Path to external Kronos vault (not inside this repo)
-vault_path: "../kronos-vault"
 
 permissions:
   filesystem:
@@ -40,8 +63,13 @@ permissions:
       - "**/*.pem"
       - "**/*.key"
       - "**/secrets/**"
-      - "/proc/**"
-      - "/sys/**"
+      # Linux paths (required by IronClaw validator)
+      - "/etc/shadow"
+      - "/etc/gshadow"
+      - "/root/.ssh"
+      - "**/.ssh/id_*"
+      - "**/.aws/credentials"
+      - "**/.gnupg/private-keys"
 
   network:
     allow_domains:
@@ -51,18 +79,19 @@ permissions:
     block_domains:
       - "metadata.google.internal"
       - "169.254.169.254"
-    allow_private_network: true   # needed for Obsidian Local REST API
+      - "metadata.azure.com"
+    block_private: false          # needed for local MCP connections
     max_requests_per_hour: 500
 
   system:
-    allow_shell: true             # needed for Claude Code + Copilot CLI skills
-    require_approval_for_high_risk: true
-    max_concurrent_tools: 4
+    allow_shell: false            # enable later with Claude Code skill
+    require_approval: true
+    max_concurrent: 4
 
 sandbox:
-  backend: "docker"
-  enforce: true
-  network_policy: "allow_local"   # permit MCP connections to Obsidian
+  backend: "native"              # use native sandbox on Windows (no Docker required)
+  enforce: false                  # relax for development, enforce in production
+  network_policy: "allow_local"
 
 memory:
   backend: "encrypted_sqlite"
@@ -78,34 +107,16 @@ providers:
 
 skills:
   directory: "./skills"
-  require_signatures: false       # disable for development, enable in production
+  require_signatures: false       # disable for development
 
-# MCP servers GRIM connects to
-mcp:
-  obsidian:
-    command: "uvx"
-    args: ["mcp-obsidian"]
-    env:
-      OBSIDIAN_API_KEY: "${OBSIDIAN_API_KEY}"
-      OBSIDIAN_HOST: "127.0.0.1"
-      OBSIDIAN_PORT: "27124"
-
-# Channels
-channels:
-  cli:
-    enabled: true
-  telegram:
-    enabled: false               # enable when ready
-    # bot_token: "${TELEGRAM_BOT_TOKEN}"
-  web_ui:
-    enabled: true
-    port: 3000
+channels: {}
 
 audit:
   path: "~/.grim/audit.log"
   enabled: true
 
-observability:
-  log_level: "info"
-  structured_logs: true
-  redact_pii: true
+dlp:
+  enabled: false                  # enable for production
+
+antitheft:
+  enforce: false                  # enable for production

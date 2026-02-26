@@ -1,0 +1,100 @@
+# GRIM Release Pipeline
+#
+# Triggers:
+#   - Push tag: v*       → build + push Docker image to GHCR
+#   - Push to main       → run tests
+#   - Manual dispatch     → build + optional push
+#
+# Images pushed to: ghcr.io/<owner>/grim:<tag>
+
+name: GRIM Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: 'Push image to registry'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/grim
+
+jobs:
+  # ── Tests ──────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: GRIM
+        run: |
+          pip install -e .
+          pip install -e ./mcp/kronos
+          pip install "fastapi>=0.115" "uvicorn[standard]>=0.34" "websockets>=14.0"
+          pip install pytest pytest-asyncio
+
+      - name: Run tests
+        working-directory: GRIM
+        env:
+          GRIM_ENV: debug
+        run: |
+          python -c "from core.config import load_config; print('Config OK')"
+          python -c "from server.app import app; print('Server OK')"
+          # pytest tests/ -x -q  # Enable when tests don't need API key
+
+  # ── Build & Push Docker Image ──────────────────────────────
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || github.event.inputs.push_image == 'true'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: GRIM
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

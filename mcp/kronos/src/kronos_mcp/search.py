@@ -584,29 +584,50 @@ class SearchEngine:
         self._semantic_loading = False  # True while background thread is building
         import threading
         self._semantic_lock = threading.Lock()
+        self._index_lock = threading.Lock()  # Serialises concurrent _full_index() calls
 
     @property
     def watcher(self) -> FileWatcher:
         return self._watcher
 
     def invalidate(self):
-        """Force full re-index on next search (call after create/update)."""
+        """Force full re-index on next search (call after create/update).
+
+        write_fdo() already updated the vault's in-memory FDO dict in-place,
+        so we only need to invalidate BM25/graph/semantic — not the vault index.
+        """
         self._initialized = False
         self._semantic_indexed = False
         self._watcher._mtimes.clear()
-        self._vault.refresh()  # Clear vault's cached index too
+        # Do NOT call vault.refresh() — write_fdo already updated the vault index
 
     def _ensure_indexed(self):
-        """Build or incrementally update BM25 + graph indices (NOT semantic)."""
-        all_paths = [str(p) for p in self._vault.vault_path.rglob("*.md")]
+        """Build or incrementally update BM25 + graph indices (NOT semantic).
 
-        if not self._initialized:
-            # First call — full build of BM25 + graph (fast)
-            self._full_index(all_paths)
-            self._initialized = True
-            return
+        Thread-safe: only one thread runs _full_index() at a time.
+        All others skip the full build if it completes while they wait.
+        """
+        # Fast path — no lock needed for the hot case
+        if self._initialized:
+            all_paths = [str(p) for p in self._vault.vault_path.rglob("*.md")]
+            if self._watcher.is_fresh(all_paths):
+                return  # Nothing changed
+            # Fall through to do incremental update under lock
+        else:
+            all_paths = [str(p) for p in self._vault.vault_path.rglob("*.md")]
 
-        # Incremental update
+        with self._index_lock:
+            # Double-check after acquiring lock: another thread may have finished
+            if self._initialized and self._watcher.is_fresh(all_paths):
+                return
+
+            if not self._initialized:
+                # Full build of BM25 + graph (fast, ~400ms for 115 FDOs)
+                self._full_index(all_paths)
+                self._initialized = True
+                return
+
+        # Incremental update (outside lock — safe since only adds/removes)
         if self._watcher.is_fresh(all_paths):
             return  # Nothing changed
 

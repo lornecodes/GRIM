@@ -1,0 +1,27 @@
+# GRIM Docker Compose — local development
+#
+# Usage:
+#   docker compose up --build
+#
+# Requires:
+#   - .env file with ANTHROPIC_API_KEY
+#   - ../kronos-vault directory (or set VAULT_PATH)
+
+services:
+  grim:
+    build: .
+    ports:
+      - "${GRIM_PORT:-8080}:8080"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GRIM_ENV=${GRIM_ENV:-debug}
+      - KRONOS_VAULT_PATH=/vault
+      - KRONOS_SKILLS_PATH=/app/skills
+    volumes:
+      - ${VAULT_PATH:-../kronos-vault}:/vault:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

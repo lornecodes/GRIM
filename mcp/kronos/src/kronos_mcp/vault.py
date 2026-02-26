@@ -20,7 +20,7 @@ from typing import Any
 # ── FDO data model ──────────────────────────────────────────────────────────
 
 REQUIRED_FIELDS = {"id", "title", "domain", "created", "updated", "status", "confidence", "related", "source_repos", "tags"}
-VALID_DOMAINS = {"physics", "ai-systems", "tools", "personal", "modelling", "computing", "projects"}
+VALID_DOMAINS = {"physics", "ai-systems", "tools", "personal", "modelling", "computing", "projects", "people", "interests", "notes", "media", "journal"}
 VALID_STATUSES = {"seed", "developing", "stable", "archived", "validated"}
 
 
@@ -343,8 +343,10 @@ class VaultEngine:
         file_path = domain_dir / f"{fdo.id}.md"
         file_path.write_text(fdo.to_markdown(), encoding="utf-8")
         fdo.file_path = str(file_path)
-        # Invalidate cache
-        self._index = None
+        # Update in-memory index in-place — no full rebuild needed.
+        # If index not yet built, leave it None (will be built on next access).
+        if self._index is not None:
+            self._index[fdo.id] = fdo
         return str(file_path)
 
     def update_field(self, fdo_id: str, field_name: str, value: Any) -> FDO | None:

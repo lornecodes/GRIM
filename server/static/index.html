@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GRIM</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-hover: #1a1a25;
+    --border: #2a2a3a;
+    --text: #e0e0e8;
+    --text-dim: #8888a0;
+    --accent: #7c6fef;
+    --accent-dim: #5a4fd0;
+    --user-bg: #1e1e30;
+    --grim-bg: #14141e;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --error: #f87171;
+    --trace-bg: #0d0d14;
+    --c-node: #60a5fa;
+    --c-llm: #c084fc;
+    --c-tool: #34d399;
+    --c-graph: #f59e0b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* -- Header -- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .logo { display: flex; align-items: center; gap: 10px; }
+
+  .logo-mark {
+    width: 28px; height: 28px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: white;
+  }
+
+  .logo h1 { font-size: 15px; font-weight: 600; letter-spacing: 2px; }
+
+  .hdr-right { display: flex; align-items: center; gap: 16px; }
+
+  .status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--error); transition: background 0.3s;
+  }
+  .status-dot.connected { background: var(--success); }
+
+  .dbg-toggle {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; color: var(--text-dim); font-family: inherit;
+    font-size: 11px; cursor: pointer; transition: all 0.2s;
+  }
+  .dbg-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .dbg-toggle.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(124,111,239,0.1);
+  }
+
+  /* -- Main layout -- */
+  .main { flex: 1; display: flex; overflow: hidden; }
+  .chat-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  /* -- Debug side-panel -- */
+  .dbg-pane {
+    width: 0; overflow: hidden; border-left: 1px solid var(--border);
+    background: var(--trace-bg); display: flex; flex-direction: column;
+    transition: width 0.25s ease;
+  }
+  .dbg-pane.open { width: 420px; }
+
+  @media (max-width: 900px) {
+    .dbg-pane.open {
+      width: 100%; position: absolute; right: 0; top: 0; bottom: 0; z-index: 10;
+    }
+  }
+
+  .dbg-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 600; color: var(--text-dim); flex-shrink: 0;
+  }
+
+  .dbg-filters { display: flex; gap: 4px; }
+
+  .fbtn {
+    background: none; border: 1px solid transparent; border-radius: 4px;
+    padding: 2px 7px; font-family: inherit; font-size: 10px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .fbtn.c-node  { color: var(--c-node); }
+  .fbtn.c-llm   { color: var(--c-llm); }
+  .fbtn.c-tool  { color: var(--c-tool); }
+  .fbtn.c-graph { color: var(--c-graph); }
+  .fbtn.active  { border-color: currentColor; background: rgba(255,255,255,0.05); }
+  .fbtn:hover   { background: rgba(255,255,255,0.05); }
+
+  .dbg-clear {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-family: inherit; font-size: 10px; padding: 2px 6px;
+  }
+  .dbg-clear:hover { color: var(--error); }
+
+  #traceLog {
+    flex: 1; overflow-y: auto; padding: 8px 10px;
+    font-size: 11px; line-height: 1.6;
+  }
+
+  .trc {
+    display: flex; gap: 8px; padding: 3px 4px; border-radius: 3px;
+    animation: trFade 0.2s ease-out; cursor: default;
+  }
+  .trc:hover { background: rgba(255,255,255,0.03); }
+  .trc.hidden { display: none; }
+
+  @keyframes trFade {
+    from { opacity: 0; transform: translateX(-4px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .trc-ms {
+    color: var(--text-dim); font-variant-numeric: tabular-nums;
+    min-width: 52px; text-align: right; flex-shrink: 0; opacity: 0.7;
+    font-size: 10px;
+  }
+
+  .trc-cat {
+    min-width: 40px; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .trc-cat.c-node  { color: var(--c-node); }
+  .trc-cat.c-llm   { color: var(--c-llm); }
+  .trc-cat.c-tool  { color: var(--c-tool); }
+  .trc-cat.c-graph { color: var(--c-graph); }
+
+  .trc-body { flex: 1; min-width: 0; }
+  .trc-text { color: var(--text); word-break: break-word; }
+
+  .trc-detail {
+    margin-top: 2px; padding: 4px 8px;
+    background: rgba(255,255,255,0.02); border-radius: 3px;
+    font-size: 10px; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 140px; overflow-y: auto;
+    display: none;
+  }
+  .trc.expanded .trc-detail { display: block; }
+
+  .trc-arrow {
+    color: var(--text-dim); cursor: pointer; font-size: 10px;
+    opacity: 0.4; flex-shrink: 0; user-select: none;
+  }
+  .trc-arrow:hover { opacity: 1; }
+
+  /* -- Chat status log (inline) -- */
+  .status-log {
+    align-self: flex-start; display: flex; flex-direction: column;
+    gap: 3px; padding: 6px 0; max-width: 70%;
+  }
+  .sline {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px; color: var(--text-dim);
+    animation: fadeIn 0.15s ease-out;
+  }
+  .sline .spinner {
+    width: 12px; height: 12px;
+    border: 1.5px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0;
+  }
+  .sline.done .spinner {
+    animation: none; border-color: var(--success); background: var(--success);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* -- Messages -- */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+    scroll-behavior: smooth;
+  }
+
+  .msg {
+    max-width: 80%; padding: 14px 18px; border-radius: 12px;
+    font-size: 13.5px; line-height: 1.7;
+    word-wrap: break-word; white-space: pre-wrap;
+    position: relative; animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg.user {
+    align-self: flex-end; background: var(--user-bg);
+    border: 1px solid var(--border); border-bottom-right-radius: 4px;
+  }
+  .msg.grim {
+    align-self: flex-start; background: var(--grim-bg);
+    border: 1px solid var(--border); border-bottom-left-radius: 4px;
+  }
+
+  .msg .meta-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-top: 10px; padding: 3px 8px; border-radius: 4px;
+    background: rgba(124, 111, 239, 0.1);
+    border: 1px solid rgba(124, 111, 239, 0.2);
+    font-size: 10px; color: var(--accent);
+  }
+
+  /* -- Input -- */
+  .input-area {
+    padding: 16px 20px; border-top: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0;
+  }
+
+  .input-row {
+    display: flex; gap: 10px; align-items: flex-end;
+    max-width: 900px; margin: 0 auto;
+  }
+
+  #input {
+    flex: 1; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; color: var(--text);
+    font-family: inherit; font-size: 13.5px;
+    resize: none; outline: none;
+    min-height: 44px; max-height: 160px;
+    line-height: 1.5; transition: border-color 0.2s;
+  }
+  #input:focus { border-color: var(--accent); }
+  #input::placeholder { color: var(--text-dim); }
+
+  #send {
+    background: var(--accent); border: none; border-radius: 10px;
+    padding: 11px 20px; color: white; font-family: inherit;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: background 0.2s, opacity 0.2s; white-space: nowrap;
+  }
+  #send:hover { background: var(--accent-dim); }
+  #send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .input-hint { text-align: center; font-size: 10px; color: var(--text-dim); margin-top: 8px; }
+
+  /* -- Scrollbar -- */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  @media (max-width: 600px) {
+    .msg { max-width: 92%; }
+    header { padding: 10px 14px; }
+    #messages { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">G</div>
+    <h1>GRIM</h1>
+  </div>
+  <div class="hdr-right">
+    <div class="status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">connecting...</span>
+    </div>
+    <button class="dbg-toggle" id="dbgToggle" title="Toggle agent trace panel">trace</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="chat-pane">
+    <div id="messages">
+      <div class="msg grim">Ready when you are. Ask me anything &mdash; I have access to the knowledge vault.</div>
+    </div>
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="input" rows="1" placeholder="Talk to GRIM..." autofocus></textarea>
+        <button id="send">Send</button>
+      </div>
+      <div class="input-hint">Enter to send &middot; Shift+Enter for newline</div>
+    </div>
+  </div>
+
+  <div class="dbg-pane" id="dbgPane">
+    <div class="dbg-header">
+      <span>AGENT TRACE</span>
+      <div class="dbg-filters">
+        <button class="fbtn c-graph active" data-cat="graph">graph</button>
+        <button class="fbtn c-node active"  data-cat="node">node</button>
+        <button class="fbtn c-llm active"   data-cat="llm">llm</button>
+        <button class="fbtn c-tool active"  data-cat="tool">tool</button>
+      </div>
+      <button class="dbg-clear" id="dbgClear" title="Clear trace log">clear</button>
+    </div>
+    <div id="traceLog"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  /* -- state -- */
+  var sessionId = crypto.randomUUID().slice(0, 8);
+  var ws = null, thinking = false;
+  var streamingEl = null, streamedText = '';
+  var statusLogEl = null;
+  var activeFilters = {graph:true, node:true, llm:true, tool:true};
+  var dbgOpen = false;
+
+  /* -- elements -- */
+  var msgs    = document.getElementById('messages');
+  var input   = document.getElementById('input');
+  var sendBtn = document.getElementById('send');
+  var dot     = document.getElementById('statusDot');
+  var stxt    = document.getElementById('statusText');
+  var dbgPane = document.getElementById('dbgPane');
+  var dbgBtn  = document.getElementById('dbgToggle');
+  var trLog   = document.getElementById('traceLog');
+  var clrBtn  = document.getElementById('dbgClear');
+
+  /* -- debug toggle -- */
+  dbgBtn.addEventListener('click', function() {
+    dbgOpen = !dbgOpen;
+    dbgPane.classList.toggle('open', dbgOpen);
+    dbgBtn.classList.toggle('active', dbgOpen);
+  });
+
+  /* -- filter buttons -- */
+  var fbtns = document.querySelectorAll('.fbtn');
+  for (var i = 0; i < fbtns.length; i++) {
+    (function(btn) {
+      btn.addEventListener('click', function() {
+        var cat = btn.getAttribute('data-cat');
+        activeFilters[cat] = !activeFilters[cat];
+        btn.classList.toggle('active', activeFilters[cat]);
+        var entries = trLog.querySelectorAll('.trc');
+        for (var j = 0; j < entries.length; j++) {
+          var ec = entries[j].getAttribute('data-cat');
+          entries[j].classList.toggle('hidden', !activeFilters[ec]);
+        }
+      });
+    })(fbtns[i]);
+  }
+
+  clrBtn.addEventListener('click', function() { trLog.innerHTML = ''; });
+
+  /* ============= WebSocket ============= */
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws/' + sessionId);
+
+    ws.onopen = function() {
+      dot.classList.add('connected');
+      stxt.textContent = 'session ' + sessionId;
+    };
+    ws.onclose = function() {
+      dot.classList.remove('connected');
+      stxt.textContent = 'disconnected';
+      setTimeout(connect, 3000);
+    };
+    ws.onerror = function() {
+      dot.classList.remove('connected');
+      stxt.textContent = 'error';
+    };
+
+    ws.onmessage = function(ev) {
+      var d = JSON.parse(ev.data);
+
+      /* -- TRACE -> debug panel + inline status -- */
+      if (d.type === 'trace') {
+        addTraceEntry(d);
+        if (d.cat === 'node' && d.action === 'start') {
+          addStatusLine(d.text);
+        } else if (d.cat === 'tool' && d.action === 'start') {
+          addStatusLine(d.text);
+        } else if (d.cat === 'node' && d.action === 'end' && d.detail) {
+          if (d.detail.fdo_count) {
+            markAllDone();
+            addStatusLine('Found ' + d.detail.fdo_count + ' FDOs');
+            markAllDone();
+          } else if (d.detail.mode) {
+            markAllDone();
+            addStatusLine('Mode: ' + d.detail.mode);
+            markAllDone();
+          }
+        }
+        return;
+      }
+
+      /* -- STREAM -> token-by-token -- */
+      if (d.type === 'stream') {
+        if (statusLogEl) {
+          var pend = statusLogEl.querySelectorAll('.sline:not(.done)');
+          for (var k = 0; k < pend.length; k++) pend[k].classList.add('done');
+        }
+        if (!streamingEl) {
+          streamingEl = document.createElement('div');
+          streamingEl.className = 'msg grim';
+          streamedText = '';
+          msgs.appendChild(streamingEl);
+        }
+        streamedText += d.token;
+        streamingEl.innerHTML = renderMd(streamedText);
+        msgs.scrollTop = msgs.scrollHeight;
+        return;
+      }
+
+      /* -- RESPONSE -> final -- */
+      if (d.type === 'response') {
+        // Mark all pending status spinners as done
+        if (statusLogEl) {
+          var pend = statusLogEl.querySelectorAll('.sline:not(.done)');
+          for (var k = 0; k < pend.length; k++) pend[k].classList.add('done');
+        }
+        if (streamingEl && streamedText) {
+          streamingEl.innerHTML = renderMd(d.content || streamedText);
+          if (d.meta) addBadge(streamingEl, d.meta);
+        } else {
+          addMsg('grim', d.content, d.meta);
+        }
+        streamingEl = null; streamedText = ''; statusLogEl = null;
+        setThinking(false);
+        return;
+      }
+
+      /* -- ERROR -- */
+      if (d.type === 'error') {
+        streamingEl = null; streamedText = ''; statusLogEl = null;
+        addMsg('grim', '\u26a0 ' + d.content);
+        setThinking(false);
+      }
+    };
+  }
+
+  /* ============= Trace panel ============= */
+  function addTraceEntry(d) {
+    var el = document.createElement('div');
+    el.className = 'trc';
+    el.setAttribute('data-cat', d.cat);
+    if (!activeFilters[d.cat]) el.classList.add('hidden');
+
+    var ms = (d.ms != null) ? ('+' + d.ms + 'ms') : '';
+
+    // build detail object
+    var det = {};
+    if (d.detail) { for (var k in d.detail) { if (d.detail.hasOwnProperty(k)) det[k] = d.detail[k]; } }
+    if (d.input) det.input = d.input;
+    if (d.output_preview) det.output_preview = d.output_preview;
+    if (d.duration_ms != null) det.duration_ms = d.duration_ms;
+    var hasDet = Object.keys(det).length > 0;
+
+    el.innerHTML =
+      '<span class="trc-ms">' + esc(ms) + '</span>' +
+      '<span class="trc-cat c-' + d.cat + '">' + d.cat + '</span>' +
+      '<div class="trc-body"><span class="trc-text">' + esc(d.text) + '</span></div>' +
+      (hasDet ? '<span class="trc-arrow">&#9656;</span>' : '');
+
+    if (hasDet) {
+      var detEl = document.createElement('div');
+      detEl.className = 'trc-detail';
+      detEl.textContent = JSON.stringify(det, null, 2);
+      el.querySelector('.trc-body').appendChild(detEl);
+      el.addEventListener('click', function() {
+        el.classList.toggle('expanded');
+        var arr = el.querySelector('.trc-arrow');
+        if (arr) arr.innerHTML = el.classList.contains('expanded') ? '&#9662;' : '&#9656;';
+      });
+    }
+
+    trLog.appendChild(el);
+    trLog.scrollTop = trLog.scrollHeight;
+  }
+
+  /* ============= Inline status (chat area) ============= */
+  function ensureStatusLog() {
+    if (!statusLogEl) {
+      statusLogEl = document.createElement('div');
+      statusLogEl.className = 'status-log';
+      msgs.appendChild(statusLogEl);
+    }
+  }
+
+  function addStatusLine(text) {
+    ensureStatusLog();
+    markAllDone();
+    var ln = document.createElement('div');
+    ln.className = 'sline';
+    ln.innerHTML = '<div class="spinner"></div><span>' + esc(text) + '</span>';
+    statusLogEl.appendChild(ln);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function markAllDone() {
+    if (!statusLogEl) return;
+    var p = statusLogEl.querySelectorAll('.sline:not(.done)');
+    for (var i = 0; i < p.length; i++) p[i].classList.add('done');
+  }
+
+  /* ============= Chat helpers ============= */
+  function renderMd(t) {
+    return esc(t)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code style="background:rgba(124,111,239,0.15);padding:1px 5px;border-radius:3px;">$1</code>')
+      .replace(/^### (.+)$/gm, '<strong style="font-size:14px;">$1</strong>')
+      .replace(/^## (.+)$/gm, '<strong style="font-size:15px;">$1</strong>')
+      .replace(/^# (.+)$/gm, '<strong style="font-size:16px;">$1</strong>')
+      .replace(/^[-]{3,}$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">');
+  }
+
+  function addBadge(el, meta) {
+    var b = document.createElement('div');
+    b.className = 'meta-badge';
+    var p = [];
+    if (meta.mode) p.push(meta.mode);
+    if (meta.knowledge_count > 0) p.push(meta.knowledge_count + ' FDOs');
+    if (meta.skills && meta.skills.length) p.push(meta.skills.join(', '));
+    if (meta.total_ms) p.push(meta.total_ms + 'ms');
+    if (p.length) { b.textContent = p.join(' \u00b7 '); el.appendChild(b); }
+  }
+
+  function addMsg(role, text, meta) {
+    var el = document.createElement('div');
+    el.className = 'msg ' + role;
+    el.innerHTML = renderMd(text);
+    if (meta && role === 'grim') addBadge(el, meta);
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function setThinking(v) {
+    thinking = v;
+    sendBtn.disabled = v;
+    input.disabled = v;
+    if (!v) input.focus();
+  }
+
+  function send() {
+    var t = input.value.trim();
+    if (!t || thinking) return;
+    addMsg('user', t);
+    ws.send(JSON.stringify({ message: t }));
+    input.value = '';
+    input.style.height = 'auto';
+    setThinking(true);
+    statusLogEl = null;
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  input.addEventListener('input', function() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  sendBtn.addEventListener('click', send);
+
+  connect();
+})();
+</script>
+</body>
+</html>

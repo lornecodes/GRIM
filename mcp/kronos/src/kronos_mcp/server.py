@@ -18,6 +18,7 @@ Tools:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -352,7 +353,8 @@ def handle_search(args: dict) -> str:
 
 
 def handle_get(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only: only need the vault FDO dict, not BM25/graph indices.
+    vault._ensure_index()
     fdo = vault.get(args["id"])
     if not fdo:
         return _json({"error": f"FDO not found: {args['id']}", "hint": "Use kronos_search to find FDOs"})
@@ -360,7 +362,8 @@ def handle_get(args: dict) -> str:
 
 
 def handle_list(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only: only need the vault FDO dict, not BM25/graph indices.
+    vault._ensure_index()
     domain = args.get("domain")
     fdos = vault.list_domain(domain) if domain else vault.list_all()
     fdos.sort(key=lambda f: (f.domain, f.id))
@@ -372,14 +375,16 @@ def handle_list(args: dict) -> str:
 
 
 def handle_graph(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only: only need the vault FDO dict, not BM25/graph indices.
+    vault._ensure_index()
     depth = min(args.get("depth", 1), 3)
     result = vault.graph_neighbors(args["id"], depth)
     return _json(result)
 
 
 def handle_validate(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only: only need the vault FDO dict, not BM25/graph indices.
+    vault._ensure_index()
     result = vault.validate()
     return _json(result)
 
@@ -546,7 +551,7 @@ async def call_tool(
         raise ValueError(f"Unknown tool: {name}")
 
     try:
-        result = handler(arguments)
+        result = await asyncio.to_thread(handler, arguments)
         return [TextContent(type="text", text=result)]
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}", exc_info=True)
