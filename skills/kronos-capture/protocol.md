@@ -82,3 +82,11 @@ Inbox notes are **NOT FDOs** and are **not indexed** by Kronos MCP search.
 4. **Set target_domain** — best guess where this becomes an FDO
 5. **Low friction** — capture should take seconds, not minutes
 6. **Don't duplicate** — check if concept already exists as FDO (`kronos_search`) or in inbox before creating
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

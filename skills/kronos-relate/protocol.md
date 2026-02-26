@@ -73,3 +73,11 @@ All three yes → connect. Otherwise → skip.
 4. **Strip brackets** — `related` values are plain IDs, never `[[bracketed]]`
 5. **Brief descriptions** — explain the relationship concisely in the body
 6. **Quality over quantity** — a sparse, meaningful graph beats a dense, noisy one
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

@@ -75,3 +75,11 @@ Refs: #issue-number (if applicable)
 3. **Atomic commits** — one logical change per commit
 4. **Clean working tree** — don't leave uncommitted changes after operations
 5. **Verify before push** — check branch, remote, and diff
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

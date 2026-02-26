@@ -16,7 +16,9 @@ secrets/
 
 # GRIM state
 ~/.grim/
+local/
 *.db
+_val.json
 
 # Obsidian
 vault/.obsidian/workspace.json

@@ -359,3 +359,11 @@ Before writing the file, verify:
 | Missing connections | Every FDO should connect. Orphans are a quality failure |
 | Expanding acronyms incorrectly | Use the source's own terminology. Don't guess what CIP stands for |
 | Mixing established and speculative | Separate clearly in text AND in confidence |
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

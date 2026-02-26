@@ -254,3 +254,11 @@ Get-ChildItem "kronos-vault\**\*.md" -Recurse | ForEach-Object {
 - **WIP branches**: Only sync from main/stable branches
 - **Style changes**: Linting, formatting — doesn't change concepts
 - **Dependency updates**: Unless they change capabilities or constraints
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

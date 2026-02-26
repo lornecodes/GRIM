@@ -116,3 +116,11 @@ tags: [carried from inbox note + additional]
 3. **Don't over-promote** — not every inbox note needs to become an FDO
 4. **Increment, don't replace** — add to FDOs, don't rewrite them
 5. **Maintain frontmatter integrity** — always valid YAML, all required fields
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

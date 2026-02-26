@@ -1,0 +1,16 @@
+# CLIProxyAPI configuration — internal Docker proxy for Claude Max
+#
+# This proxy runs inside the Docker network, not exposed to LAN.
+# GRIM and other services reach it at http://cliproxyapi:8317/v1
+#
+# First-time setup:
+#   docker exec -it cliproxyapi /CLIProxyAPI/CLIProxyAPI --claude-login
+
+host: ""          # bind all interfaces inside container
+port: 8317
+
+# Auth token storage (mounted as Docker volume for persistence)
+auth-dir: "/root/.cli-proxy-api"
+
+# No client API key auth — internal network only
+api-keys: []

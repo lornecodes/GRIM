@@ -2,26 +2,84 @@
 #
 # Usage:
 #   docker compose up --build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d  (production)
 #
 # Requires:
-#   - .env file with ANTHROPIC_API_KEY
 #   - ../kronos-vault directory (or set VAULT_PATH)
+#   - CLIProxyAPI OAuth login (one-time):
+#       docker exec -it cliproxyapi /CLIProxyAPI/CLIProxyAPI --claude-login
 
 services:
+  # ── Claude Max API Proxy ──────────────────────────────────
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:latest
+    pull_policy: always
+    container_name: cliproxyapi
+    volumes:
+      - cliproxyapi-auths:/root/.cli-proxy-api
+      - ./config/cliproxyapi.yaml:/CLIProxyAPI/config.yaml:ro
+    expose:
+      - "8317"
+    ports:
+      - "127.0.0.1:54545:54545"   # OAuth callback — localhost only, one-time setup
+    networks:
+      - grim-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8317/v1/models || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ── GRIM ──────────────────────────────────────────────────
   grim:
     build: .
+    image: grim:latest
+    container_name: grim
+    depends_on:
+      cliproxyapi:
+        condition: service_started
     ports:
       - "${GRIM_PORT:-8080}:8080"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-placeholder-for-proxy}
+      - ANTHROPIC_BASE_URL=http://cliproxyapi:8317
       - GRIM_ENV=${GRIM_ENV:-debug}
       - KRONOS_VAULT_PATH=/vault
       - KRONOS_SKILLS_PATH=/app/skills
     volumes:
       - ${VAULT_PATH:-../kronos-vault}:/vault:ro
+      - grim-sessions:/app/local/sessions
+      - grim-evolution:/app/local/evolution
+    networks:
+      - grim-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  grim-net:
+    name: grim-net
+    driver: bridge
+
+volumes:
+  cliproxyapi-auths:
+    name: cliproxyapi-auths
+  grim-sessions:
+    name: grim-sessions
+  grim-evolution:
+    name: grim-evolution

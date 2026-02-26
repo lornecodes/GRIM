@@ -1,0 +1,61 @@
+name: docker-release
+version: "1.0"
+description: >
+  Docker image lifecycle for GRIM — build, test, deploy, clean.
+  Uses release.sh to manage image tags, run containerised tests,
+  and maintain a clean Docker environment. Handles the full path
+  from code change to running container.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - shell:execute
+  - docker:build
+  - docker:run
+
+consumers:
+  ops-agent:
+    role: execution
+    description: Runs Docker build/test/deploy commands via release.sh
+    reads: [protocol.md, safety, quality_gates]
+
+inputs:
+  operation:
+    type: enum
+    values: [build, test, up, down, status, clean, rebuild, prod]
+    required: true
+    description: Release operation to perform
+  vault_path:
+    type: string
+    required: false
+    description: Override kronos-vault path for MCP tests
+
+outputs:
+  success: boolean
+  image_tag: string
+  test_results: string
+  error: string
+
+triggers:
+  - delegation: "GRIM routes a Docker/release task to ops-agent"
+  - explicit: "User asks to build, deploy, release, or redeploy GRIM"
+  - keywords:
+      strong: ["docker build", "release grim", "deploy grim", "rebuild grim", "redeploy"]
+      weak: ["build image", "container", "docker"]
+
+safety:
+  - "Never run docker commands outside GRIM directory"
+  - "Never delete running containers without explicit confirmation"
+  - "Always run tests after build before deploying"
+  - "Keep at least 3 previous image tags (GRIM_KEEP default)"
+  - "Never expose API keys in build args or image layers"
+  - "Verify Docker daemon is running before any operation"
+
+quality_gates:
+  - "Image builds successfully (exit code 0)"
+  - "Core unit tests pass (119/119)"
+  - "MCP handler tests pass (functional — timing thresholds may vary)"
+  - "Integration tests pass (35/35 — health, MCP, REST, WebSocket, errors)"
+  - "Health check responds after deployment"
+  - "Old images cleaned up (keeps last GRIM_KEEP tags)"

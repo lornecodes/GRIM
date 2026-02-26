@@ -87,3 +87,11 @@ When surfacing knowledge:
 3. **Respect confidence levels** — note when information is low-confidence or seed status
 4. **Don't fabricate** — only present what's actually in the vault
 5. **Suggest capture** — if the query reveals a gap, offer to fill it
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

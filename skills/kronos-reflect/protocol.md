@@ -98,3 +98,11 @@ Recent activity: [N FDOs updated in last 7 days]
 3. **Be honest about gaps** — flag empty or weak domains
 4. **Track trends** — compare current state to previous counts when available
 5. **Suggest, don't demand** — reflection is advisory, user drives decisions
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

@@ -67,3 +67,11 @@ For long-running commands (servers, watchers):
 3. Return immediately with process ID
 4. Check status on demand
 5. Kill cleanly on shutdown (SIGTERM → wait → SIGKILL)
+
+## Currency Check
+
+After completing this skill, verify the protocol is still accurate:
+- [ ] Commands in this protocol match the actual codebase
+- [ ] File paths referenced still exist
+- [ ] Test counts and quality gates match current reality
+- [ ] If anything is stale, update this protocol before finishing

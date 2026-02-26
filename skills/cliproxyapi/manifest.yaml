@@ -1,0 +1,62 @@
+name: cliproxyapi
+version: "1.0"
+description: >
+  CLIProxyAPI lifecycle management — OAuth setup, health checks,
+  troubleshooting. Manages the singleton proxy that routes GRIM
+  (and future services) through a Claude Max subscription via OAuth.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - shell:execute
+  - docker:run
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes proxy-related requests to ops-agent
+    reads: [triggers, quality_gates]
+  ops-agent:
+    role: execution
+    description: Runs proxy setup, auth, diagnostics via Docker commands
+    reads: [protocol.md, inputs, outputs, safety, quality_gates]
+
+inputs:
+  operation:
+    type: enum
+    values: [login, status, troubleshoot]
+    required: true
+    description: Proxy operation to perform
+  force_restart:
+    type: boolean
+    required: false
+    default: false
+    description: Restart proxy container before operation
+
+outputs:
+  success: boolean
+  client_count: integer
+  models_available: list
+  error: string
+
+triggers:
+  - delegation: "GRIM routes a proxy/auth task to ops-agent"
+  - explicit: "User asks to set up proxy, run OAuth login, or check proxy health"
+  - keywords:
+      strong: ["cliproxyapi", "proxy login", "oauth login", "proxy setup", "claude max proxy"]
+      weak: ["proxy", "oauth", "api proxy", "models empty"]
+
+safety:
+  - "Never expose OAuth tokens or auth file contents"
+  - "Never modify proxy config without explicit confirmation"
+  - "Port 54545 is localhost-only — never expose to LAN"
+  - "Port 8317 is internal Docker network only — never expose to host"
+  - "Auth tokens persist in cliproxyapi-auths volume — never delete without confirmation"
+
+quality_gates:
+  - "Proxy container is running and healthy"
+  - "Auth directory has at least one .json token file"
+  - "GET /v1/models returns non-empty model list"
+  - "GRIM can reach proxy at http://cliproxyapi:8317/v1/models from inside Docker network"
+  - "No /v1/v1/ double-path errors in proxy logs"

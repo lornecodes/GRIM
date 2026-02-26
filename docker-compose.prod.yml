@@ -1,0 +1,32 @@
+# GRIM Production Override
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Layered on top of docker-compose.yml for dedicated server deployment.
+
+services:
+  cliproxyapi:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
+
+  grim:
+    environment:
+      - GRIM_ENV=production
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
