@@ -390,7 +390,8 @@ def handle_validate(args: dict) -> str:
 
 
 def handle_create(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only check: only need vault dict to verify ID doesn't exist.
+    vault._ensure_index()
 
     fdo_id = args["id"]
     if vault.get(fdo_id):
@@ -419,13 +420,14 @@ def handle_create(args: dict) -> str:
     )
 
     path = vault.write_fdo(fdo)
-    # Invalidate caches so next call picks up the new FDO
-    search_engine.invalidate()
+    # Incremental index update — no full rebuild, keeps _initialized=True.
+    search_engine.index_fdo(fdo)
     return _json({"created": fdo_id, "path": path, "domain": domain})
 
 
 def handle_update(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only check: only need vault dict to fetch the FDO.
+    vault._ensure_index()
 
     fdo_id = args["id"]
     fdo = vault.get(fdo_id)
@@ -441,8 +443,8 @@ def handle_update(args: dict) -> str:
 
     fdo.updated = str(date.today())
     path = vault.write_fdo(fdo)
-    # Invalidate caches so next call picks up the change
-    search_engine.invalidate()
+    # Incremental index update — no full rebuild, keeps _initialized=True.
+    search_engine.index_fdo(fdo)
     return _json({"updated": fdo_id, "path": path, "fields_changed": list(fields.keys())})
 
 
@@ -475,7 +477,8 @@ def handle_skill_load(args: dict) -> str:
 
 
 def handle_tags(args: dict) -> str:
-    search_engine._ensure_indexed()
+    # Read-only: tags come from FDO frontmatter, not the BM25/graph indices.
+    vault._ensure_index()
     domain_filter = args.get("domain")
 
     # Collect all tags with their FDOs and domains

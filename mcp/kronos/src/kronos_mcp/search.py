@@ -591,15 +591,51 @@ class SearchEngine:
         return self._watcher
 
     def invalidate(self):
-        """Force full re-index on next search (call after create/update).
-
-        write_fdo() already updated the vault's in-memory FDO dict in-place,
-        so we only need to invalidate BM25/graph/semantic — not the vault index.
-        """
+        """Force full re-index on next search. Use index_fdo() after writes instead."""
         self._initialized = False
         self._semantic_indexed = False
         self._watcher._mtimes.clear()
         # Do NOT call vault.refresh() — write_fdo already updated the vault index
+
+    def index_fdo(self, fdo: "FDO"):
+        """Incrementally index a new or updated FDO — no full rebuild needed.
+
+        Called by handle_create/handle_update instead of invalidate().
+        Keeps _initialized=True so subsequent reads stay fast.
+        Thread-safe: all operations are atomic dict assignments (GIL-protected).
+        """
+        if not self._initialized:
+            # Index not built yet — will be built on first search, which picks
+            # up the new FDO from vault._ensure_index() anyway.
+            return
+
+        # Update BM25 (add/replace the FDO's entry)
+        self._bm25.add(fdo.id, self._fdo_text_fields(fdo))
+
+        # Update graph
+        self._graph.add(
+            fdo.id, fdo.related, fdo.pac_parent, fdo.pac_children, fdo.wikilinks
+        )
+
+        # Update file watcher so is_fresh() returns True for this file
+        if fdo.file_path:
+            try:
+                mtime = os.path.getmtime(fdo.file_path)
+                self._watcher._mtimes[fdo.file_path] = mtime
+            except OSError:
+                pass
+
+        # Update semantic embedding if semantic index is already built
+        if self._semantic_indexed and self._semantic.available:
+            text = self._fdo_embed_text(fdo)
+            self._semantic.update(fdo.id, text)
+            # Persist updated cache in background to avoid blocking handler
+            import threading
+            threading.Thread(
+                target=self._semantic.flush,
+                daemon=True,
+                name=f"embed-flush-{fdo.id}",
+            ).start()
 
     def _ensure_indexed(self):
         """Build or incrementally update BM25 + graph indices (NOT semantic).
