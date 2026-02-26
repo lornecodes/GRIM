@@ -1,0 +1,69 @@
+name: kronos-recall
+version: "1.0"
+description: >
+  Search and surface knowledge from both the FDO graph and the inbox.
+  Uses kronos MCP tools (primary) with direct file access fallback.
+  Presents results with context, confidence, and connections.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  claude_skill: .claude/instructions/kronos-recall.instructions.md
+  auto_load: true
+  apply_to: "**"
+
+permissions:
+  - vault:read
+  - filesystem:read
+
+inputs:
+  query:
+    type: string
+    required: true
+    description: Natural language query or keyword search
+  semantic:
+    type: boolean
+    default: true
+    description: Enable semantic embedding search
+
+outputs:
+  results: list
+  inbox_matches: list
+  suggested_capture: boolean
+
+triggers:
+  - explicit: "User asks 'what do I know about...', 'remind me...', 'find...'"
+  - background: "Context would help answer a question"
+  - pre-create: "Checking if something exists before capturing"
+
+search_channels:
+  tag_exact:
+    weight: 2.0
+    description: "Exact tag matches"
+  keyword_bm25:
+    weight: 1.0
+    description: "Token-based full-text search"
+  semantic:
+    weight: 1.2
+    description: "Embedding similarity"
+  graph:
+    weight: 0.6
+    description: "Related FDO traversal"
+
+consumers:
+  grim:
+    role: recognition
+    description: Knows when to search vault for context before responding
+    reads: [triggers, search_channels]
+  memory-agent:
+    role: execution
+    description: Executes multi-channel search and returns structured results
+    reads: [protocol.md, inputs, outputs, search_channels, quality_gates]
+
+quality_gates:
+  - "Search before creating — always check if something exists"
+  - "Check inbox too — _inbox/ is not indexed by MCP"
+  - "Respect confidence levels — note when info is low-confidence"
+  - "Don't fabricate — only present what's in the vault"
+  - "If nothing found, offer to capture"

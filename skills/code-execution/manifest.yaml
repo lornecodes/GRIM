@@ -1,0 +1,70 @@
+name: code-execution
+version: "1.0"
+description: >
+  How agents write, run, and test code safely. Covers file creation,
+  modification, test execution, and validation. Enforces the thinker/doer
+  split — GRIM never codes, agents always follow this protocol.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+  - shell:execute
+  - sandbox:required
+
+consumers:
+  coder-agent:
+    role: execution
+    description: Follows protocol to write, run, test, and validate code
+    reads: [protocol.md, inputs, outputs, quality_gates, safety]
+
+inputs:
+  task:
+    type: string
+    required: true
+    description: What code to write or modify
+  language:
+    type: string
+    required: false
+    description: Target language (inferred from context if not specified)
+  target_files:
+    type: list
+    required: false
+    description: Specific files to create or modify
+  test_command:
+    type: string
+    required: false
+    description: Command to validate the change
+
+outputs:
+  files_created: list
+  files_modified: list
+  tests_passed: boolean
+  validation_output: string
+
+triggers:
+  - delegation: "GRIM routes a coding task to coder-agent"
+  - explicit: "User asks to write, fix, or refactor code"
+
+phases:
+  1_understand: "Read existing code, understand context and constraints"
+  2_plan: "Propose changes before making them (minimal diff)"
+  3_implement: "Make changes — small, focused, one concern at a time"
+  4_validate: "Run tests, check for errors, verify behavior"
+  5_report: "Summarize what changed and why"
+
+safety:
+  - "Never execute untrusted code outside sandbox"
+  - "Never modify files outside the declared target scope"
+  - "Always validate changes compile/parse before reporting success"
+  - "Preserve existing interfaces — don't break contracts"
+  - "Keep diffs small and focused"
+
+quality_gates:
+  - "Changes match the task description"
+  - "All existing tests still pass"
+  - "New code has appropriate error handling"
+  - "No secrets or credentials in code"
+  - "Code is idiomatic for the target language"

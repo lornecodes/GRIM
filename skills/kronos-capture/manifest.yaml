@@ -1,0 +1,65 @@
+name: kronos-capture
+version: "1.0"
+description: >
+  Quick capture of vault-worthy information to the inbox DMZ (_inbox/).
+  Low-friction, proactive by default — notices people, concepts, ideas,
+  and references during conversation and suggests saving them.
+  Configurable: respects "no capture" signals.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  claude_skill: .claude/instructions/kronos-capture.instructions.md
+  auto_load: true
+  apply_to: "**"
+
+permissions:
+  - vault:write
+  - filesystem:read
+
+inputs:
+  title:
+    type: string
+    required: true
+    description: Descriptive title for the capture
+  tags:
+    type: list
+    required: false
+    description: Tags for search and promotion routing
+  target_domain:
+    type: enum
+    values: [people, interests, notes, media, journal, physics, ai-systems, computing, modelling, projects]
+    required: true
+    description: Best-guess domain for eventual FDO promotion
+  source:
+    type: enum
+    values: [conversation, reference, user]
+    default: conversation
+    description: Where the information came from
+
+outputs:
+  inbox_note_path: string
+  already_exists: boolean
+
+triggers:
+  - proactive: "Vault-worthy info surfaces in conversation"
+  - explicit: "User says 'remember this', 'save this', 'capture this'"
+  - suppress: "User says 'don't save this', 'off the record', 'no capture'"
+
+consumers:
+  grim:
+    role: recognition
+    description: Detects vault-worthy information in conversation flow
+    reads: [triggers, quality_gates]
+  memory-agent:
+    role: execution
+    description: Follows protocol.md to create inbox notes via Kronos MCP
+    reads: [protocol.md, inputs, outputs, quality_gates]
+
+quality_gates:
+  - "One concept per note — don't bundle unrelated things"
+  - "Context over completeness — why matters more than what"
+  - "Check for duplicates before creating (kronos_search)"
+  - "Tags are specific and searchable"
+  - "target_domain is set"

@@ -21,7 +21,7 @@ inputs:
     description: Path to source material (repo, paper directory, etc.)
   domain:
     type: enum
-    values: [physics, ai-systems, tools, personal]
+    values: [physics, ai-systems, tools, personal, modelling, computing, projects, people, interests, notes, media, journal]
     required: true
     description: Target domain for the FDOs
   vault_path:
@@ -73,3 +73,13 @@ quality_gates:
     - "All links bidirectional"
     - "No orphan FDOs"
     - "Spot check 2 random FDOs against source"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes ingestion requests to research agent with source context
+    reads: [triggers, phases, checkpoints]
+  research-agent:
+    role: execution
+    description: Follows 7-phase protocol with checkpoints for deep FDO creation
+    reads: [protocol.md, inputs, outputs, phases, checkpoints, quality_gates]

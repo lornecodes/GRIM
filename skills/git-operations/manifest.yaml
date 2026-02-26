@@ -1,0 +1,59 @@
+name: git-operations
+version: "1.0"
+description: >
+  How agents interact with git safely — commit, branch, push, PR.
+  Enforces commit message conventions, branch naming, and safety checks.
+  Never force-pushes to protected branches.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - git:read
+  - git:write
+  - shell:execute
+
+consumers:
+  ops-agent:
+    role: execution
+    description: Follows protocol for all git operations
+    reads: [protocol.md, safety, quality_gates]
+
+inputs:
+  operation:
+    type: enum
+    values: [commit, branch, push, pull, status, diff, log, tag]
+    required: true
+    description: Git operation to perform
+  message:
+    type: string
+    required: false
+    description: Commit message (required for commit operation)
+  branch:
+    type: string
+    required: false
+    description: Branch name (required for branch/push operations)
+
+outputs:
+  success: boolean
+  commit_hash: string
+  branch_name: string
+  error: string
+
+triggers:
+  - delegation: "GRIM routes a git task to ops-agent"
+  - post-code: "After code-execution agent completes changes"
+  - explicit: "User asks to commit, branch, or push"
+
+safety:
+  - "Never force-push to main or protected branches"
+  - "Never rewrite history on shared branches"
+  - "Always check status before commit (no accidental includes)"
+  - "Never commit secrets, credentials, or large binary files"
+  - "Verify remote exists before push"
+
+quality_gates:
+  - "Commit messages follow conventional format"
+  - "No untracked secrets in staged files"
+  - "Branch name follows convention (feature/, fix/, etc.)"
+  - "Working tree is clean after operation"

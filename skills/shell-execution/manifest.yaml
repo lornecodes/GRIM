@@ -1,0 +1,71 @@
+name: shell-execution
+version: "1.0"
+description: >
+  How agents run shell commands safely. Covers command execution,
+  output capture, environment management, and safety constraints.
+  All execution happens within IronClaw sandbox (Phase 2+).
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - shell:execute
+  - sandbox:required
+
+consumers:
+  coder-agent:
+    role: execution
+    description: Runs build commands, tests, and dev tools
+    reads: [protocol.md, safety, allowed_categories]
+  ops-agent:
+    role: execution
+    description: Runs maintenance commands, deployments, system checks
+    reads: [protocol.md, safety, allowed_categories]
+
+inputs:
+  command:
+    type: string
+    required: true
+    description: Shell command to execute
+  working_dir:
+    type: string
+    required: false
+    description: Working directory for execution
+  timeout:
+    type: integer
+    default: 300
+    description: Maximum execution time in seconds
+  background:
+    type: boolean
+    default: false
+    description: Run as background process
+
+outputs:
+  exit_code: integer
+  stdout: string
+  stderr: string
+  timed_out: boolean
+
+triggers:
+  - delegation: "Agent needs to run a command as part of a task"
+
+allowed_categories:
+  build: "cargo, npm, pip, make, cmake, etc."
+  test: "pytest, cargo test, npm test, etc."
+  lint: "clippy, eslint, ruff, mypy, etc."
+  tools: "git, docker, rclone, etc."
+  query: "find, grep, ls, cat, head, tail, etc."
+
+safety:
+  - "Never run destructive commands (rm -rf /, format, etc.) without explicit confirmation"
+  - "Never execute commands that download and run arbitrary code (curl | bash)"
+  - "Never expose environment variables with secrets in command output"
+  - "Always set reasonable timeouts"
+  - "Capture both stdout and stderr"
+  - "Sandbox all execution in Phase 2+ (IronClaw)"
+
+quality_gates:
+  - "Command matches allowed category"
+  - "Timeout is set"
+  - "Output is captured and returned"
+  - "Exit code is checked and reported"

@@ -1,0 +1,69 @@
+name: kronos-reflect
+version: "1.0"
+description: >
+  Periodic review, triage, and health monitoring of the knowledge graph.
+  Surfaces inbox backlog, stale FDOs, orphan nodes, broken links, and
+  domain distribution. Advisory — presents findings and lets user decide.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  claude_skill: .claude/instructions/kronos-reflect.instructions.md
+  auto_load: true
+  apply_to: "**"
+
+permissions:
+  - vault:read
+  - filesystem:read
+
+inputs:
+  scope:
+    type: enum
+    values: [inbox, health, full]
+    default: full
+    description: "inbox: triage only; health: vault checks; full: both"
+
+outputs:
+  inbox_count: integer
+  promote_candidates: list
+  orphan_fdos: list
+  stale_fdos: list
+  broken_links: list
+  domain_stats: object
+
+triggers:
+  - explicit: "User asks to 'review vault', 'triage inbox', 'check health'"
+  - breakpoint: "At natural breaks in a work session"
+  - pre-topic: "Before starting a new topic area"
+
+checks:
+  inbox_triage:
+    - "Group by target_domain"
+    - "Recommend: promote, merge, keep, or discard"
+  orphan_detection:
+    - "FDOs with empty related: lists"
+    - "Suggest possible links"
+  stale_content:
+    - "seed/developing FDOs not updated in 30+ days"
+  domain_distribution:
+    - "Count per domain, flag empty or imbalanced"
+  broken_links:
+    - "related: entries pointing to non-existent FDOs"
+    - "[[wikilinks]] to non-existent files"
+
+consumers:
+  grim:
+    role: recognition
+    description: Identifies when vault review is overdue or health check needed
+    reads: [triggers, checks]
+  memory-agent:
+    role: execution
+    description: Runs inbox triage, orphan detection, stale checks, domain stats
+    reads: [protocol.md, inputs, outputs, checks, quality_gates]
+
+quality_gates:
+  - "Don't auto-fix — present findings, let user decide"
+  - "Prioritize inbox triage — growing inbox means knowledge leak"
+  - "Be honest about gaps — flag empty or weak domains"
+  - "Suggest, don't demand — reflection is advisory"

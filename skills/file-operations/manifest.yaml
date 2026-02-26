@@ -1,0 +1,64 @@
+name: file-operations
+version: "1.0"
+description: >
+  How agents read, write, move, and organize files safely.
+  Covers file creation, modification, deletion, and directory management.
+  Enforces scope boundaries — agents only touch files they're authorized for.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+consumers:
+  coder-agent:
+    role: execution
+    description: File manipulation as part of coding tasks
+    reads: [protocol.md, safety, quality_gates]
+  ops-agent:
+    role: execution
+    description: File organization, cleanup, archival operations
+    reads: [protocol.md, safety, quality_gates]
+  memory-agent:
+    role: execution
+    description: Direct file access as Kronos MCP fallback
+    reads: [protocol.md, safety]
+
+inputs:
+  operation:
+    type: enum
+    values: [read, write, move, delete, create_dir, list]
+    required: true
+    description: What file operation to perform
+  path:
+    type: string
+    required: true
+    description: Target file or directory path
+  content:
+    type: string
+    required: false
+    description: Content for write operations
+
+outputs:
+  success: boolean
+  files_affected: list
+  error: string
+
+triggers:
+  - delegation: "Agent needs to manipulate files as part of a task"
+
+safety:
+  - "Never modify files outside declared scope"
+  - "Never delete without confirmation for non-temp files"
+  - "Respect .gitignore and protected paths"
+  - "Protected: .env*, *.key, *.pem, .github/workflows/, .cip/"
+  - "Always use absolute paths internally, relative for display"
+  - "Check file exists before modifying"
+
+quality_gates:
+  - "Operation matches the declared intent"
+  - "No protected files modified without explicit permission"
+  - "Directory structure preserved"
+  - "File encoding is correct (UTF-8 default)"

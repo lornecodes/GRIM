@@ -58,3 +58,13 @@ change_types:
   evolution: "Existing concept changed significantly"
   status_change: "Project status shifted"
   deprecation: "Something removed or superseded"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes sync requests after detecting code changes
+    reads: [triggers, phases]
+  ops-agent:
+    role: execution
+    description: Follows 5-phase protocol to detect changes and update FDOs
+    reads: [protocol.md, phases, change_types, quality_gates]

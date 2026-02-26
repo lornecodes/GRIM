@@ -1,0 +1,59 @@
+name: kronos-relate
+version: "1.0"
+description: >
+  Wire the knowledge graph with meaningful bidirectional connections.
+  Every link requires two updates (one in each FDO). Prioritizes
+  quality over quantity — sparse, meaningful graph beats dense, noisy one.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  claude_skill: .claude/instructions/kronos-relate.instructions.md
+  auto_load: true
+  apply_to: "**"
+
+permissions:
+  - vault:read
+  - vault:write
+
+inputs:
+  fdo_a:
+    type: string
+    required: false
+    description: First FDO to connect (or auto-detect from context)
+  fdo_b:
+    type: string
+    required: false
+    description: Second FDO to connect
+  reason:
+    type: string
+    required: false
+    description: Brief description of the relationship
+
+outputs:
+  connections_made: integer
+  fdos_updated: integer
+
+triggers:
+  - post-promote: "New FDO created or existing one enriched"
+  - explicit: "User asks to 'link', 'connect', or 'relate' concepts"
+  - discovery: "Cross-domain relationship surfaces in conversation"
+
+consumers:
+  grim:
+    role: recognition
+    description: Notices cross-concept relationships during conversation
+    reads: [triggers, quality_gates]
+  memory-agent:
+    role: execution
+    description: Follows protocol to wire bidirectional FDO links
+    reads: [protocol.md, inputs, outputs, quality_gates]
+
+quality_gates:
+  - "Always bidirectional — if A links to B, B links to A"
+  - "No orphan links — verify target FDO exists"
+  - "No duplicate links — check related: before adding"
+  - "related: values are plain IDs, never [[bracketed]]"
+  - "Brief descriptions in ## Connections body section"
+  - "Would someone following this link learn something useful?"

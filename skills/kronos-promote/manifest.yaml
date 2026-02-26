@@ -1,0 +1,66 @@
+name: kronos-promote
+version: "1.0"
+description: >
+  Promote inbox captures into long-term FDO memory, incrementally.
+  Supports two growth patterns: append (raw/uncertain) and enrich
+  (confirmed/structured). Never overwrites — always grows FDOs
+  over time.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  claude_skill: .claude/instructions/kronos-promote.instructions.md
+  auto_load: true
+  apply_to: "**"
+
+permissions:
+  - vault:read
+  - vault:write
+  - filesystem:read
+  - filesystem:write
+
+inputs:
+  inbox_note:
+    type: string
+    required: false
+    description: Specific inbox note to promote (or process all)
+  growth_pattern:
+    type: enum
+    values: [append, enrich, auto]
+    default: auto
+    description: "append: raw observations to ## Notes; enrich: weave into sections; auto: decide per item"
+
+outputs:
+  fdos_created: integer
+  fdos_enriched: integer
+  inbox_notes_deleted: integer
+
+triggers:
+  - explicit: "User asks to 'promote', 'organize', 'process inbox', 'clean up captures'"
+  - post-reflect: "Reflect skill identifies promotion candidates"
+  - accumulation: "Enough context on a topic to justify an FDO"
+
+phases:
+  1_check: "Search vault for existing FDOs (dedup)"
+  2_decide: "Append vs enrich vs create new"
+  3_apply: "Write changes to FDO"
+  4_cleanup: "Delete inbox note, bump updated date"
+  5_relate: "Hand off to kronos-relate for connections"
+
+consumers:
+  grim:
+    role: recognition
+    description: Identifies when inbox items are ready for promotion
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: Follows 5-phase protocol to promote inbox → FDO
+    reads: [protocol.md, inputs, outputs, phases, quality_gates]
+
+quality_gates:
+  - "Never promote without checking for duplicates"
+  - "Preserve provenance — note where info came from"
+  - "Increment, don't replace — add to FDOs, don't rewrite"
+  - "Frontmatter integrity — valid YAML, all required fields"
+  - "Status starts at seed for new FDOs"
