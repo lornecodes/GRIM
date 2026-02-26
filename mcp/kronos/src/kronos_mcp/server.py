@@ -563,12 +563,22 @@ async def call_tool(
 
 async def main():
     from mcp.server.stdio import stdio_server
+    import anyio
+    from io import TextIOWrapper
+    import sys
 
     logger.info(f"Kronos MCP starting — vault: {vault_path}")
     if skills_engine:
         logger.info(f"Skills path: {skills_path}")
 
-    async with stdio_server() as (read_stream, write_stream):
+    # On Windows, TextIOWrapper with default newline=None translates \n → \r\n.
+    # MCP protocol requires \n-only line endings (newline-delimited JSON).
+    # Pass explicit stdout with newline="" to suppress the translation.
+    fixed_stdout = anyio.wrap_file(
+        TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")
+    )
+
+    async with stdio_server(stdout=fixed_stdout) as (read_stream, write_stream):
         await app.run(
             read_stream,
             write_stream,
