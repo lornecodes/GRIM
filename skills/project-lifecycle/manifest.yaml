@@ -1,0 +1,86 @@
+name: project-lifecycle
+version: "1.0"
+description: >
+  Maintains the DFI project knowledge system: roadmap FDOs, design specs,
+  and architectural decision records (ADRs). Ensures every project has
+  a living roadmap, designs are written before building, and decisions
+  are captured after building with links to actual code.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:read
+  - vault:write
+  - git:read
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes project lifecycle moments and suggests appropriate actions
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: Creates and updates project, design, and ADR FDOs
+    reads: [protocol.md, phases, quality_gates, templates]
+
+inputs:
+  action:
+    type: enum
+    values: [kickoff, design, adr, update, review]
+    required: true
+    description: >
+      kickoff: Start a new project (create proj-* FDO)
+      design: Create a design spec before building
+      adr: Record a decision after building
+      update: Update project roadmap progress
+      review: Review project health and completeness
+  project_id:
+    type: string
+    required: true
+    description: The project FDO id (e.g., proj-grim)
+  feature:
+    type: string
+    required: false
+    description: Feature name for design/ADR (e.g., grim-ui-nextjs)
+
+outputs:
+  created_fdos: list
+  updated_fdos: list
+
+triggers:
+  - explicit: "User asks to start a project, write a design, or record a decision"
+  - proactive: "A significant implementation is completed — suggest ADR capture"
+  - pre-build: "Before starting a new feature — suggest design spec"
+  - post-build: "After completing a feature — suggest ADR and roadmap update"
+  - keywords:
+      strong: ["ADR", "design spec", "project roadmap", "kickoff", "record decision"]
+      weak: ["project", "design", "decision", "why did we", "what was decided"]
+
+phases:
+  1_assess: "Determine which lifecycle action is needed"
+  2_execute: "Create or update the appropriate FDOs"
+  3_link: "Wire bidirectional connections between project, design, and ADR FDOs"
+  4_verify: "Confirm vault graph integrity after changes"
+
+safety:
+  - "Never delete or archive project FDOs without explicit confirmation"
+  - "ADRs are append-only records — update status but never rewrite history"
+  - "Design FDOs transition seed → developing → stable, never backwards"
+  - "Always link ADRs back to the project FDO"
+
+quality_gates:
+  project_fdo:
+    - "Has clear milestones with checkbox status"
+    - "Current focus section is accurate"
+    - "All related design/ADR FDOs are linked"
+  design_fdo:
+    - "Written BEFORE implementation starts"
+    - "Has requirements, architecture, and implementation plan"
+    - "Linked to project FDO"
+  adr_fdo:
+    - "Written AFTER implementation completes"
+    - "Has context, decision, alternatives considered"
+    - "Has code references (file paths, commits)"
+    - "Linked to project FDO and design FDO (if applicable)"
+    - "Status is stable (ADRs are historical records)"
