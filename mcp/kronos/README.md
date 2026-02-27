@@ -41,8 +41,8 @@ The loop: AI reads vault → does better work → updates vault → next AI sess
 Create a `.env` file or set environment variables:
 
 ```env
-KRONOS_VAULT_PATH=C:\Users\you\repos\Dawn Field Institute\kronos-vault
-KRONOS_SKILLS_PATH=C:\Users\you\repos\Dawn Field Institute\GRIM\skills
+KRONOS_VAULT_PATH=C:\Users\you\repos\core_workspace\kronos-vault
+KRONOS_SKILLS_PATH=C:\Users\you\repos\core_workspace\GRIM\skills
 ```
 
 ### 2. Install
@@ -64,8 +64,8 @@ Add to your MCP server settings (`.vscode/mcp.json` or global settings):
     "kronos": {
       "command": "kronos-mcp",
       "env": {
-        "KRONOS_VAULT_PATH": "C:\\Users\\you\\repos\\Dawn Field Institute\\kronos-vault",
-        "KRONOS_SKILLS_PATH": "C:\\Users\\you\\repos\\Dawn Field Institute\\GRIM\\skills"
+        "KRONOS_VAULT_PATH": "C:\\Users\\you\\repos\\core_workspace\\kronos-vault",
+        "KRONOS_SKILLS_PATH": "C:\\Users\\you\\repos\\core_workspace\\GRIM\\skills"
       }
     }
   }

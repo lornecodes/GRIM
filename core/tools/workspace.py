@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Workspace root — resolved at import time, overridable
 _workspace_root: Path = Path(__file__).resolve().parent.parent.parent.parent
-# That's GRIM/../.. = Dawn Field Institute root
+# That's GRIM/../.. = core_workspace root
 
 
 def set_workspace_root(path: Path) -> None:

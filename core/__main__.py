@@ -92,7 +92,7 @@ async def run_session(
     config = load_config(config_path, grim_root)
 
     # Set workspace root for tools
-    workspace_root = grim_root.parent  # Dawn Field Institute root
+    workspace_root = grim_root.parent  # core_workspace root
     from core.tools.workspace import set_workspace_root
     set_workspace_root(workspace_root)
 

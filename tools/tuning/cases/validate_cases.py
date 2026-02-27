@@ -47,7 +47,7 @@ CASES = [
                 "title": "Repository Metadata",
                 "domain": "tools",
                 "summary": "Root metadata for mock-repo at C:\\Users\\peter\\repos\\mock-repo\\meta.yaml",
-                "details": "Located at C:/Users/peter/repos/Dawn Field Institute/mock-repo.",
+                "details": "Located at C:/Users/peter/repos/core_workspace/mock-repo.",
                 "tags": ["metadata"],
                 "source_path": "meta.yaml",
             },

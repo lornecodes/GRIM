@@ -257,30 +257,53 @@ class SemanticIndex:
                 )
         return self._available
 
+    # Timeout for model loading (seconds).  Covers both local load and
+    # any fallback network download from HuggingFace.
+    MODEL_LOAD_TIMEOUT = 60
+
     def _load_model(self):
         """Load the sentence-transformer model (lazy, first search only).
 
         Uses local_files_only=True to avoid network calls to HuggingFace
         when the model is already cached. Falls back to network download
         only if the local cache is missing.
+
+        Raises TimeoutError if loading exceeds MODEL_LOAD_TIMEOUT seconds.
         """
         if self._model is not None:
             return
         if not self.available:
             return
 
+        import concurrent.futures
+
         logger.info(f"Loading embedding model: {self._model_name}")
         t0 = time.time()
-        from sentence_transformers import SentenceTransformer
-        try:
-            # Try local-only first (no network, fast)
-            self._model = SentenceTransformer(
-                self._model_name, local_files_only=True
-            )
-        except OSError:
-            # Model not cached — download once
-            logger.info(f"Model not cached locally, downloading: {self._model_name}")
-            self._model = SentenceTransformer(self._model_name)
+
+        def _do_load():
+            from sentence_transformers import SentenceTransformer
+            try:
+                # Try local-only first (no network, fast)
+                return SentenceTransformer(
+                    self._model_name, local_files_only=True
+                )
+            except OSError:
+                # Model not cached — download once
+                logger.info(f"Model not cached locally, downloading: {self._model_name}")
+                return SentenceTransformer(self._model_name)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_do_load)
+            try:
+                self._model = future.result(timeout=self.MODEL_LOAD_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    f"Model load timed out after {self.MODEL_LOAD_TIMEOUT}s — "
+                    f"semantic search disabled for this session"
+                )
+                self._available = False
+                return
+
         self._dim = self._model.get_sentence_embedding_dimension()
         logger.info(f"Model loaded in {time.time() - t0:.1f}s — dim={self._dim}")
 
@@ -729,7 +752,7 @@ class SearchEngine:
         acquired = self._semantic_lock.acquire(blocking=blocking)
         if not acquired:
             # Another thread is building — skip semantic for this request
-            logger.debug("Semantic index still loading — skipping for this request")
+            logger.warning("Semantic index still loading — skipping semantic for this request")
             return False
         try:
             if self._semantic_indexed:  # Double-check after acquiring lock
