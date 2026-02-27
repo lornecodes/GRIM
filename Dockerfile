@@ -1,5 +1,5 @@
 # ── GRIM Container ──────────────────────────────────────────
-# Multi-stage build: slim Python + GRIM core + chat UI
+# Multi-stage build: Node.js (UI) + Python (backend)
 #
 # Build:
 #   docker build -t grim .
@@ -10,6 +10,15 @@
 #     -v /path/to/kronos-vault:/vault \
 #     grim
 
+# ── Stage 1: Build Next.js UI ─────────────────────────────
+FROM node:20-slim AS ui-build
+WORKDIR /ui
+COPY ui/package*.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# ── Stage 2: Python backend ───────────────────────────────
 FROM python:3.11-slim AS base
 
 # System deps for MCP stdio transport
@@ -37,6 +46,9 @@ COPY config/ config/
 COPY identity/ identity/
 COPY skills/ skills/
 COPY tests/ tests/
+
+# ── Next.js static build ──────────────────────────────────
+COPY --from=ui-build /ui/out/ ui/out/
 
 # Default env
 ENV GRIM_ENV=production

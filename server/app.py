@@ -1,10 +1,11 @@
 """GRIM Chat Server — FastAPI + WebSocket wrapping the LangGraph core.
 
 Provides:
-  GET  /           → Chat UI (static HTML)
-  GET  /health     → Health check
-  WS   /ws/{sid}   → WebSocket chat (streaming-ready)
-  POST /api/chat   → REST fallback (request/response)
+  GET  /              → Chat UI (Next.js static build or legacy HTML)
+  GET  /health        → Health check
+  WS   /ws/{sid}      → WebSocket chat (streaming-ready)
+  POST /api/chat      → REST fallback (request/response)
+  GET  /api/sessions  → List session thread IDs
 
 Startup:
   uvicorn server.app:app --host 0.0.0.0 --port 8080
@@ -24,6 +25,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage
@@ -132,8 +134,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Serve static files (UI)
+# CORS — allow Next.js dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static files — prefer Next.js build (ui/out/), fall back to legacy static/
+_ui_dir = Path(__file__).resolve().parent.parent / "ui" / "out"
 _static_dir = Path(__file__).parent / "static"
+
+if _ui_dir.exists():
+    _next_dir = _ui_dir / "_next"
+    if _next_dir.exists():
+        app.mount("/_next", StaticFiles(directory=str(_next_dir)), name="next-assets")
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
@@ -144,10 +161,13 @@ if _static_dir.exists():
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """Serve the chat UI."""
-    index_path = _static_dir / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path), media_type="text/html")
+    """Serve the chat UI — Next.js build preferred, legacy fallback."""
+    ui_index = _ui_dir / "index.html"
+    if ui_index.exists():
+        return FileResponse(str(ui_index), media_type="text/html")
+    legacy_index = _static_dir / "index.html"
+    if legacy_index.exists():
+        return FileResponse(str(legacy_index), media_type="text/html")
     return HTMLResponse("<h1>GRIM</h1><p>Static files not found.</p>")
 
 
@@ -160,6 +180,27 @@ async def health():
         "vault": str(_config.vault_path) if _config else None,
         "graph": _graph is not None,
     })
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """List unique session thread IDs from the checkpointer."""
+    if not _checkpointer:
+        return JSONResponse({"sessions": []})
+    try:
+        async with _checkpointer.conn.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        sessions = [
+            row[0].removeprefix("grim-web-")
+            for row in rows
+            if row[0].startswith("grim-web-")
+        ]
+        return JSONResponse({"sessions": sessions})
+    except Exception as exc:
+        logger.warning("Failed to list sessions: %s", exc)
+        return JSONResponse({"sessions": []})
 
 
 @app.get("/api/test-mcp")

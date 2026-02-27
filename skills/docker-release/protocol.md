@@ -15,6 +15,7 @@ This is the path from "code changed" to "new GRIM is running."
 3. `.env` file exists with `ANTHROPIC_API_KEY` (for runtime, not builds)
 4. `kronos-vault` exists at `../kronos-vault` (for MCP tests)
 5. CLIProxyAPI authenticated (see `cliproxyapi` skill for OAuth setup)
+6. Node.js 20+ installed locally (for UI development and testing)
 
 ## Operations
 
@@ -22,15 +23,29 @@ This is the path from "code changed" to "new GRIM is running."
 ```bash
 ./scripts/release.sh build
 ```
+- Multi-stage Dockerfile: Node.js (UI static export) + Python (backend)
+- Stage 1: `node:20-slim` — `npm ci` + `npm run build` → static files in `ui/out/`
+- Stage 2: `python:3.11-slim` — backend + `COPY --from=ui-build /ui/out/ ui/out/`
 - Tags image with git hash + date (e.g., `grim:a0fbb0e-20260226`)
 - Also tags as `grim:latest`
 - Shows image size after build
 
-### Test
+### UI Tests (run locally before Docker build)
+```bash
+cd ui && npm run test
+```
+- 30 tests via vitest + jsdom + @testing-library/react
+- 15 persistence tests (save/load/delete roundtrips)
+- 9 session hook tests (create, switch, delete)
+- 6 component tests (render, session switching, message restoration)
+- Config: `ui/vitest.config.ts` (React plugin, path aliases, jsdom)
+- Run `npm run test:watch` for development
+
+### Test (containerised)
 ```bash
 ./scripts/release.sh test
 ```
-- Runs 119 core unit tests (mocked, no vault needed)
+- Runs core unit tests (mocked, no vault needed)
 - Runs 57 MCP handler tests (needs real vault mounted)
 - E2E tests optional: `GRIM_E2E=1 ./scripts/release.sh test`
 - Handler timing thresholds may vary in container (cold-start)
@@ -104,14 +119,24 @@ Shows: container health, images, volumes, disk usage.
 
 ## Standard Workflow
 
-1. Make code changes
-2. `./scripts/release.sh build` — build new image
-3. `./scripts/release.sh test` — verify unit tests in container
-4. `./scripts/release.sh up` — deploy
-5. `./scripts/release.sh integration` — verify live endpoints
-6. Periodically: `./scripts/release.sh clean` — reclaim disk space
+1. Make code changes (backend or UI)
+2. If UI changed: `cd ui && npm run test` — verify UI tests locally
+3. If UI changed: `cd ui && npm run build` — verify static export succeeds
+4. `./scripts/release.sh build` — build Docker image (includes UI build stage)
+5. `./scripts/release.sh test` — verify backend tests in container
+6. `./scripts/release.sh up` — deploy
+7. `./scripts/release.sh integration` — verify live endpoints
+8. Periodically: `./scripts/release.sh clean` — reclaim disk space
 
-Or one command: `./scripts/release.sh rebuild` (does all of the above)
+Or one command: `./scripts/release.sh rebuild` (does steps 4-7)
+
+### UI Development (dev server)
+```bash
+cd ui && npm run dev    # Next.js on :3000, proxies API to :8080
+```
+- Requires GRIM backend running (Docker or local uvicorn)
+- `.env.local` sets `NEXT_PUBLIC_GRIM_API=http://localhost:8080`
+- Hot reload for UI changes, no Docker rebuild needed
 
 ## Windows Notes
 

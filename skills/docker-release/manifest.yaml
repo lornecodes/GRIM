@@ -53,8 +53,9 @@ safety:
   - "Verify Docker daemon is running before any operation"
 
 quality_gates:
-  - "Image builds successfully (exit code 0)"
-  - "Core unit tests pass (119/119)"
+  - "Image builds successfully (exit code 0) — includes Node.js UI build stage"
+  - "UI tests pass (30/30 — vitest: persistence, sessions, component)"
+  - "Core unit tests pass inside container"
   - "MCP handler tests pass (functional — timing thresholds may vary)"
   - "Integration tests pass (35/35 — health, MCP, REST, WebSocket, errors)"
   - "Health check responds after deployment"

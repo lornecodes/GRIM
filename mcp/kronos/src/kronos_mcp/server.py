@@ -554,8 +554,14 @@ async def call_tool(
         raise ValueError(f"Unknown tool: {name}")
 
     try:
-        result = await asyncio.to_thread(handler, arguments)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(handler, arguments),
+            timeout=30.0,  # 30s hard timeout — prevents indefinite hangs
+        )
         return [TextContent(type="text", text=result)]
+    except asyncio.TimeoutError:
+        logger.error(f"Tool {name} timed out after 30s")
+        return [TextContent(type="text", text=_json({"error": f"{name} timed out after 30s"}))]
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}", exc_info=True)
         return [TextContent(type="text", text=_json({"error": str(e)}))]

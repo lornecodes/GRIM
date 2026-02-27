@@ -258,7 +258,12 @@ class SemanticIndex:
         return self._available
 
     def _load_model(self):
-        """Load the sentence-transformer model (lazy, first search only)."""
+        """Load the sentence-transformer model (lazy, first search only).
+
+        Uses local_files_only=True to avoid network calls to HuggingFace
+        when the model is already cached. Falls back to network download
+        only if the local cache is missing.
+        """
         if self._model is not None:
             return
         if not self.available:
@@ -267,7 +272,15 @@ class SemanticIndex:
         logger.info(f"Loading embedding model: {self._model_name}")
         t0 = time.time()
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(self._model_name)
+        try:
+            # Try local-only first (no network, fast)
+            self._model = SentenceTransformer(
+                self._model_name, local_files_only=True
+            )
+        except OSError:
+            # Model not cached — download once
+            logger.info(f"Model not cached locally, downloading: {self._model_name}")
+            self._model = SentenceTransformer(self._model_name)
         self._dim = self._model.get_sentence_embedding_dimension()
         logger.info(f"Model loaded in {time.time() - t0:.1f}s — dim={self._dim}")
 

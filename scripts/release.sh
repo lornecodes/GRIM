@@ -68,11 +68,47 @@ cmd_build() {
     docker build -t "$IMAGE_NAME:$tag" -t "$IMAGE_NAME:latest" "$GRIM_DIR"
 
     _ok "Built: $IMAGE_NAME:$tag + $IMAGE_NAME:latest"
+
+    # Auto-cleanup: remove old image tags (keeps last KEEP_IMAGES + latest)
+    _log "Cleaning old images (keeping last $KEEP_IMAGES) ..."
+    local all_tags
+    all_tags=$(docker images "$IMAGE_NAME" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r)
+    local count=0
+    while IFS= read -r old_tag; do
+        [[ -z "$old_tag" ]] && continue
+        count=$((count + 1))
+        if [[ $count -gt $KEEP_IMAGES ]]; then
+            _log "Removing old image: $IMAGE_NAME:$old_tag"
+            docker rmi "$IMAGE_NAME:$old_tag" 2>/dev/null || true
+        fi
+    done <<< "$all_tags"
+
+    # Remove dangling images from this build
+    local dangling
+    dangling=$(docker images -f "dangling=true" -q 2>/dev/null)
+    if [[ -n "$dangling" ]]; then
+        echo "$dangling" | xargs docker rmi -f 2>/dev/null || true
+    fi
+
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
 }
 
 cmd_test() {
-    _log "Running tests inside container ..."
+    _log "Running tests ..."
+
+    # ── UI tests (local, not containerised) ──
+    local ui_dir="$GRIM_DIR/ui"
+    if [[ -d "$ui_dir" && -f "$ui_dir/package.json" ]]; then
+        _log "── UI tests (vitest) ──"
+        if command -v npm &>/dev/null; then
+            (cd "$ui_dir" && npm run test) || {
+                _err "UI tests failed"
+                return 1
+            }
+        else
+            _warn "npm not found — skipping UI tests"
+        fi
+    fi
 
     # Resolve vault path for MCP tests (handler + E2E need the real vault)
     local vault
@@ -83,7 +119,7 @@ cmd_test() {
         vault=""
     fi
 
-    # Core unit tests (119) — no vault needed, uses mocks
+    # Core unit tests — no vault needed, uses mocks
     _log "── Core unit tests ──"
     MSYS_NO_PATHCONV=1 docker run --rm \
         -e KRONOS_VAULT_PATH=/app/tests/vault \
@@ -128,7 +164,10 @@ cmd_test() {
 
 cmd_up() {
     _log "Starting GRIM ..."
-    _compose up -d --build
+
+    # Use pre-built image — don't rebuild (compose cache can serve stale layers).
+    # Run 'release.sh build' first if code changed.
+    _compose up -d
     _log "Waiting for health check ..."
     sleep 3
 

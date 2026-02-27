@@ -40,3 +40,9 @@ desktop.ini
 output/
 tmp/
 *.log
+
+# Next.js UI
+ui/node_modules/
+ui/.next/
+ui/out/
+ui/.env*.local

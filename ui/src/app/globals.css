@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-grim-bg text-grim-text;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-grim-border rounded-sm;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-grim-text-dim;
+  }
+}
+
+/* Markdown prose overrides */
+.grim-prose {
+  @apply text-grim-text leading-relaxed text-sm;
+}
+
+.grim-prose h1,
+.grim-prose h2,
+.grim-prose h3,
+.grim-prose h4 {
+  @apply text-grim-text font-semibold mt-4 mb-2;
+}
+
+.grim-prose h1 { @apply text-base; }
+.grim-prose h2 { @apply text-[15px]; }
+.grim-prose h3 { @apply text-sm; }
+
+.grim-prose p {
+  @apply mb-2 last:mb-0;
+}
+
+.grim-prose a {
+  @apply text-grim-accent no-underline hover:underline;
+}
+
+.grim-prose ul,
+.grim-prose ol {
+  @apply pl-5 mb-2;
+}
+
+.grim-prose li {
+  @apply mb-1;
+}
+
+.grim-prose code:not(pre code) {
+  @apply text-grim-accent bg-grim-accent/10 px-1.5 py-0.5 rounded text-xs font-mono;
+}
+
+.grim-prose pre {
+  @apply bg-grim-surface border border-grim-border rounded-lg p-3 my-2 overflow-x-auto text-xs;
+}
+
+.grim-prose pre code {
+  @apply bg-transparent p-0 text-grim-text;
+}
+
+.grim-prose table {
+  @apply w-full border-collapse my-2 text-xs;
+}
+
+.grim-prose th {
+  @apply border border-grim-border bg-grim-surface px-3 py-1.5 text-left font-semibold;
+}
+
+.grim-prose td {
+  @apply border border-grim-border px-3 py-1.5;
+}
+
+.grim-prose blockquote {
+  @apply border-l-2 border-grim-accent/40 pl-3 my-2 text-grim-text-dim italic;
+}
+
+.grim-prose hr {
+  @apply border-grim-border my-3;
+}
+
+.grim-prose strong {
+  @apply text-grim-text font-semibold;
+}
+
+.grim-prose em {
+  @apply text-grim-text-dim;
+}

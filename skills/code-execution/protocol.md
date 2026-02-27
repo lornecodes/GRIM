@@ -49,6 +49,13 @@ After implementation:
 3. Run linters if available
 4. If tests fail, fix before reporting
 
+**Test commands by area:**
+- Backend (Python): `python -m pytest tests/test_grim_core.py -v`
+- MCP handlers: `PYTHONPATH=mcp/kronos/src python tests/test_mcp_handlers.py`
+- UI (Next.js): `cd ui && npm run test` (vitest + jsdom + @testing-library/react)
+- UI build: `cd ui && npm run build` (static export must succeed)
+- Integration: `./scripts/release.sh integration` (requires running container)
+
 ### Phase 5: Report
 
 Return to GRIM:

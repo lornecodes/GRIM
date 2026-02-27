@@ -41,6 +41,9 @@ consumers:
 | `kronos-reflect/` | ✅ Built | recognition | memory-agent | Inbox triage, vault health |
 | `deep-ingest/` | ✅ Built | delegation | research-agent | 7-phase deep FDO creation |
 | `vault-sync/` | ✅ Built | delegation | ops-agent | 5-phase vault sync after code changes |
+| `docker-release/` | ✅ Built | delegation | ops-agent | Docker image build, test, deploy via release.sh |
+| `cliproxyapi/` | ✅ Built | delegation | ops-agent | CLIProxyAPI OAuth setup, health, troubleshooting |
+| `project-lifecycle/` | ✅ Built | delegation | memory-agent | Roadmap, design spec, and ADR FDO management |
 
 ### Agent-Only Skills (agents execute, GRIM doesn't read)
 
@@ -93,9 +96,9 @@ skill-name/
 
 | Agent | Responsibility | Skills |
 |-------|---------------|--------|
-| **memory-agent** | All Kronos vault operations | kronos-capture, kronos-promote, kronos-relate, kronos-recall, kronos-reflect, file-operations |
+| **memory-agent** | All Kronos vault operations | kronos-capture, kronos-promote, kronos-relate, kronos-recall, kronos-reflect, project-lifecycle, file-operations |
 | **coder-agent** | Code creation and modification | code-execution, file-operations, shell-execution |
-| **ops-agent** | Infrastructure, git, deployment | git-operations, file-operations, shell-execution, vault-sync |
+| **ops-agent** | Infrastructure, git, deployment | git-operations, file-operations, shell-execution, vault-sync, docker-release, cliproxyapi |
 | **research-agent** | Deep analysis and ingestion | deep-ingest, kronos-recall |
 
 ## Development Mode
