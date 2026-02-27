@@ -1,0 +1,67 @@
+name: experiment-scaffold
+version: 1.0.0
+description: >
+  Generates a new experiment directory with correct structure following
+  STANDARDS.md conventions. Creates meta.yaml (schema v2.0), README.md,
+  and scripts/ directory. Optionally links to existing FDOs and sets up
+  journal entries.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - filesystem:read
+  - filesystem:write
+
+inputs:
+  name:
+    type: string
+    required: true
+    description: Experiment name in snake_case (becomes the directory name)
+  title:
+    type: string
+    required: true
+    description: Human-readable experiment title
+  hypothesis:
+    type: string
+    required: true
+    description: One-sentence hypothesis being tested
+  pillar:
+    type: enum
+    values: [PAC, SEC, RBF, MED, cross-domain]
+    required: true
+    description: Which DFT pillar this experiment falls under
+  parent_dir:
+    type: string
+    default: dawn-field-theory/foundational/experiments
+    description: Parent directory for the new experiment
+  related_fdos:
+    type: list
+    required: false
+    description: List of FDO IDs this experiment will support
+
+outputs:
+  experiment_path: string
+  files_created: list
+
+phases:
+  1_validate: "Check name doesn't conflict, parent dir exists"
+  2_scaffold: "Create directory structure and template files"
+  3_link: "Update experiments README and optionally FDO source_paths"
+
+quality_gates:
+  per_scaffold:
+    - "Directory name is valid snake_case"
+    - "meta.yaml has all required fields"
+    - "README.md has hypothesis, status, and FDO links sections"
+    - "scripts/ directory exists"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes scaffold requests when user wants to start a new experiment
+    reads: [triggers, phases]
+  agent:
+    role: execution
+    description: Creates directory structure, fills templates, updates README
+    reads: [protocol.md, inputs, outputs, quality_gates]

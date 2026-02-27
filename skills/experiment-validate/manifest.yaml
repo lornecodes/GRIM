@@ -1,0 +1,59 @@
+name: experiment-validate
+version: 1.0.0
+description: >
+  Validates experiment folder structure against STANDARDS.md conventions.
+  Checks for required files (meta.yaml, README.md), correct directory layout
+  (scripts/, results/, journals/), script naming conventions, and meta.yaml
+  schema compliance. Reports per-experiment compliance scores.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - filesystem:read
+
+inputs:
+  experiment_path:
+    type: string
+    required: false
+    description: >
+      Path to a single experiment directory to validate. If omitted, validates
+      all experiments in the default DFT experiments directory.
+  experiments_root:
+    type: string
+    default: dawn-field-theory/foundational/experiments
+    description: Root directory containing all experiments (used when experiment_path is omitted)
+
+outputs:
+  total_experiments: integer
+  compliant: integer
+  partial: integer
+  failing: integer
+  issues: list
+  score_breakdown: object
+
+phases:
+  1_discover: "Locate experiment directories to validate"
+  2_check: "Run all checks against each experiment"
+  3_report: "Produce compliance report with scores and issues"
+
+quality_gates:
+  per_experiment:
+    - "meta.yaml exists and parses as valid YAML"
+    - "meta.yaml has schema_version field"
+    - "README.md exists and is non-empty"
+    - "No loose .py files in experiment root (should be in scripts/)"
+    - "Script files follow exp_NN_name.py naming convention"
+  global:
+    - "No experiment scores below 2/5"
+    - "Average compliance score >= 3.5/5"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes validation requests, can trigger after experiment creation
+    reads: [triggers, phases]
+  agent:
+    role: execution
+    description: Walks experiment directories, runs checks, produces report
+    reads: [protocol.md, inputs, outputs, quality_gates]

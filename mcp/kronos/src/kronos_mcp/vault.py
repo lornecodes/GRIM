@@ -7,6 +7,7 @@ No Obsidian dependency — pure filesystem operations.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import yaml
@@ -15,6 +16,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
+
+logger = logging.getLogger("kronos-mcp.vault")
 
 
 # ── FDO data model ──────────────────────────────────────────────────────────
@@ -48,6 +51,7 @@ class FDO:
     falsifiable: bool | None = None
     confidence_basis: str | None = None
     superseded_by: str | None = None
+    source_paths: list[dict[str, str]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     # Cached at parse time (not recomputed per access)
@@ -93,6 +97,8 @@ class FDO:
             d["confidence_basis"] = self.confidence_basis
         if self.superseded_by:
             d["superseded_by"] = self.superseded_by
+        if self.source_paths:
+            d["source_paths"] = self.source_paths
         d.update(self.extra)
         return d
 
@@ -149,7 +155,8 @@ class VaultEngine:
         """Parse a markdown file into an FDO, or None if it lacks valid frontmatter."""
         try:
             text = path.read_text(encoding="utf-8")
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to read {path}: {e}")
             return None
 
         # Extract YAML frontmatter
@@ -159,7 +166,8 @@ class VaultEngine:
 
         try:
             fm = yaml.safe_load(m.group(1))
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
+            logger.warning(f"Invalid YAML frontmatter in {path}: {e}")
             return None
 
         if not isinstance(fm, dict) or "id" not in fm:
@@ -190,11 +198,12 @@ class VaultEngine:
             falsifiable=fm.get("falsifiable"),
             confidence_basis=fm.get("confidence_basis"),
             superseded_by=fm.get("superseded_by"),
+            source_paths=fm.get("source_paths", []) or [],
             extra={k: v for k, v in fm.items() if k not in {
                 "id", "title", "domain", "created", "updated", "status",
                 "confidence", "related", "source_repos", "tags", "pac_parent",
                 "pac_children", "equations", "falsifiable", "confidence_basis",
-                "superseded_by",
+                "superseded_by", "source_paths",
             }},
         )
 

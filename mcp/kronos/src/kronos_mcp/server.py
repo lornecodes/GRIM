@@ -10,6 +10,7 @@ Tools:
     kronos_validate     — Run vault-wide validation checks
     kronos_create       — Create a new FDO
     kronos_update       — Update fields on an existing FDO
+    kronos_deep_dive    — Gather source material paths for a concept
 
   Skills:
     kronos_skills       — List all available GRIM skills
@@ -22,6 +23,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import Sequence
 from datetime import date
 from typing import Any
@@ -54,13 +56,20 @@ vault = VaultEngine(vault_path)
 search_engine = SearchEngine(vault)
 skills_engine = SkillsEngine(skills_path) if skills_path else None
 
-# Pre-load semantic index in background thread so first search is fast
+# Pre-load semantic index in background thread so first search is fast.
+# Timeout prevents the preload from hanging the server startup indefinitely
+# (e.g. if the sentence-transformer model needs to download from HuggingFace).
 import threading
+
+PRELOAD_TIMEOUT = 90  # seconds — generous, but not infinite
+
 def _preload_semantic():
     try:
+        t0 = time.time()
         search_engine._ensure_indexed()  # BM25 + graph first
+        logger.info(f"BM25 + graph indexed in {time.time() - t0:.1f}s")
         search_engine._ensure_semantic(blocking=True)  # Then semantic model + embeddings
-        logger.info("Semantic pre-load complete — all channels ready")
+        logger.info(f"Semantic pre-load complete in {time.time() - t0:.1f}s — all channels ready")
     except Exception as e:
         logger.warning(f"Semantic pre-load failed (search still works without it): {e}")
 
@@ -209,6 +218,19 @@ TOOLS: list[Tool] = [
                 },
                 "confidence_basis": {"type": "string", "description": "Why this confidence level"},
                 "pac_parent": {"type": "string", "description": "Parent FDO ID"},
+                "source_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "repo": {"type": "string", "description": "Repository name (e.g., 'dawn-field-theory')"},
+                            "path": {"type": "string", "description": "Relative path within the repo"},
+                            "type": {"type": "string", "enum": ["experiment", "script", "module", "doc", "config", "data"]},
+                        },
+                        "required": ["repo", "path", "type"],
+                    },
+                    "description": "Links to source material in code repos",
+                },
             },
             "required": ["id", "title", "domain", "confidence", "body"],
         },
@@ -267,6 +289,35 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kronos_deep_dive",
+        description=(
+            "Gather all source material paths for a concept. Takes an FDO ID or search "
+            "query and returns structured source_paths from the FDO and optionally its "
+            "related FDOs (up to `depth` hops). Returns paths grouped by repo, filtered "
+            "by type. Use this to find the actual code, experiments, and docs behind a concept."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "FDO ID (exact) or search query to find the concept",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "How many hops of related FDOs to include (default: 1, max: 3)",
+                    "default": 1,
+                },
+                "type_filter": {
+                    "type": "string",
+                    "description": "Filter source_paths by type (experiment, script, module, doc, config, data). Omit for all types.",
+                    "enum": ["experiment", "script", "module", "doc", "config", "data"],
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
         name="kronos_skill_load",
         description=(
             "Load the full instruction protocol for a GRIM skill. Returns the complete "
@@ -321,6 +372,7 @@ def _fdo_full(fdo: FDO) -> dict:
         "pac_children": fdo.pac_children,
         "equations": fdo.equations,
         "falsifiable": fdo.falsifiable,
+        "source_paths": fdo.source_paths,
         "summary": fdo.summary,
         "body": fdo.body,
     }
@@ -417,6 +469,7 @@ def handle_create(args: dict) -> str:
         file_path="",
         pac_parent=args.get("pac_parent"),
         confidence_basis=args.get("confidence_basis"),
+        source_paths=args.get("source_paths", []),
     )
 
     path = vault.write_fdo(fdo)
@@ -446,6 +499,73 @@ def handle_update(args: dict) -> str:
     # Incremental index update — no full rebuild, keeps _initialized=True.
     search_engine.index_fdo(fdo)
     return _json({"updated": fdo_id, "path": path, "fields_changed": list(fields.keys())})
+
+
+def handle_deep_dive(args: dict) -> str:
+    vault._ensure_index()
+    query = args["query"]
+    depth = min(args.get("depth", 1), 3)
+    type_filter = args.get("type_filter")
+
+    # Resolve query to an FDO — try exact ID first, then search
+    root_fdo = vault.get(query)
+    if not root_fdo:
+        results = vault.search(query, max_results=1)
+        if results:
+            root_fdo = results[0]
+    if not root_fdo:
+        return _json({"error": f"No FDO found for: {query}", "hint": "Use kronos_search to find concepts"})
+
+    # Walk related FDOs up to depth
+    visited: set[str] = set()
+    fdo_sources: list[dict] = []
+
+    def collect(fdo_id: str, d: int):
+        if fdo_id in visited or d > depth:
+            return
+        visited.add(fdo_id)
+        fdo = vault.get(fdo_id)
+        if not fdo:
+            return
+        paths = fdo.source_paths
+        if type_filter:
+            paths = [p for p in paths if p.get("type") == type_filter]
+        if paths:
+            fdo_sources.append({
+                "fdo_id": fdo.id,
+                "fdo_title": fdo.title,
+                "hop": d,
+                "source_paths": paths,
+            })
+        if d < depth:
+            for rel_id in fdo.related:
+                collect(rel_id, d + 1)
+
+    collect(root_fdo.id, 0)
+
+    # Group all paths by repo
+    by_repo: dict[str, list[dict]] = {}
+    for entry in fdo_sources:
+        for sp in entry["source_paths"]:
+            repo = sp.get("repo", "unknown")
+            if repo not in by_repo:
+                by_repo[repo] = []
+            by_repo[repo].append({
+                "path": sp["path"],
+                "type": sp["type"],
+                "from_fdo": entry["fdo_id"],
+            })
+
+    return _json({
+        "root": root_fdo.id,
+        "root_title": root_fdo.title,
+        "depth": depth,
+        "type_filter": type_filter,
+        "fdos_traversed": len(visited),
+        "fdos_with_sources": len(fdo_sources),
+        "sources_by_fdo": fdo_sources,
+        "sources_by_repo": by_repo,
+    })
 
 
 def handle_skills(args: dict) -> str:
@@ -530,6 +650,7 @@ HANDLERS = {
     "kronos_create": handle_create,
     "kronos_update": handle_update,
     "kronos_tags": handle_tags,
+    "kronos_deep_dive": handle_deep_dive,
     "kronos_skills": handle_skills,
     "kronos_skill_load": handle_skill_load,
 }

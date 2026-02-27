@@ -1,0 +1,55 @@
+name: fdo-source-validate
+version: 1.0.0
+description: >
+  Validates that all source_paths in FDO frontmatter point to real files or
+  directories in the workspace. Reports broken links, FDOs with no source_paths,
+  coverage statistics, and type distribution. Use after adding or updating
+  source_paths on FDOs.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:read
+  - filesystem:read
+
+inputs:
+  domain:
+    type: string
+    required: false
+    description: Filter to a specific domain (e.g., 'physics'). Omit to check all domains.
+  workspace_root:
+    type: string
+    default: .
+    description: Root of the workspace containing all repos referenced in source_paths
+
+outputs:
+  total_fdos: integer
+  fdos_with_sources: integer
+  fdos_without_sources: integer
+  total_paths: integer
+  valid_paths: integer
+  broken_paths: integer
+  broken_details: list
+  coverage_by_repo: object
+
+phases:
+  1_scan: "Load all FDOs and extract source_paths"
+  2_resolve: "Check each source_path against the filesystem"
+  3_report: "Produce validation report with broken links and coverage stats"
+
+quality_gates:
+  passing:
+    - "Zero broken source_paths"
+    - "Every FDO with source_repos also has source_paths"
+    - "All experiment-type paths point to directories with meta.yaml"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes validation requests, can trigger after source_paths updates
+    reads: [triggers, phases]
+  agent:
+    role: execution
+    description: Walks vault FDOs, resolves paths, produces report
+    reads: [protocol.md, inputs, outputs, quality_gates]
