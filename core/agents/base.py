@@ -76,8 +76,16 @@ class BaseAgent:
         # Pass system prompt via messages (not the API system field).
         # CLIProxyAPI injects "You are Claude Code..." into the system field;
         # the proxy config filters it out, so we use messages instead.
+        # cache_control on the system prompt block enables Anthropic prompt
+        # caching — the static instructions are cached for 5 min.
         messages = [
-            HumanMessage(content=f"[SYSTEM INSTRUCTIONS — follow exactly]\n{system_prompt}\n[END SYSTEM INSTRUCTIONS]"),
+            HumanMessage(content=[
+                {
+                    "type": "text",
+                    "text": f"[SYSTEM INSTRUCTIONS — follow exactly]\n{system_prompt}\n[END SYSTEM INSTRUCTIONS]",
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ]),
             AIMessage(content=f"Understood. I am the {self.agent_name} agent and will follow these instructions."),
             HumanMessage(content=task),
         ]

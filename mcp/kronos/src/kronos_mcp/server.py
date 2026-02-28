@@ -60,6 +60,10 @@ vault = VaultEngine(vault_path)
 search_engine = SearchEngine(vault)
 skills_engine = SkillsEngine(skills_path) if skills_path else None
 
+# ── Redis cache (optional) ────────────────────────────────────────────────────
+from .cache import KronosCache, WRITE_TOOLS
+cache = KronosCache.from_env()
+
 # Pre-load semantic index in background thread so first search is fast.
 # Timeout prevents the preload from hanging the server startup indefinitely
 # (e.g. if the sentence-transformer model needs to download from HuggingFace).
@@ -383,7 +387,7 @@ def _fdo_summary(fdo: FDO) -> dict:
 
 
 def _fdo_full(fdo: FDO) -> dict:
-    return {
+    d = {
         "id": fdo.id,
         "title": fdo.title,
         "domain": fdo.domain,
@@ -403,6 +407,10 @@ def _fdo_full(fdo: FDO) -> dict:
         "summary": fdo.summary,
         "body": fdo.body,
     }
+    # Include extra frontmatter fields (type, role, etc.)
+    if fdo.extra:
+        d.update(fdo.extra)
+    return d
 
 
 def handle_search(args: dict) -> str:
@@ -793,18 +801,31 @@ async def call_tool(
     if not handler:
         raise ValueError(f"Unknown tool: {name}")
 
+    # ── Cache read (read-only tools only) ─────────────────────────────────────
+    cached = cache.get(name, arguments)
+    if cached is not None:
+        return [TextContent(type="text", text=cached)]
+
+    # ── Execute handler ───────────────────────────────────────────────────────
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(handler, arguments),
             timeout=30.0,  # 30s hard timeout — prevents indefinite hangs
         )
-        return [TextContent(type="text", text=result)]
     except asyncio.TimeoutError:
         logger.error(f"Tool {name} timed out after 30s")
         return [TextContent(type="text", text=_json({"error": f"{name} timed out after 30s"}))]
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}", exc_info=True)
         return [TextContent(type="text", text=_json({"error": str(e)}))]
+
+    # ── Cache write / invalidation ────────────────────────────────────────────
+    if name in WRITE_TOOLS:
+        cache.invalidate_for_write(name, arguments)
+    else:
+        cache.set(name, arguments, result)
+
+    return [TextContent(type="text", text=result)]
 
 
 async def main():

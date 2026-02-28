@@ -751,7 +751,7 @@ class TestUserCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cache_path = Path(tmp) / "user.cache.md"
             fdo = {
-                "frontmatter": {"id": "peter", "title": "Peter Lorne", "role": "owner"},
+                "id": "peter", "title": "Peter Lorne", "role": "owner",
                 "body": textwrap.dedent("""\
                     ## Working Style
                     - Builds things to understand them
@@ -779,7 +779,7 @@ class TestUserCache(unittest.TestCase):
         """compile_caller_summary produces compact prompt for a service caller."""
         from core.personality.user_cache import compile_caller_summary
         fdo = {
-            "frontmatter": {"id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service"},
+            "id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service",
             "body": textwrap.dedent("""\
                 ## Context
                 - Rust-based physics engine for DFT simulations
@@ -823,7 +823,7 @@ class TestCallerResolution(unittest.TestCase):
             cache_path = Path(tmp) / "personality.cache.md"
             cfg = make_test_config(personality_cache_path=cache_path)
             ironclaw_fdo = {
-                "frontmatter": {"id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service"},
+                "id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service",
                 "body": "## Context\n- Rust engine\n\n## Communication Style\n- Structured\n",
             }
             mcp = MockMCPSession({"kronos_get": ironclaw_fdo})
@@ -1673,7 +1673,12 @@ class TestBaseAgent(unittest.TestCase):
         # Verify system prompt includes protocol
         call_args = mock_instance.ainvoke.call_args[0][0]
         system_msg = call_args[0].content
-        self.assertIn("Skill Protocol", system_msg)
+        # Content is now a list of blocks (cache_control support)
+        if isinstance(system_msg, list):
+            system_text = system_msg[0]["text"]
+        else:
+            system_text = system_msg
+        self.assertIn("Skill Protocol", system_text)
 
     @patch("core.agents.base.ChatAnthropic")
     def test_execute_handles_llm_error(self, MockLLM):

@@ -20,6 +20,9 @@ server = [
     "uvicorn[standard]>=0.34",
     "websockets>=14.0",
 ]
+cache = [
+    "redis>=5.0.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

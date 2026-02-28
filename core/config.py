@@ -49,6 +49,9 @@ class GrimConfig:
     evolution_dir: Path = field(default_factory=lambda: Path("local/evolution"))
     evolution_frequency: str = "per_session"
 
+    # Redis (optional — for reasoning cache)
+    redis_url: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.env == "production"
@@ -109,6 +112,11 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.local_dir = _resolve(cfg.local_dir, grim_root)
     cfg.checkpoint_path = _resolve(cfg.checkpoint_path, grim_root)
     cfg.evolution_dir = _resolve(cfg.evolution_dir, grim_root)
+
+    # Redis URL
+    redis_override = os.getenv("GRIM_REDIS_URL", os.getenv("KRONOS_REDIS_URL", ""))
+    if redis_override:
+        cfg.redis_url = redis_override
 
     # Use test vault in debug mode if real vault doesn't exist
     if cfg.is_debug and not cfg.vault_path.exists():

@@ -1,43 +1,41 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import type { ChatMessage } from "@/lib/types";
+import { useGrimStore } from "@/store";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
+import { GrimSprite } from "./GrimSprite";
 
 interface ChatAreaProps {
-  messages: ChatMessage[];
-  isStreaming: boolean;
   onSend: (text: string) => void;
-  connected: boolean;
 }
 
-export function ChatArea({
-  messages,
-  isStreaming,
-  onSend,
-  connected,
-}: ChatAreaProps) {
+export function ChatArea({ onSend }: ChatAreaProps) {
+  const messages = useGrimStore((s) => s.messages);
+  const isStreaming = useGrimStore((s) => s.isStreaming);
+  const wsStatus = useGrimStore((s) => s.wsStatus);
+  const chatPanelOpen = useGrimStore((s) => s.chatPanelOpen);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll on new messages or streaming updates
+  const connected = wsStatus === "connected";
+
+  // Auto-scroll on new messages (only when panel is visible)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (chatPanelOpen) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, chatPanelOpen]);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-3">
         {messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-grim-accent text-3xl mb-3 font-bold">G</div>
-              <div className="text-sm text-grim-text-dim">
-                Ready when you are.
-              </div>
-              <div className="text-xs text-grim-text-dim mt-1">
-                Ask me anything — I have access to the knowledge vault.
+            <div className="text-center flex flex-col items-center">
+              <GrimSprite size="md" />
+              <div className="text-[11px] text-grim-text-dim mt-2">
+                GRIM is ready.
               </div>
             </div>
           </div>

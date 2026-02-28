@@ -108,8 +108,12 @@ async def lifespan(app: FastAPI):
     async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
         _checkpointer = checkpointer
 
+        # Initialize reasoning cache (Redis, optional)
+        from core.reasoning_cache import ReasoningCache
+        reasoning_cache = await ReasoningCache.from_env()
+
         # Build graph (once, shared across all connections)
-        _graph = build_graph(_config, mcp_session=mcp_session, checkpointer=checkpointer)
+        _graph = build_graph(_config, mcp_session=mcp_session, checkpointer=checkpointer, reasoning_cache=reasoning_cache)
         logger.info("Graph built — server ready")
 
         yield
@@ -349,6 +353,9 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                 streaming_started = False
                 seen_nodes = set()
                 _node_times: dict[str, float] = {}
+                _current_node: str = ""
+                _node_text: dict[str, str] = {}  # per-node LLM output
+                _node_stream_text: dict[str, str] = {}  # per-node streamed tokens
 
                 async def _trace(cat: str, text: str, **extra):
                     """Emit a trace event to the client."""
@@ -381,6 +388,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                         if name not in seen_nodes:
                             seen_nodes.add(name)
                             _node_times[name] = _time.monotonic()
+                            _current_node = name
                             await _trace("node", f"→ {name}", node=name, action="start")
 
                     elif kind == "on_chain_end" and name in seen_nodes:
@@ -410,9 +418,12 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                         "mode": fs.expression_mode() if hasattr(fs, "expression_mode") else "",
                                     }
 
+                        # Include step_content for nodes that produced LLM output
+                        step_text = _node_text.get(name) or _node_stream_text.get(name)
                         await _trace("node", f"✓ {name} ({node_elapsed}ms)",
                                      node=name, action="end", duration_ms=node_elapsed,
-                                     detail=detail if detail else None)
+                                     detail=detail if detail else None,
+                                     step_content=step_text if step_text else None)
 
                     # ── LLM lifecycle ──
                     elif kind == "on_chat_model_start":
@@ -445,6 +456,8 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                 if text:
                                     full_response = text
                                     streaming_started = True
+                                    if _current_node:
+                                        _node_text[_current_node] = text
                         await _trace("llm", "LLM call complete", action="end",
                                      detail=info if info else None)
 
@@ -457,7 +470,9 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                 if not streaming_started:
                                     streaming_started = True
                                 full_response += token
-                                await ws.send_json({"type": "stream", "token": token})
+                                if _current_node:
+                                    _node_stream_text[_current_node] = _node_stream_text.get(_current_node, "") + token
+                                await ws.send_json({"type": "stream", "token": token, "node": _current_node or None})
 
                     # ── Tool lifecycle ──
                     elif kind == "on_tool_start":

@@ -41,12 +41,14 @@ def build_graph(
     config: GrimConfig,
     mcp_session: Any = None,
     checkpointer: Any = None,
+    reasoning_cache: Any = None,
 ) -> Any:
     """Build and compile the GRIM state graph.
 
     Args:
         config: Resolved runtime configuration.
         mcp_session: MCP client session for Kronos (None in debug mode).
+        reasoning_cache: ReasoningCache instance (optional, for companion node).
         checkpointer: LangGraph checkpointer for persistence (default: MemorySaver).
 
     Returns:
@@ -65,7 +67,7 @@ def build_graph(
     identity_fn = make_identity_node(config, mcp_session)
     memory_fn = make_memory_node(mcp_session)
     skill_match_fn = make_skill_match_node(skill_registry)
-    companion_fn = make_companion_node(config)
+    companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
     evolve_fn = make_evolve_node(config)
 
     # Create all four doer agents

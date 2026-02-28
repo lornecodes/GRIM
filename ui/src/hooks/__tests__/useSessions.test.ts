@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSessions } from "../useSessions";
+import { useGrimStore } from "@/store";
 
 beforeEach(() => {
   localStorage.clear();
+  // Reset Zustand store between tests
+  useGrimStore.setState({
+    messages: [],
+    isStreaming: false,
+    sessions: [],
+    activeSessionId: "",
+  });
 });
 
 describe("useSessions", () => {
@@ -46,10 +54,14 @@ describe("useSessions", () => {
     expect(result.current.activeId).toBe("target-id");
   });
 
-  it("persists sessions to localStorage", () => {
+  it("persists sessions to localStorage", async () => {
     const { result } = renderHook(() => useSessions());
     act(() => {
       result.current.updateSession("s1", "first session");
+    });
+    // Wait for the useEffect that persists to localStorage
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
     });
     const stored = localStorage.getItem("grim-sessions");
     expect(stored).not.toBeNull();
@@ -70,10 +82,12 @@ describe("useSessions", () => {
     expect(result.current.sessions[0].id).toBe("old1");
   });
 
-  it("deleteSession removes the session", () => {
+  it("deleteSession removes the session", async () => {
     const { result } = renderHook(() => useSessions());
     act(() => {
       result.current.updateSession("s1", "session one");
+    });
+    act(() => {
       result.current.updateSession("s2", "session two");
     });
     expect(result.current.sessions).toHaveLength(2);

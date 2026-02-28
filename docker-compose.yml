@@ -68,6 +68,30 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  # ── Redis cache ──────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: kronos-redis
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    expose:
+      - "6379"
+    ports:
+      - "127.0.0.1:6379:6379"   # Local dev access (MCP subprocess)
+    networks:
+      - grim-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   # ── GRIM ──────────────────────────────────────────────────
   grim:
     build: .
@@ -75,6 +99,8 @@ services:
     container_name: grim
     depends_on:
       ai-bridge:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "${GRIM_PORT:-8080}:8080"
@@ -84,6 +110,8 @@ services:
       - GRIM_ENV=${GRIM_ENV:-debug}
       - KRONOS_VAULT_PATH=/vault
       - KRONOS_SKILLS_PATH=/app/skills
+      - KRONOS_REDIS_URL=redis://redis:6379/0
+      - GRIM_REDIS_URL=redis://redis:6379/0
     volumes:
       - ${VAULT_PATH:-../kronos-vault}:/vault:ro
       - grim-sessions:/app/local/sessions

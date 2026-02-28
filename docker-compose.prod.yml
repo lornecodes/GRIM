@@ -15,6 +15,16 @@ services:
         reservations:
           memory: 128m
 
+  redis:
+    restart: always
+    ports: []   # Internal only in prod
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 64m
+
   grim:
     environment:
       - GRIM_ENV=production

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { Session } from "@/lib/types";
+import { useEffect, useCallback } from "react";
+import { useGrimStore } from "@/store";
+import { saveMessages, loadMessages, deleteMessages } from "@/lib/persistence";
 
 const STORAGE_KEY = "grim-sessions";
 
@@ -10,59 +11,75 @@ function generateId(): string {
 }
 
 export function useSessions() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeId, setActiveId] = useState<string>("");
+  const store = useGrimStore();
 
-  // Load from localStorage on mount
+  // Load sessions from localStorage on mount + generate initial session ID
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setSessions(JSON.parse(stored));
+      if (stored) store.setSessions(JSON.parse(stored));
     } catch {
       // Ignore corrupted storage
     }
-    setActiveId(generateId());
+    store.setActiveSessionId(generateId());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist to localStorage
+  // Persist sessions to localStorage
   useEffect(() => {
-    if (sessions.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    if (store.sessions.length > 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store.sessions));
     }
-  }, [sessions]);
+  }, [store.sessions]);
 
-  const updateSession = useCallback((id: string, title: string) => {
-    setSessions((prev) => {
-      const existing = prev.find((s) => s.id === id);
-      if (existing) {
-        return prev.map((s) =>
-          s.id === id ? { ...s, title, updatedAt: Date.now() } : s
-        );
-      }
-      return [{ id, title, updatedAt: Date.now() }, ...prev];
-    });
-  }, []);
+  // Auto-save messages when streaming completes
+  useEffect(() => {
+    if (store.activeSessionId && !store.isStreaming && store.messages.length > 0) {
+      saveMessages(store.activeSessionId, store.messages);
+    }
+  }, [store.messages, store.isStreaming, store.activeSessionId]);
 
   const newSession = useCallback(() => {
+    if (store.activeSessionId && store.messages.length > 0) {
+      saveMessages(store.activeSessionId, store.messages);
+    }
     const id = generateId();
-    setActiveId(id);
+    store.setActiveSessionId(id);
+    store.setMessages([]);
     return id;
-  }, []);
+  }, [store]);
 
-  const switchSession = useCallback((id: string) => {
-    setActiveId(id);
-  }, []);
+  const switchSession = useCallback(
+    (id: string) => {
+      if (store.activeSessionId && store.messages.length > 0) {
+        saveMessages(store.activeSessionId, store.messages);
+      }
+      store.setActiveSessionId(id);
+      const restored = loadMessages(id);
+      store.setMessages(restored);
+    },
+    [store]
+  );
 
   const deleteSession = useCallback(
     (id: string) => {
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-      if (id === activeId) {
+      store.deleteSessionById(id);
+      deleteMessages(id);
+      if (id === store.activeSessionId) {
         const newId = generateId();
-        setActiveId(newId);
+        store.setActiveSessionId(newId);
+        store.setMessages([]);
       }
     },
-    [activeId]
+    [store]
   );
 
-  return { sessions, activeId, updateSession, newSession, switchSession, deleteSession };
+  return {
+    sessions: store.sessions,
+    activeId: store.activeSessionId,
+    updateSession: store.upsertSession,
+    newSession,
+    switchSession,
+    deleteSession,
+  };
 }

@@ -51,11 +51,11 @@ def compile_user_cache(user_fdo: dict, cache_path: Path) -> None:
     into a prompt-ready file.
     """
     body = user_fdo.get("body", "")
-    frontmatter = user_fdo.get("frontmatter", {})
 
-    title = frontmatter.get("title", "Unknown Caller")
-    fdo_id = frontmatter.get("id", "unknown")
-    role = frontmatter.get("role", "unknown")
+    # MCP kronos_get returns a flat dict (not nested under "frontmatter")
+    title = user_fdo.get("title", "Unknown Caller")
+    fdo_id = user_fdo.get("id", "unknown")
+    role = user_fdo.get("role", "unknown")
 
     # Extract key sections from the FDO body
     working_style = _extract_section_items(body, "Working Style")
@@ -98,11 +98,11 @@ def compile_caller_summary(caller_fdo: dict) -> str:
     Used for services (IronClaw) and friends — one-time vault lookup per session.
     """
     body = caller_fdo.get("body", "")
-    frontmatter = caller_fdo.get("frontmatter", {})
 
-    title = frontmatter.get("title", "Unknown")
-    role = frontmatter.get("role", "unknown")
-    fdo_type = frontmatter.get("type", "unknown")
+    # MCP kronos_get returns a flat dict (not nested under "frontmatter")
+    title = caller_fdo.get("title", "Unknown")
+    role = caller_fdo.get("role", "unknown")
+    fdo_type = caller_fdo.get("type", "unknown")
 
     # Extract context and communication style
     context_items = _extract_section_items(body, "Context")

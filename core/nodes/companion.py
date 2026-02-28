@@ -13,7 +13,7 @@ the Router sends to Dispatch instead.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -23,13 +23,16 @@ from core.config import GrimConfig
 from core.state import GrimState
 from core.tools.kronos_read import COMPANION_TOOLS
 
+if TYPE_CHECKING:
+    from core.reasoning_cache import ReasoningCache
+
 logger = logging.getLogger(__name__)
 
 # Max tool-call round trips per turn
 MAX_TOOL_STEPS = 3
 
 
-def make_companion_node(config: GrimConfig):
+def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | None = None):
     """Create a companion node closure with config."""
 
     # Initialize LLM with read-only tools
@@ -47,23 +50,20 @@ def make_companion_node(config: GrimConfig):
     async def companion_node(state: GrimState, run_config: RunnableConfig = None) -> dict:
         """Generate GRIM's response in companion (thinker) mode.
 
-        Includes a tool-calling loop so the companion can query Kronos
-        mid-turn (e.g. kronos_search, kronos_get) and fold results
-        into its final answer.
-
-        Accepts RunnableConfig (as run_config to avoid shadowing the
-        outer GrimConfig) so LangGraph's astream_events callback chain
-        propagates through our LLM calls, enabling token streaming.
+        Two caching layers:
+        1. Anthropic prompt caching — static system prompt prefix marked with
+           cache_control: {"type": "ephemeral"} so Anthropic caches it for 5 min.
+        2. Reasoning cache — tool-loop results cached in Redis so repeated
+           questions skip the tool loop entirely (3-4 LLM calls → 1).
         """
-        system_prompt = state.get("system_prompt", "You are GRIM.")
         messages = list(state.get("messages", []))
         knowledge_context = state.get("knowledge_context", [])
         matched_skills = state.get("matched_skills", [])
 
-        # Enrich system prompt with per-turn context
-        from core.personality.prompt_builder import build_system_prompt
+        # Build system prompt with static/dynamic split for prompt caching
+        from core.personality.prompt_builder import build_system_prompt_parts
 
-        enriched_prompt = build_system_prompt(
+        parts = build_system_prompt_parts(
             prompt_path=config.identity_prompt_path,
             personality_path=config.identity_personality_path,
             field_state=state.get("field_state"),
@@ -74,37 +74,110 @@ def make_companion_node(config: GrimConfig):
             caller_context=state.get("caller_context"),
         )
 
-        # Inject system prompt via messages rather than the API system field.
-        # CLIProxyAPI prepends "You are Claude Code..." to the system field,
-        # overriding GRIM's identity. The proxy config filters out the system
-        # field entirely, so we pass GRIM's prompt through a HumanMessage/
-        # AIMessage pair which survives the filter and establishes identity.
+        # Build system instruction with cache_control on stable prefix.
+        # CLIProxyAPI hijacks the system field, so we inject via HumanMessage/
+        # AIMessage pair. The static prefix (identity + personality + caller)
+        # gets cache_control: {"type": "ephemeral"} — Anthropic caches it for
+        # 5 min, reducing input token cost on subsequent calls.
+        system_content = [
+            {
+                "type": "text",
+                "text": f"[SYSTEM INSTRUCTIONS — follow exactly]\n{parts.static}",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
+        if parts.dynamic:
+            system_content.append({
+                "type": "text",
+                "text": f"{parts.dynamic}\n[END SYSTEM INSTRUCTIONS]",
+            })
+        else:
+            system_content[0]["text"] += "\n[END SYSTEM INSTRUCTIONS]"
+
         llm_messages = [
-            HumanMessage(content=f"[SYSTEM INSTRUCTIONS — follow exactly]\n{enriched_prompt}\n[END SYSTEM INSTRUCTIONS]"),
+            HumanMessage(content=system_content),
             AIMessage(content="Understood. I am GRIM and will follow these instructions precisely."),
         ] + messages
 
         logger.info("Companion: generating response (%d messages in history)", len(messages))
 
-        # Tool-calling loop — pass config so astream_events can
-        # intercept and emit on_chat_model_stream / on_chat_model_end events.
-        new_messages: list[Any] = []
-        for step in range(MAX_TOOL_STEPS):
-            response = await llm_with_tools.ainvoke(llm_messages, config=run_config)
-            new_messages.append(response)
-            llm_messages.append(response)
+        # Extract user message and FDO IDs for reasoning cache
+        user_msg = ""
+        if messages:
+            last = messages[-1]
+            user_msg = last.content if hasattr(last, "content") and isinstance(last.content, str) else str(last)
 
-            # If the LLM made tool calls, execute them and loop
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                logger.info("Companion: tool calls at step %d: %s",
-                            step, [tc["name"] for tc in response.tool_calls])
-                for tc in response.tool_calls:
-                    tool_result = await _execute_tool(tool_map, tc)
-                    new_messages.append(tool_result)
-                    llm_messages.append(tool_result)
-            else:
-                # No tool calls — we have the final answer
-                break
+        fdo_ids = [fdo.id for fdo in knowledge_context] if knowledge_context else []
+
+        # ── Reasoning cache check ─────────────────────────────────────────
+        cached_results = None
+        if reasoning_cache and user_msg:
+            cached_results = await reasoning_cache.get(user_msg, fdo_ids)
+
+        if cached_results is not None:
+            # CACHE HIT: Skip tool loop, inject cached context, one LLM call
+            logger.info(
+                "Companion: reasoning cache hit — skipping tool loop (%d cached results)",
+                len(cached_results),
+            )
+            context_parts = []
+            for r in cached_results:
+                context_parts.append(f"[{r['name']}({r.get('args', {})})]\n{r['content']}")
+            cached_context = "\n\n".join(context_parts)
+
+            llm_messages.append(
+                HumanMessage(
+                    content=(
+                        "[CACHED KNOWLEDGE CONTEXT — gathered from previous identical query]\n"
+                        f"{cached_context}\n"
+                        "[END CACHED CONTEXT]\n\n"
+                        "Please respond to the user's message using this context."
+                    )
+                )
+            )
+            response = await llm.ainvoke(llm_messages, config=run_config)
+            new_messages: list[Any] = [response]
+        else:
+            # CACHE MISS: Normal tool-calling loop
+            new_messages = []
+            got_text_response = False
+            tool_results_to_cache: list[dict] = []
+
+            for step in range(MAX_TOOL_STEPS):
+                response = await llm_with_tools.ainvoke(llm_messages, config=run_config)
+                new_messages.append(response)
+                llm_messages.append(response)
+
+                if hasattr(response, "tool_calls") and response.tool_calls:
+                    logger.info(
+                        "Companion: tool calls at step %d: %s",
+                        step, [tc["name"] for tc in response.tool_calls],
+                    )
+                    for tc in response.tool_calls:
+                        tool_result = await _execute_tool(tool_map, tc)
+                        new_messages.append(tool_result)
+                        llm_messages.append(tool_result)
+
+                        # Collect successful results for caching
+                        if not tool_result.content.startswith(("Tool error:", "Unknown tool:")):
+                            tool_results_to_cache.append({
+                                "name": tc["name"],
+                                "args": tc.get("args", {}),
+                                "content": tool_result.content,
+                            })
+                else:
+                    got_text_response = True
+                    break
+
+            # Force final response if tool loop exhausted
+            if not got_text_response:
+                logger.info("Companion: tool loop exhausted (%d steps), forcing final response", MAX_TOOL_STEPS)
+                response = await llm.ainvoke(llm_messages, config=run_config)
+                new_messages.append(response)
+
+            # Cache the tool results for future identical queries
+            if reasoning_cache and tool_results_to_cache and user_msg:
+                await reasoning_cache.set(user_msg, fdo_ids, tool_results_to_cache)
 
         # Track topics for evolution
         topics = list(state.get("session_topics", []))

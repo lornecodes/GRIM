@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from tracker import TokenTracker
@@ -49,6 +50,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI Bridge", lifespan=lifespan)
+
+# CORS — allow dashboard UI to call bridge API from different origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ── Health check ────────────────────────────────────────────
