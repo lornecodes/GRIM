@@ -91,10 +91,10 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             if (!id) break;
             const nodeName = data.node || currentNode.current || "";
 
-            // Determine which bubble to stream into
+            // Companion streams into the main response bubble (with avatar).
+            // Other non-integrate nodes get step bubbles (rare — most don't stream).
             let targetId = id;
-            if (nodeName && nodeName !== "integrate") {
-              // Non-final nodes get their own step bubble
+            if (nodeName && nodeName !== "integrate" && nodeName !== "companion") {
               if (!stepBubbleIds.current.has(nodeName)) {
                 const stepId = crypto.randomUUID();
                 stepBubbleIds.current.set(nodeName, stepId);
@@ -118,36 +118,29 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             }
             break;
           }
+          case "stream_clear": {
+            // Companion made tool calls — the text just streamed was "thinking".
+            // Clear the bubble so the final answer starts fresh.
+            if (!id) break;
+            state.updateMessage(id, { content: "", thinkingText: data.thinking || "" });
+            break;
+          }
           case "response": {
             if (!id) break;
             const meta = data.meta as ResponseMeta;
-            const hasStepBubbles = stepBubbleIds.current.size > 0;
 
-            if (hasStepBubbles) {
-              // Step bubbles already have the streamed content — don't duplicate.
-              // Finalize all step bubbles, attach meta+traces to the last one.
-              let lastStepId = "";
-              stepBubbleIds.current.forEach((stepId) => {
-                state.updateMessage(stepId, { streaming: false });
-                lastStepId = stepId;
-              });
-              if (lastStepId) {
-                state.updateMessage(lastStepId, {
-                  meta,
-                  traces: [...currentTraces.current],
-                });
-              }
-              // Remove the empty main placeholder
-              state.deleteMessage(id);
-            } else {
-              // No step bubbles — single response bubble (original behavior)
-              state.updateMessage(id, {
-                content: data.content,
-                meta,
-                traces: [...currentTraces.current],
-                streaming: false,
-              });
-            }
+            // Finalize step bubbles (non-companion nodes that streamed)
+            stepBubbleIds.current.forEach((stepId) => {
+              state.updateMessage(stepId, { streaming: false });
+            });
+
+            // Finalize the main response bubble (companion streams here)
+            state.updateMessage(id, {
+              content: data.content,
+              meta,
+              traces: [...currentTraces.current],
+              streaming: false,
+            });
 
             state.setStreaming(false);
             currentResponseId.current = "";

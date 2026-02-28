@@ -35,15 +35,6 @@ MAX_TOOL_STEPS = 3
 def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | None = None):
     """Create a companion node closure with config."""
 
-    # Initialize LLM with read-only tools
-    llm = ChatAnthropic(
-        model=config.model,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-        default_headers={"X-Caller-ID": "grim"},
-    )
-    llm_with_tools = llm.bind_tools(COMPANION_TOOLS) if COMPANION_TOOLS else llm
-
     # Build a name→tool lookup for execution
     tool_map = {t.name: t for t in COMPANION_TOOLS}
 
@@ -56,6 +47,19 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
         2. Reasoning cache — tool-loop results cached in Redis so repeated
            questions skip the tool loop entirely (3-4 LLM calls → 1).
         """
+        # Select model — use router's selection or fall back to config default
+        selected_model = state.get("selected_model") or config.model
+
+        llm = ChatAnthropic(
+            model=selected_model,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            default_headers={"X-Caller-ID": "grim"},
+        )
+        llm_with_tools = llm.bind_tools(COMPANION_TOOLS) if COMPANION_TOOLS else llm
+
+        logger.info("Companion: using model %s", selected_model)
+
         messages = list(state.get("messages", []))
         knowledge_context = state.get("knowledge_context", [])
         matched_skills = state.get("matched_skills", [])
@@ -69,6 +73,7 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
             field_state=state.get("field_state"),
             knowledge_context=knowledge_context,
             matched_skills=matched_skills,
+            objectives=state.get("objectives"),
             personality_cache_path=config.personality_cache_path,
             caller_id=state.get("caller_id"),
             caller_context=state.get("caller_context"),
@@ -135,7 +140,7 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
                     )
                 )
             )
-            response = await llm.ainvoke(llm_messages, config=run_config)
+            response = await _safe_invoke(llm, llm_messages, run_config)
             new_messages: list[Any] = [response]
         else:
             # CACHE MISS: Normal tool-calling loop
@@ -144,7 +149,7 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
             tool_results_to_cache: list[dict] = []
 
             for step in range(MAX_TOOL_STEPS):
-                response = await llm_with_tools.ainvoke(llm_messages, config=run_config)
+                response = await _safe_invoke(llm_with_tools, llm_messages, run_config)
                 new_messages.append(response)
                 llm_messages.append(response)
 
@@ -172,7 +177,7 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
             # Force final response if tool loop exhausted
             if not got_text_response:
                 logger.info("Companion: tool loop exhausted (%d steps), forcing final response", MAX_TOOL_STEPS)
-                response = await llm.ainvoke(llm_messages, config=run_config)
+                response = await _safe_invoke(llm, llm_messages, run_config)
                 new_messages.append(response)
 
             # Cache the tool results for future identical queries
@@ -191,6 +196,27 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
         }
 
     return companion_node
+
+
+async def _safe_invoke(llm, messages: list, run_config=None):
+    """Invoke LLM with error recovery.
+
+    Catches streaming/serialization errors (e.g. langchain-anthropic
+    context_management bug) and retries once. If retry fails, returns
+    a fallback AIMessage so the graph doesn't crash.
+    """
+    try:
+        return await llm.ainvoke(messages, config=run_config)
+    except AttributeError as exc:
+        logger.warning("Companion: LLM streaming error (retrying): %s", exc)
+        try:
+            return await llm.ainvoke(messages, config=run_config)
+        except Exception as retry_exc:
+            logger.error("Companion: LLM retry failed: %s", retry_exc)
+            return AIMessage(content="I encountered a temporary error. Could you try again?")
+    except Exception as exc:
+        logger.error("Companion: LLM call failed: %s", exc)
+        return AIMessage(content=f"I hit an error: {exc}. Let me try a different approach if you ask again.")
 
 
 async def _execute_tool(tool_map: dict, tool_call: dict) -> ToolMessage:

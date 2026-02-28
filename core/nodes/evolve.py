@@ -1,11 +1,13 @@
-"""Evolve node — update field state and capture session learning.
+"""Evolve node — update field state, extract objectives, capture session learning.
 
-Runs at end of session (or periodically). Computes field state drift
-based on conversation topics and outcomes, saves snapshots.
+Runs after every turn. Computes field state drift based on conversation
+topics and outcomes, saves snapshots. Also extracts/updates persistent
+objectives via a lightweight LLM call (every 5 turns to limit cost).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +15,26 @@ from pathlib import Path
 import yaml
 
 from core.config import GrimConfig
+from core.context import format_messages_for_summary
+from core.objectives import (
+    OBJECTIVE_EXTRACTION_PROMPT,
+    Objective,
+    load_objectives,
+    save_objectives,
+)
 from core.state import FieldState, GrimState
 
 logger = logging.getLogger(__name__)
 
+# Extract objectives every N turns to limit LLM calls
+_OBJECTIVE_EXTRACT_INTERVAL = 5
+
 
 def make_evolve_node(config: GrimConfig):
     """Create an evolve node closure with config."""
+
+    # Track turn count for objective extraction interval
+    _turn_counter = {"count": 0}
 
     async def evolve_node(state: GrimState) -> dict:
         """Evolve field state based on session activity."""
@@ -62,6 +77,16 @@ def make_evolve_node(config: GrimConfig):
             start_snapshot["uncertainty"], end_snapshot["uncertainty"],
         )
 
+        # Objective extraction (periodic, not every turn)
+        _turn_counter["count"] += 1
+        messages = list(state.get("messages", []))
+
+        if (
+            len(messages) >= 4
+            and _turn_counter["count"] % _OBJECTIVE_EXTRACT_INTERVAL == 0
+        ):
+            await _extract_and_save_objectives(messages, state, config)
+
         return {"field_state": field_state}
 
     return evolve_node
@@ -97,3 +122,85 @@ def _save_snapshot(
 
     except Exception:
         logger.exception("Failed to save evolution snapshot")
+
+
+async def _extract_and_save_objectives(
+    messages: list, state: GrimState, config: GrimConfig
+) -> None:
+    """Extract objectives from conversation via LLM and save to disk."""
+    try:
+        from langchain_anthropic import ChatAnthropic
+        from langchain_core.messages import HumanMessage
+
+        llm = ChatAnthropic(
+            model=config.model,
+            temperature=0.0,
+            max_tokens=1024,
+            default_headers={"X-Caller-ID": "grim"},
+        )
+
+        current_objectives = state.get("objectives", [])
+        current_obj_text = "None" if not current_objectives else json.dumps(
+            [o.to_dict() if hasattr(o, "to_dict") else o for o in current_objectives],
+            indent=2,
+        )
+
+        # Use last 20 messages for extraction (not full history)
+        recent = messages[-20:]
+        conversation_text = format_messages_for_summary(recent)
+
+        prompt = OBJECTIVE_EXTRACTION_PROMPT.format(
+            current_objectives=current_obj_text,
+            conversation=conversation_text,
+            max_objectives=config.objectives_max_active,
+        )
+
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        raw_text = response.content.strip()
+
+        # Parse JSON from response (handle markdown code blocks)
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        parsed = json.loads(raw_text)
+        obj_list = parsed.get("objectives", [])
+
+        # Merge with existing objectives (preserve timestamps)
+        existing_map = {}
+        for o in current_objectives:
+            obj = o if isinstance(o, Objective) else Objective.from_dict(o)
+            existing_map[obj.id] = obj
+
+        now = datetime.now().isoformat()
+        updated: list[Objective] = []
+        for raw_obj in obj_list:
+            obj_id = raw_obj.get("id", "")
+            if not obj_id:
+                continue
+
+            if obj_id in existing_map:
+                existing = existing_map[obj_id]
+                existing.status = raw_obj.get("status", existing.status)
+                existing.updated = now
+                new_notes = raw_obj.get("notes", [])
+                if new_notes:
+                    existing.notes.extend(new_notes)
+                updated.append(existing)
+            else:
+                updated.append(Objective(
+                    id=obj_id,
+                    description=raw_obj.get("description", ""),
+                    status=raw_obj.get("status", "active"),
+                    created=now,
+                    updated=now,
+                    source_session=str(state.get("session_start", "")),
+                    notes=raw_obj.get("notes", []),
+                ))
+
+        save_objectives(updated, config.objectives_path)
+        logger.info("Evolve: extracted %d objectives", len(updated))
+
+    except json.JSONDecodeError:
+        logger.warning("Evolve: failed to parse objective extraction JSON")
+    except Exception:
+        logger.exception("Evolve: objective extraction failed")

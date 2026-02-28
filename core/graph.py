@@ -23,12 +23,13 @@ from core.agents.operator_agent import make_operator_agent
 from core.agents.research_agent import make_research_agent
 from core.config import GrimConfig
 from core.nodes.companion import make_companion_node
+from core.nodes.compress import make_compress_node
 from core.nodes.dispatch import make_dispatch_node
 from core.nodes.evolve import make_evolve_node
 from core.nodes.identity import make_identity_node
 from core.nodes.integrate import integrate_node
 from core.nodes.memory import make_memory_node
-from core.nodes.router import route_decision, router_node
+from core.nodes.router import make_router_node, route_decision
 from core.nodes.skill_match import make_skill_match_node
 from core.skills.loader import load_skills
 from core.skills.registry import SkillRegistry
@@ -65,8 +66,10 @@ def build_graph(
 
     # Create node closures with config/dependencies
     identity_fn = make_identity_node(config, mcp_session)
+    compress_fn = make_compress_node(config)
     memory_fn = make_memory_node(mcp_session)
     skill_match_fn = make_skill_match_node(skill_registry)
+    router_fn = make_router_node(config)
     companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
     evolve_fn = make_evolve_node(config)
 
@@ -91,17 +94,19 @@ def build_graph(
 
     # Add nodes
     graph.add_node("identity", identity_fn)
+    graph.add_node("compress", compress_fn)
     graph.add_node("memory", memory_fn)
     graph.add_node("skill_match", skill_match_fn)
-    graph.add_node("router", router_node)
+    graph.add_node("router", router_fn)
     graph.add_node("companion", companion_fn)
     graph.add_node("dispatch", dispatch_fn)
     graph.add_node("integrate", integrate_node)
     graph.add_node("evolve", evolve_fn)
 
-    # Wire edges: identity → memory → skill_match → router
+    # Wire edges: identity → compress → memory → skill_match → router
     graph.set_entry_point("identity")
-    graph.add_edge("identity", "memory")
+    graph.add_edge("identity", "compress")
+    graph.add_edge("compress", "memory")
     graph.add_edge("memory", "skill_match")
     graph.add_edge("skill_match", "router")
 
@@ -125,6 +130,6 @@ def build_graph(
         checkpointer = MemorySaver()
 
     compiled = graph.compile(checkpointer=checkpointer)
-    logger.info("GRIM state graph compiled — 8 nodes, 4 agents")
+    logger.info("GRIM state graph compiled — 9 nodes, 4 agents")
 
     return compiled

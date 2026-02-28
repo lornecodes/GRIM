@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 if TYPE_CHECKING:
+    from core.objectives import Objective
     from core.state import FDOSummary, FieldState, SkillContext
 
 
@@ -31,6 +32,7 @@ def build_system_prompt_parts(
     field_state: FieldState,
     knowledge_context: list[FDOSummary] | None = None,
     matched_skills: list[SkillContext] | None = None,
+    objectives: list[Objective] | None = None,
     identity_fdo: dict | None = None,
     personality_cache_path: Path | None = None,
     caller_id: str | None = None,
@@ -90,7 +92,18 @@ def build_system_prompt_parts(
 
     # --- Dynamic layers (change per turn) ---
 
-    # 4. Knowledge context
+    # 4a. Active objectives (persistent across sessions)
+    if objectives:
+        active = [o for o in objectives if o.status == "active"]
+        if active:
+            obj_lines = ["\n## Active Objectives\n"]
+            for obj in active:
+                obj_lines.append(f"- **{obj.id}**: {obj.description}")
+                if obj.notes:
+                    obj_lines.append(f"  Last note: {obj.notes[-1]}")
+            dynamic_sections.append("\n".join(obj_lines))
+
+    # 4b. Knowledge context
     if knowledge_context:
         ctx_lines = ["\n## Relevant Knowledge\n"]
         for fdo in knowledge_context[:10]:

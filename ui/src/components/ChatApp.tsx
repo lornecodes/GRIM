@@ -2,14 +2,16 @@
 
 import { AppHeader } from "./AppHeader";
 import { ChatPanel } from "./ChatPanel";
-import { Dashboard } from "./Dashboard";
+import { Sidebar } from "./Sidebar";
+import { PageContent } from "./PageContent";
 
 export function ChatApp() {
   return (
     <div className="h-screen flex flex-col bg-grim-bg font-mono">
       <AppHeader />
       <div className="flex-1 flex overflow-hidden">
-        <Dashboard />
+        <Sidebar />
+        <PageContent />
         <ChatPanel />
       </div>
     </div>

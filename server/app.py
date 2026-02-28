@@ -37,6 +37,40 @@ from core.config import GrimConfig, load_config
 from core.graph import build_graph
 
 # ---------------------------------------------------------------------------
+# Monkey-patch: langchain-anthropic 1.3.4 context_management bug
+# The Anthropic API returns context_management as a dict, but
+# langchain-anthropic calls .model_dump() on it expecting a Pydantic model.
+# Patch until upstream fix lands.
+# ---------------------------------------------------------------------------
+try:
+    import langchain_anthropic.chat_models as _lcam
+
+    _orig_make_chunk = _lcam._make_message_chunk_from_anthropic_event
+
+    def _patched_make_chunk(*args, **kwargs):
+        try:
+            return _orig_make_chunk(*args, **kwargs)
+        except AttributeError as e:
+            if "model_dump" in str(e):
+                # Retry with context_management stripped from the event
+                event = args[0] if args else kwargs.get("event")
+                if hasattr(event, "context_management"):
+                    cm = event.context_management
+                    # Replace with a dict that has model_dump
+                    if isinstance(cm, dict):
+                        class _DictWrapper(dict):
+                            def model_dump(self):
+                                return dict(self)
+                        event.context_management = _DictWrapper(cm)
+                        return _orig_make_chunk(*args, **kwargs)
+            raise
+
+    _lcam._make_message_chunk_from_anthropic_event = _patched_make_chunk
+    logging.getLogger("grim.server").info("Patched langchain-anthropic context_management bug")
+except Exception:
+    pass  # don't crash on patch failure
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
@@ -382,7 +416,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
                     # ── Node lifecycle ──
                     if kind == "on_chain_start" and name in (
-                        "identity", "memory", "skill_match", "router",
+                        "identity", "compress", "memory", "skill_match", "router",
                         "companion", "dispatch", "integrate", "evolve",
                     ):
                         if name not in seen_nodes:
@@ -450,6 +484,21 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                             has_tool_calls = hasattr(resp, "tool_calls") and resp.tool_calls
                             if has_tool_calls:
                                 info["tool_calls"] = [tc["name"] for tc in resp.tool_calls]
+                                # Tell the UI: the text just streamed was thinking
+                                # (companion will make tool calls, then answer).
+                                # UI should clear the bubble so the final answer
+                                # starts fresh.
+                                if _current_node == "companion":
+                                    thinking = _node_stream_text.get("companion", "")
+                                    await ws.send_json({
+                                        "type": "stream_clear",
+                                        "node": "companion",
+                                        "thinking": thinking.strip() if thinking else "",
+                                    })
+                                    # Reset companion stream text and full_response
+                                    # so the final answer starts fresh
+                                    _node_stream_text["companion"] = ""
+                                    full_response = ""
                             # Always capture the LAST non-tool-call AI response.
                             if not has_tool_calls and hasattr(resp, "content"):
                                 text = _extract_text(resp.content)
@@ -512,10 +561,20 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                 })
 
             except Exception as exc:
-                logger.exception("WS processing error")
+                import traceback
+                tb = traceback.format_exc()
+                logger.error("WS processing error: %s\n%s", exc, tb)
+                # Send error with enough detail to debug
+                exc_type = type(exc).__name__
+                exc_loc = ""
+                if exc.__traceback__:
+                    frame = exc.__traceback__
+                    while frame.tb_next:
+                        frame = frame.tb_next
+                    exc_loc = f" at {frame.tb_frame.f_code.co_filename}:{frame.tb_lineno}"
                 await ws.send_json({
                     "type": "error",
-                    "content": f"Something went wrong: {exc}",
+                    "content": f"Error ({exc_type}{exc_loc}): {exc}",
                 })
 
     except WebSocketDisconnect:

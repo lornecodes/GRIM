@@ -28,15 +28,22 @@ class BaseAgent:
 
     agent_name: str = "base"
 
-    def __init__(self, config: GrimConfig, tools: list[BaseTool]) -> None:
+    def __init__(
+        self,
+        config: GrimConfig,
+        tools: list[BaseTool],
+        model_override: str | None = None,
+    ) -> None:
         self.config = config
         self.tools = tools
+        model = model_override or config.model
         self.llm = ChatAnthropic(
-            model=config.model,
+            model=model,
             temperature=0.3,  # lower temp for agents — precision matters
             max_tokens=config.max_tokens,
             default_headers={"X-Caller-ID": "grim"},
         )
+        logger.info("%s agent: using model %s", self.agent_name, model)
         if tools:
             self.llm_with_tools = self.llm.bind_tools(tools)
         else:

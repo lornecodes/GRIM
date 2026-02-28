@@ -140,6 +140,7 @@ class GrimState(TypedDict, total=False):
     # Routing decision
     mode: Literal["companion", "delegate"]
     delegation_type: Optional[Literal["memory", "code", "research", "operate"]]
+    selected_model: Optional[str]  # model ID chosen by model router
 
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]
@@ -147,6 +148,13 @@ class GrimState(TypedDict, total=False):
     # Caller identity (resolved at session start)
     caller_id: str  # "peter", "ironclaw", etc. — defaults to "peter"
     caller_context: Optional[str]  # compiled caller profile for prompt injection
+
+    # Context management
+    context_summary: Optional[str]  # compressed summary of older messages
+    token_estimate: int  # estimated total tokens in messages
+
+    # Persistent objectives
+    objectives: list  # list[Objective] — active objectives loaded at session start
 
     # Evolution tracking
     session_topics: list[str]

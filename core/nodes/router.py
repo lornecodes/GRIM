@@ -5,6 +5,9 @@ to determine the appropriate path through the graph.
 
 Routing uses consumer declarations from skill manifests. If a matched skill
 has an execution consumer, it tells us which agent should handle it.
+
+Also runs the model router to select the optimal model tier (haiku/sonnet/opus)
+for the current turn.
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
+from core.config import GrimConfig
+from core.model_router import route_model
 from core.state import GrimState
 
 logger = logging.getLogger(__name__)
@@ -39,51 +44,99 @@ DELEGATION_KEYWORDS = {
 }
 
 
-async def router_node(state: GrimState) -> dict:
-    """Decide: companion mode (think) or delegation mode (do).
+def make_router_node(config: GrimConfig):
+    """Create a router node closure with config for model routing."""
 
-    Priority:
-    1. Check matched skills for consumer-declared delegation targets
-    2. Fallback to keyword matching
-    3. Default: companion mode
-    """
-    matched_skills = state.get("matched_skills", [])
-    messages = state.get("messages", [])
+    async def router_node(state: GrimState) -> dict:
+        """Decide: companion mode (think) or delegation mode (do).
 
-    if not messages:
-        return {"mode": "companion", "delegation_type": None}
+        Also selects the optimal model tier via the model router.
 
-    last_msg = messages[-1]
-    message = (last_msg.content if hasattr(last_msg, "content") else str(last_msg)).lower()
+        Priority:
+        1. Check matched skills for consumer-declared delegation targets
+        2. Fallback to keyword matching
+        3. Default: companion mode
+        """
+        matched_skills = state.get("matched_skills", [])
+        messages = state.get("messages", [])
 
-    # 1. Check matched skills for delegation targets (consumer-aware)
-    #    SkillContext doesn't carry the full Skill object, but we stored
-    #    the skill_protocols dict. If a skill has write permissions or
-    #    is a known action skill, delegate.
-    for skill_ctx in matched_skills:
-        delegation = _skill_ctx_to_delegation(skill_ctx)
-        if delegation:
-            logger.info(
-                "Router: delegating to %s (skill %s matched)",
-                delegation,
-                skill_ctx.name,
-            )
-            return {"mode": "delegate", "delegation_type": delegation}
+        if not messages:
+            return {"mode": "companion", "delegation_type": None, "selected_model": None}
 
-    # 2. Keyword fallback
-    for delegation_type, keywords in DELEGATION_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in message:
+        last_msg = messages[-1]
+        raw_message = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+        message = raw_message.lower()
+
+        # ── Mode routing (companion vs delegate) ──
+        result: dict = {}
+
+        # 1. Check matched skills for delegation targets (consumer-aware)
+        delegation_found = False
+        for skill_ctx in matched_skills:
+            delegation = _skill_ctx_to_delegation(skill_ctx)
+            if delegation:
                 logger.info(
-                    "Router: delegating to %s (keyword '%s')",
-                    delegation_type,
-                    keyword,
+                    "Router: delegating to %s (skill %s matched)",
+                    delegation,
+                    skill_ctx.name,
                 )
-                return {"mode": "delegate", "delegation_type": delegation_type}
+                result = {"mode": "delegate", "delegation_type": delegation}
+                delegation_found = True
+                break
 
-    # 3. Default: companion mode
-    logger.info("Router: companion mode")
-    return {"mode": "companion", "delegation_type": None}
+        if not delegation_found:
+            # 2. Keyword fallback
+            for delegation_type, keywords in DELEGATION_KEYWORDS.items():
+                for keyword in keywords:
+                    if keyword in message:
+                        logger.info(
+                            "Router: delegating to %s (keyword '%s')",
+                            delegation_type,
+                            keyword,
+                        )
+                        result = {"mode": "delegate", "delegation_type": delegation_type}
+                        delegation_found = True
+                        break
+                if delegation_found:
+                    break
+
+        if not delegation_found:
+            # 3. Default: companion mode
+            logger.info("Router: companion mode")
+            result = {"mode": "companion", "delegation_type": None}
+
+        # ── Model routing (haiku / sonnet / opus) ──
+        has_write_skill = any(
+            any("write" in p for p in sc.permissions)
+            for sc in matched_skills
+        )
+        knowledge_context = state.get("knowledge_context", [])
+
+        model_decision = await route_model(
+            raw_message if isinstance(raw_message, str) else str(raw_message),
+            enabled=config.routing_enabled,
+            default_tier=config.routing_default_tier,
+            classifier_enabled=config.routing_classifier_enabled,
+            confidence_threshold=config.routing_confidence_threshold,
+            has_objectives=bool(state.get("objectives")),
+            has_compressed_context=bool(state.get("context_summary")),
+            matched_write_skill=has_write_skill,
+            fdo_count=len(knowledge_context),
+        )
+
+        result["selected_model"] = model_decision.model
+        logger.info(
+            "Router: model=%s tier=%s (stage %d, confidence %.2f — %s)",
+            model_decision.model,
+            model_decision.tier,
+            model_decision.stage,
+            model_decision.confidence,
+            model_decision.reason,
+        )
+
+        return result
+
+    return router_node
 
 
 def _skill_ctx_to_delegation(skill_ctx) -> str | None:

@@ -41,6 +41,12 @@ export interface ErrorEvent {
   content: string;
 }
 
+export interface StreamClearEvent {
+  type: "stream_clear";
+  node: string;
+  thinking?: string;  // the intermediate text that was cleared
+}
+
 // ── UI command types (future GRIM UI control) ──
 
 export type UICommandType =
@@ -55,7 +61,7 @@ export interface UICommand {
   payload?: Record<string, unknown>;
 }
 
-export type ServerEvent = TraceEvent | StreamEvent | ResponseEvent | ErrorEvent | UICommand;
+export type ServerEvent = TraceEvent | StreamEvent | StreamClearEvent | ResponseEvent | ErrorEvent | UICommand;
 
 // ── Chat state types ──
 
@@ -65,6 +71,7 @@ export interface ChatMessage {
   content: string;
   node?: string;    // graph node name (for step bubbles)
   isStep?: boolean;  // true = per-node step bubble
+  thinkingText?: string;  // intermediate text before tool calls (e.g. "Let me look into that")
   meta?: ResponseMeta;
   traces: TraceEvent[];
   streaming?: boolean;
@@ -116,10 +123,3 @@ export interface TokenRecentEntry {
   total_tokens: number;
 }
 
-// ── Widget registry types ──
-
-export interface WidgetDef {
-  id: string;
-  label: string;
-  component: React.ComponentType;
-}

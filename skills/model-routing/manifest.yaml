@@ -1,0 +1,48 @@
+name: model-routing
+version: "1.0"
+description: >
+  Multi-tier model routing protocol. Routes requests to the optimal
+  Claude model tier (haiku/sonnet/opus) based on task complexity.
+  Adapted from OpenClaw model-router, replacing local model with Haiku.
+  Portable — designed for reuse in IronClaw.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+deployment:
+  auto_load: false        # routing is handled by core, not loaded per-turn
+  apply_to: "**"
+
+permissions: []           # read-only — routing doesn't write anything
+
+inputs:
+  message:
+    type: string
+    required: true
+    description: The user message to route
+  context_signals:
+    type: object
+    required: false
+    description: >
+      GRIM-specific context signals (objectives, compression state,
+      matched skills, FDO count) that influence tier selection
+
+outputs:
+  tier: string            # "haiku" | "sonnet" | "opus"
+  model: string           # full model ID
+  reason: string          # human-readable explanation
+  confidence: float       # 0-1
+  stage: integer          # which routing stage decided (1-4)
+
+triggers:
+  - implicit: "Every user message is routed before model invocation"
+
+consumers:
+  grim:
+    role: execution
+    description: Router node calls route_model() with GRIM context signals
+    reads: [protocol.md, inputs, outputs]
+  ironclaw:
+    role: execution
+    description: IronClaw engine integrates via core/model_router.py
+    reads: [protocol.md, inputs, outputs]

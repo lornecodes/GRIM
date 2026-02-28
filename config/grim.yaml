@@ -105,6 +105,22 @@ providers:
     max_tokens: 8192
     temperature: 0.7
 
+# Model routing — multi-tier model selection (haiku/sonnet/opus)
+routing:
+  enabled: true
+  default_tier: "sonnet"
+  classifier_enabled: false   # enable after calibration
+  confidence_threshold: 0.6
+
+# Context window management — compress old messages when approaching limit
+context_management:
+  max_tokens: 160000        # trigger compression above this (~200K model limit)
+  keep_recent: 12           # keep last N messages (6 turns) intact
+
+# Persistent objectives — survive compression and session boundaries
+objectives:
+  max_active: 10
+
 skills:
   directory: "./skills"
   require_signatures: false       # disable for development

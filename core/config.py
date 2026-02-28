@@ -49,6 +49,20 @@ class GrimConfig:
     evolution_dir: Path = field(default_factory=lambda: Path("local/evolution"))
     evolution_frequency: str = "per_session"
 
+    # Context window management
+    context_max_tokens: int = 160_000  # trigger compression above this
+    context_keep_recent: int = 12  # keep last N messages (6 turns) intact
+
+    # Persistent objectives
+    objectives_path: Path = field(default_factory=lambda: Path("local/objectives"))
+    objectives_max_active: int = 10
+
+    # Model routing
+    routing_enabled: bool = True
+    routing_default_tier: str = "sonnet"
+    routing_classifier_enabled: bool = False  # enable after calibration
+    routing_confidence_threshold: float = 0.6
+
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
 
@@ -112,6 +126,7 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.local_dir = _resolve(cfg.local_dir, grim_root)
     cfg.checkpoint_path = _resolve(cfg.checkpoint_path, grim_root)
     cfg.evolution_dir = _resolve(cfg.evolution_dir, grim_root)
+    cfg.objectives_path = _resolve(cfg.objectives_path, grim_root)
 
     # Redis URL
     redis_override = os.getenv("GRIM_REDIS_URL", os.getenv("KRONOS_REDIS_URL", ""))
@@ -172,6 +187,31 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
     if "snapshot_dir" in evolution:
         cfg.evolution_dir = Path(evolution["snapshot_dir"])
     cfg.evolution_frequency = evolution.get("snapshot_frequency", cfg.evolution_frequency)
+
+    # Routing
+    routing = raw.get("routing", {})
+    if "enabled" in routing:
+        cfg.routing_enabled = routing["enabled"]
+    if "default_tier" in routing:
+        cfg.routing_default_tier = routing["default_tier"]
+    if "classifier_enabled" in routing:
+        cfg.routing_classifier_enabled = routing["classifier_enabled"]
+    if "confidence_threshold" in routing:
+        cfg.routing_confidence_threshold = routing["confidence_threshold"]
+
+    # Context management
+    ctx = raw.get("context_management", {})
+    if "max_tokens" in ctx:
+        cfg.context_max_tokens = ctx["max_tokens"]
+    if "keep_recent" in ctx:
+        cfg.context_keep_recent = ctx["keep_recent"]
+
+    # Objectives
+    objectives = raw.get("objectives", {})
+    if "path" in objectives:
+        cfg.objectives_path = Path(objectives["path"])
+    if "max_active" in objectives:
+        cfg.objectives_max_active = objectives["max_active"]
 
 
 def _resolve(p: Path, root: Path) -> Path:

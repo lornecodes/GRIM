@@ -7,6 +7,7 @@ dependencies = [
     "langgraph>=0.2",
     "langgraph-checkpoint-sqlite>=3.0",
     "langchain-anthropic>=0.3",
+    "anthropic>=0.39,<0.84",  # 0.84 has model_dump compat issue with langchain-anthropic
     "langchain-core>=0.3",
     "langchain-mcp-adapters>=0.1",
     "mcp>=1.0",

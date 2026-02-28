@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from core.config import GrimConfig
+from core.objectives import load_objectives
 from core.personality.cache import compile_personality_cache, is_cache_stale
 from core.personality.prompt_builder import build_system_prompt, load_field_state
 from core.personality.user_cache import (
@@ -80,6 +81,12 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             caller_context=caller_context,
         )
 
+        # Load persistent objectives
+        objectives = load_objectives(config.objectives_path)
+        if objectives:
+            active = [o for o in objectives if o.status == "active"]
+            logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
+
         logger.info(
             "Identity loaded — mode: %s, coherence: %.2f",
             field_state.expression_mode(),
@@ -91,6 +98,7 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             "field_state": field_state,
             "caller_id": caller_id,
             "caller_context": caller_context,
+            "objectives": objectives,
         }
 
     return identity_node

@@ -31,12 +31,16 @@ type UICommandHandler = (cmd: UICommand) => void;
 
 interface UISlice {
   chatPanelOpen: boolean;
-  activeDashboardWidget: string;
+  activePage: string;
+  sidebarCollapsed: boolean;
+  activeDashboardWidget: string;  // legacy alias — use activePage
   _commandHandlers: Set<UICommandHandler>;
   // Actions
   setChatPanelOpen: (v: boolean) => void;
   toggleChatPanel: () => void;
-  setActiveDashboardWidget: (name: string) => void;
+  setActivePage: (id: string) => void;
+  toggleSidebar: () => void;
+  setActiveDashboardWidget: (name: string) => void;  // legacy alias
   subscribeUICommand: (handler: UICommandHandler) => () => void;
   dispatchUICommand: (cmd: UICommand) => void;
 }
@@ -88,13 +92,16 @@ export const useGrimStore = create<GrimStore>()(
 
       // ── UI state ──
       chatPanelOpen: true,
-      activeDashboardWidget: "tokens",
+      activePage: "dashboard",
+      sidebarCollapsed: false,
+      activeDashboardWidget: "tokens",  // legacy alias
       _commandHandlers: new Set(),
 
       setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
       toggleChatPanel: () => set((s) => ({ chatPanelOpen: !s.chatPanelOpen })),
-      setActiveDashboardWidget: (activeDashboardWidget) =>
-        set({ activeDashboardWidget }),
+      setActivePage: (activePage) => set({ activePage }),
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      setActiveDashboardWidget: (id) => set({ activeDashboardWidget: id, activePage: id }),
 
       subscribeUICommand: (handler) => {
         get()._commandHandlers.add(handler);
@@ -113,7 +120,7 @@ export const useGrimStore = create<GrimStore>()(
             break;
           case "navigate_dashboard":
             if (cmd.payload?.widget && typeof cmd.payload.widget === "string") {
-              set({ activeDashboardWidget: cmd.payload.widget });
+              set({ activePage: cmd.payload.widget, activeDashboardWidget: cmd.payload.widget });
             }
             break;
         }

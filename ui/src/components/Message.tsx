@@ -22,7 +22,7 @@ const NODE_COLORS: Record<string, string> = {
   evolve: "#06b6d4",
 };
 
-function ThinkingIndicator() {
+function ThinkingIndicator({ label = "thinking" }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 py-1">
       <div className="flex gap-1">
@@ -34,7 +34,7 @@ function ThinkingIndicator() {
           />
         ))}
       </div>
-      <span className="text-xs text-grim-text-dim">thinking</span>
+      <span className="text-xs text-grim-text-dim">{label}</span>
     </div>
   );
 }
@@ -94,6 +94,8 @@ export function Message({ message }: MessageProps) {
         >
           {isUser ? (
             <div className="whitespace-pre-wrap">{message.content}</div>
+          ) : isEmpty && isStreaming && message.thinkingText ? (
+            <ThinkingIndicator label="gathering knowledge" />
           ) : isEmpty && isStreaming ? (
             <ThinkingIndicator />
           ) : (

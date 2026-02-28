@@ -1115,7 +1115,9 @@ class TestSkillMatchNode(unittest.TestCase):
 
 class TestRouterNode(unittest.TestCase):
     def test_default_companion_mode(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({
             "messages": [make_human_message("tell me about physics")],
             "matched_skills": [],
@@ -1124,13 +1126,17 @@ class TestRouterNode(unittest.TestCase):
         self.assertIsNone(result["delegation_type"])
 
     def test_no_messages(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({"messages": []}))
         self.assertEqual(result["mode"], "companion")
 
     def test_skill_based_delegation(self):
         """Router delegates when a matched skill has write permissions."""
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         skill = SkillContext(
             name="kronos-capture", version="1.0",
             description="Capture to vault",
@@ -1144,7 +1150,9 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "memory")
 
     def test_keyword_delegation_memory(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({
             "messages": [make_human_message("capture this idea about topology")],
             "matched_skills": [],
@@ -1153,7 +1161,9 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "memory")
 
     def test_keyword_delegation_code(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({
             "messages": [make_human_message("write code for a Fibonacci generator")],
             "matched_skills": [],
@@ -1162,7 +1172,9 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "code")
 
     def test_keyword_delegation_research(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({
             "messages": [make_human_message("analyze this paper on quantum mechanics")],
             "matched_skills": [],
@@ -1171,7 +1183,9 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "research")
 
     def test_keyword_delegation_operate(self):
-        from core.nodes.router import router_node
+        from core.config import GrimConfig
+        from core.nodes.router import make_router_node
+        router_node = make_router_node(GrimConfig())
         result = run_async(router_node({
             "messages": [make_human_message("commit and push these changes")],
             "matched_skills": [],
