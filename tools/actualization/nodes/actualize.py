@@ -39,12 +39,12 @@ def make_fdo_id(source_id: str, chunk_path: str) -> str:
         ("myrepo", "src/main.py")       → "myrepo-src-main"
         ("myrepo", "docs/meta.yaml")    → "myrepo-docs-meta"
         ("myrepo", "meta.yaml")         → "myrepo-meta"
-        ("myrepo", ".cip/core.yaml")    → "myrepo-cip-core"
+        ("myrepo", ".spec/spec.md")     → "myrepo-spec-spec"
     """
     p = Path(chunk_path)
     # Include parent dir(s) in the slug to disambiguate
     parts = list(p.parts)
-    # Strip leading dots from dir names (e.g. ".cip" → "cip")
+    # Strip leading dots from dir names (e.g. ".spec" → "spec")
     parts = [part.lstrip('.') for part in parts]
     # Remove extension from filename
     parts[-1] = p.stem.lstrip('.')

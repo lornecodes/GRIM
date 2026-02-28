@@ -342,7 +342,7 @@ Before writing the file, verify:
 
 ### Tools Domain
 
-**Key terms**: CIP, cip-core, actualization, pipeline, vault
+**Key terms**: actualization, pipeline, vault, MCP, skills
 **Focus on**: What it does, how to use it, what it depends on
 **Confidence**: Based on test coverage and usage
 

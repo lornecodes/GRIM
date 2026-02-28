@@ -11,6 +11,7 @@ Tools:
     kronos_create       — Create a new FDO
     kronos_update       — Update fields on an existing FDO
     kronos_deep_dive    — Gather source material paths for a concept
+    kronos_navigate     — Read directory metadata (meta.yaml) for repo navigation
 
   Skills:
     kronos_skills       — List all available GRIM skills
@@ -26,7 +27,10 @@ import os
 import time
 from collections.abc import Sequence
 from datetime import date
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -335,6 +339,29 @@ TOOLS: list[Tool] = [
             "required": ["name"],
         },
     ),
+    # ── Navigation tools ──
+    Tool(
+        name="kronos_navigate",
+        description=(
+            "Read directory metadata (meta.yaml) from any repo path. Returns description, "
+            "semantic scope, files, and child directories. Use this to understand what a "
+            "directory contains before diving into its files. Falls back to a basic file "
+            "listing if no meta.yaml exists."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Relative path from workspace root "
+                        "(e.g., 'dawn-field-theory/foundational/experiments/milestone1')"
+                    ),
+                },
+            },
+            "required": ["path"],
+        },
+    ),
 ]
 
 
@@ -387,20 +414,36 @@ def handle_search(args: dict) -> str:
         channels.append("semantic")
     ranked = search_engine.search(query, max_results=max_results, channels=channels)
     if not ranked:
-        return _json({"query": query, "count": 0, "results": []})
+        return _json({"query": query, "count": 0, "results": [], "directories": []})
     results = []
+    directories = []
     for fused in ranked:
-        fdo = vault.get(fused.fdo_id)
-        if fdo:
-            entry = _fdo_summary(fdo)
-            entry["score"] = round(fused.rrf_score, 4)
-            entry["channels"] = {k: round(v, 4) for k, v in fused.channel_scores.items()}
-            results.append(entry)
+        if fused.fdo_id.startswith("meta::"):
+            meta = search_engine.get_meta(fused.fdo_id)
+            if meta:
+                directories.append({
+                    "type": "directory",
+                    "repo": meta["repo"],
+                    "path": meta["path"],
+                    "description": meta["description"],
+                    "semantic_scope": meta.get("semantic_scope", []),
+                    "status": meta.get("status", ""),
+                    "score": round(fused.rrf_score, 4),
+                })
+        else:
+            fdo = vault.get(fused.fdo_id)
+            if fdo:
+                entry = _fdo_summary(fdo)
+                entry["score"] = round(fused.rrf_score, 4)
+                entry["channels"] = {k: round(v, 4) for k, v in fused.channel_scores.items()}
+                results.append(entry)
     return _json({
         "query": query,
         "count": len(results),
+        "directories_count": len(directories),
         "semantic_enabled": use_semantic,
         "results": results,
+        "directories": directories,
     })
 
 
@@ -543,18 +586,32 @@ def handle_deep_dive(args: dict) -> str:
 
     collect(root_fdo.id, 0)
 
-    # Group all paths by repo
+    # Group all paths by repo, enriching directory entries with meta.yaml
+    workspace = Path(vault_path).parent
     by_repo: dict[str, list[dict]] = {}
     for entry in fdo_sources:
         for sp in entry["source_paths"]:
             repo = sp.get("repo", "unknown")
             if repo not in by_repo:
                 by_repo[repo] = []
-            by_repo[repo].append({
+            path_entry: dict[str, Any] = {
                 "path": sp["path"],
                 "type": sp["type"],
                 "from_fdo": entry["fdo_id"],
-            })
+            }
+            # Enrich directory source_paths with meta.yaml context
+            if sp.get("type") in ("experiment", "module"):
+                meta_path = workspace / repo / sp["path"] / "meta.yaml"
+                if meta_path.is_file():
+                    try:
+                        meta = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+                        path_entry["meta"] = {
+                            k: meta[k] for k in ("description", "status", "semantic_scope")
+                            if k in meta
+                        }
+                    except Exception:
+                        pass
+            by_repo[repo].append(path_entry)
 
     return _json({
         "root": root_fdo.id,
@@ -641,6 +698,67 @@ def handle_tags(args: dict) -> str:
     })
 
 
+_NAVIGATE_SKIP = {
+    "__pycache__", ".venv", "venv", "node_modules", ".git",
+    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+    ".egg-info",
+}
+
+
+def handle_navigate(args: dict) -> str:
+    """Read meta.yaml from a directory, or fall back to a file listing."""
+    rel_path = args["path"].strip().strip("/\\")
+
+    # Workspace root = vault parent (kronos-vault sits inside the workspace)
+    workspace = Path(vault_path).parent
+    target = workspace / rel_path
+
+    if not target.exists():
+        return _json({"error": f"Path not found: {rel_path}"})
+    if not target.is_dir():
+        return _json({"error": f"Not a directory: {rel_path}", "hint": "kronos_navigate works on directories"})
+
+    result: dict[str, Any] = {"path": rel_path}
+
+    meta_file = target / "meta.yaml"
+    if meta_file.exists():
+        try:
+            meta = yaml.safe_load(meta_file.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            meta = {}
+            result["meta_parse_error"] = str(e)
+
+        result["has_meta"] = True
+        for key in ("description", "semantic_scope", "semantic_tags", "status",
+                     "key_results", "files", "child_directories", "schema_version"):
+            if key in meta:
+                result[key] = meta[key]
+    else:
+        result["has_meta"] = False
+
+    # Always include a directory listing (filtered)
+    try:
+        entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        dirs = []
+        files = []
+        for entry in entries:
+            name = entry.name
+            if name.startswith(".") and name not in (".spec",):
+                continue
+            if name in _NAVIGATE_SKIP:
+                continue
+            if entry.is_dir():
+                has_child_meta = (entry / "meta.yaml").exists()
+                dirs.append({"name": name, "has_meta": has_child_meta})
+            else:
+                files.append(name)
+        result["listing"] = {"directories": dirs, "files": files}
+    except PermissionError:
+        result["listing"] = {"error": "Permission denied"}
+
+    return _json(result)
+
+
 HANDLERS = {
     "kronos_search": handle_search,
     "kronos_get": handle_get,
@@ -653,6 +771,7 @@ HANDLERS = {
     "kronos_deep_dive": handle_deep_dive,
     "kronos_skills": handle_skills,
     "kronos_skill_load": handle_skill_load,
+    "kronos_navigate": handle_navigate,
 }
 
 

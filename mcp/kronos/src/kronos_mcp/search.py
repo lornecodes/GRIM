@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+import yaml
+
 if TYPE_CHECKING:
     from .vault import FDO, VaultEngine
 
@@ -793,10 +795,20 @@ class SearchEngine:
         # Build graph
         self._graph.build(self._vault.index)
 
+        # Index meta.yaml entries from workspace repos
+        self._meta_entries: dict[str, dict[str, Any]] = {}
+        try:
+            meta_entries = self._scan_repo_metadata()
+            for entry in meta_entries:
+                self._meta_entries[entry["meta_id"]] = entry
+                self._index_meta_entry(entry)
+        except Exception as e:
+            logger.warning(f"meta.yaml scanning failed (search still works): {e}")
+
         elapsed = time.time() - t0
         logger.info(
             f"Index built in {elapsed:.1f}s — "
-            f"bm25={len(self._bm25._docs)}, "
+            f"bm25={len(self._bm25._docs)} (incl {len(self._meta_entries)} meta), "
             f"graph={len(self._graph._adjacency)}"
         )
 
@@ -827,6 +839,101 @@ class SearchEngine:
         if summary:
             parts.append(summary)
         return " | ".join(parts)
+
+    # Directories to skip when scanning for meta.yaml
+    _META_SKIP = {
+        "__pycache__", ".venv", "venv", "node_modules", ".git", ".tox",
+        ".mypy_cache", ".pytest_cache", "dist", "build", ".egg-info",
+        ".claude", ".obsidian", ".kronos_cache", "legacy", "external_repos",
+    }
+
+    def _scan_repo_metadata(self) -> list[dict[str, Any]]:
+        """Scan workspace repos for meta.yaml files worth indexing.
+
+        Returns dicts with keys: meta_id, repo, path, description, semantic_scope,
+        semantic_tags, status, key_results.
+
+        Only scans depth 0-3 to avoid auto-generated __pycache__ clutter.
+        """
+        workspace = self._vault.vault_path.parent
+        repos_yaml = workspace / "repos.yaml"
+        if not repos_yaml.exists():
+            return []
+
+        try:
+            manifest = yaml.safe_load(repos_yaml.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return []
+
+        repo_names = [
+            r["path"] for r in manifest.get("repos", [])
+            if r.get("tier") in ("core", "support")
+        ]
+
+        entries: list[dict[str, Any]] = []
+        for repo_name in repo_names:
+            repo_root = workspace / repo_name
+            if not repo_root.is_dir():
+                continue
+            self._walk_meta_yaml(repo_root, repo_name, "", 0, 3, entries)
+
+        logger.info(f"Scanned {len(entries)} meta.yaml entries from {len(repo_names)} repos")
+        return entries
+
+    def _walk_meta_yaml(
+        self, directory: Path, repo: str, rel_path: str,
+        depth: int, max_depth: int, entries: list[dict[str, Any]],
+    ):
+        """Recursively walk directories for meta.yaml, respecting skip list and max depth."""
+        meta_file = directory / "meta.yaml"
+        if meta_file.is_file():
+            try:
+                meta = yaml.safe_load(meta_file.read_text(encoding="utf-8")) or {}
+            except Exception:
+                meta = {}
+            desc = meta.get("description", "")
+            if desc:  # Only index if there's something meaningful
+                meta_id = f"meta::{repo}/{rel_path}" if rel_path else f"meta::{repo}"
+                entries.append({
+                    "meta_id": meta_id,
+                    "repo": repo,
+                    "path": rel_path,
+                    "description": desc,
+                    "semantic_scope": meta.get("semantic_scope", []),
+                    "semantic_tags": meta.get("semantic_tags", []),
+                    "status": meta.get("status", ""),
+                    "key_results": meta.get("key_results", ""),
+                })
+
+        if depth >= max_depth:
+            return
+
+        try:
+            for child in sorted(directory.iterdir()):
+                if not child.is_dir():
+                    continue
+                name = child.name
+                if name.startswith(".") and name not in (".spec",):
+                    continue
+                if name in self._META_SKIP:
+                    continue
+                child_rel = f"{rel_path}/{name}" if rel_path else name
+                self._walk_meta_yaml(child, repo, child_rel, depth + 1, max_depth, entries)
+        except PermissionError:
+            pass
+
+    def _index_meta_entry(self, entry: dict[str, Any]):
+        """Index a single meta.yaml entry into BM25."""
+        meta_id = entry["meta_id"]
+        tags_text = " ".join(entry.get("semantic_tags", []) + entry.get("semantic_scope", []))
+        fields = {
+            "id": entry["repo"] + " " + entry["path"].replace("/", " "),
+            "title": entry.get("description", "")[:200],
+            "tags": tags_text,
+            "summary": entry.get("description", ""),
+            "body": entry.get("key_results", ""),
+        }
+        self._bm25.add(meta_id, fields)
 
     def search(
         self,
@@ -955,10 +1062,16 @@ class SearchEngine:
             for fid, s in ranked[:max_results]
         ]
 
+    def get_meta(self, meta_id: str) -> dict[str, Any] | None:
+        """Look up a meta.yaml entry by its ID (e.g. 'meta::dawn-field-theory/foundational')."""
+        return getattr(self, '_meta_entries', {}).get(meta_id)
+
     def stats(self) -> dict[str, Any]:
         """Return index statistics."""
+        meta_count = len(getattr(self, '_meta_entries', {}))
         return {
             "bm25_docs": len(self._bm25._docs),
+            "meta_entries": meta_count,
             "semantic_indexed": self._semantic.indexed_count,
             "semantic_available": self._semantic.available,
             "semantic_model": self._semantic._model_name,

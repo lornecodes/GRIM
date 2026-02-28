@@ -14,7 +14,6 @@ The following paths must NEVER be modified without explicit user permission:
 - `*.key`, `*.pem` — cryptographic material
 - `.github/workflows/` — CI/CD pipelines
 - `.gitlab-ci.yml` — CI/CD config
-- `.cip/` — CIP configuration
 - `*lock.json`, `*lock.yaml` — dependency locks
 - `.git/` — git internals
 

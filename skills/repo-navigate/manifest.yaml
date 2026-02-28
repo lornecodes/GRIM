@@ -1,0 +1,53 @@
+name: repo-navigate
+version: 1.0.0
+description: >
+  Navigate repository directory structure using meta.yaml metadata.
+  Uses kronos_navigate MCP tool to read directory context, then suggests
+  related FDOs and deeper exploration paths. Replaces CIP navigation.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - filesystem:read
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: >
+      Relative path from workspace root (e.g. "dawn-field-theory/foundational/experiments/milestone1")
+  repo:
+    type: string
+    required: false
+    description: >
+      Repository name. If omitted, inferred from the first segment of path.
+
+outputs:
+  directory_context: object
+  navigation_suggestions: list
+  related_fdos: list
+
+phases:
+  1_navigate: "Read directory metadata via kronos_navigate"
+  2_contextualize: "If deeper context needed, read specific files"
+  3_connect: "Find related FDOs via kronos_search using directory's semantic scope"
+
+quality_gates:
+  navigation:
+    - "Never guess file contents — use kronos_navigate or read the file"
+    - "Use meta.yaml description when available, not inference"
+    - "Suggest child directories that have their own meta.yaml"
+  context:
+    - "Connect directory context to vault FDOs when semantic_scope is available"
+    - "Distinguish between experiment directories and module/library directories"
+
+consumers:
+  grim:
+    role: delegation
+    description: Routes navigation requests, detects "what's in this directory" intent
+    reads: [triggers, phases]
+  agent:
+    role: execution
+    description: Calls kronos_navigate, reads files if needed, connects to vault
+    reads: [protocol.md, inputs, outputs, quality_gates]

@@ -53,7 +53,7 @@ safety:
   - "Never modify files outside declared scope"
   - "Never delete without confirmation for non-temp files"
   - "Respect .gitignore and protected paths"
-  - "Protected: .env*, *.key, *.pem, .github/workflows/, .cip/"
+  - "Protected: .env*, *.key, *.pem, .github/workflows/"
   - "Always use absolute paths internally, relative for display"
   - "Check file exists before modifying"
 
