@@ -26,3 +26,7 @@
 - Never fabricate file contents — always read or navigate first
 - Use meta.yaml descriptions as authoritative context for the directory
 - When navigating deep hierarchies, summarize the path from root to current directory
+
+## Vault Sync
+
+If navigation reveals that directory structure has changed (moved files, renamed directories), flag this for a `vault-sync` run to update FDO `source_paths` and references.

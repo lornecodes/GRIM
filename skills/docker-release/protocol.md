@@ -152,6 +152,16 @@ cd ui && npm run dev    # Next.js on :3000, proxies API to :8080
 4. **Health check** — verify `/health` endpoint responds after deploy
 5. **Production limits** — prod override caps memory at 4GB to prevent runaway
 
+## Vault Sync
+
+After deployment changes, check if vault FDOs need updating:
+1. Did the Docker setup, ports, or architecture change? Update [[proj-grim]] or [[grim-architecture]]
+2. Did test counts change? Update `confidence_basis` on affected FDOs
+3. Were new services added? Update the deployment architecture in relevant FDOs
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

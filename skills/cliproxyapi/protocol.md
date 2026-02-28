@@ -159,6 +159,15 @@ new-service:
 3. **Never log or display auth token contents** — only check file existence
 4. **Recreate, don't restart** — env var changes need `docker compose up -d`, not `restart`
 
+## Vault Sync
+
+After infrastructure or proxy configuration changes, check if vault FDOs need updating:
+1. Did the proxy setup, ports, or architecture change? Update [[proj-grim]] or deployment FDOs
+2. If new services were connected, update the architecture in relevant FDOs
+3. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

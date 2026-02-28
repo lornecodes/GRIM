@@ -68,6 +68,10 @@ For long-running commands (servers, watchers):
 4. Check status on demand
 5. Kill cleanly on shutdown (SIGTERM → wait → SIGKILL)
 
+## Vault Sync
+
+If shell operations resulted in meaningful changes (builds, deployments, infrastructure), consider running the `vault-sync` skill to keep FDOs current.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

@@ -129,3 +129,7 @@ If quality gates fail, list the specific experiments that need attention.
 - The `legacy/` directory is excluded — those are archived pre-structured simulations
 - Empty directories (created as placeholders) should NOT be penalized — only check for directories when there's content that belongs in them
 - This skill is read-only — it reports issues but does not fix them
+
+## Vault Sync
+
+If validation findings led to fixes or structural changes, run the `vault-sync` skill to update affected FDOs (especially project trackers and experiment-related FDOs).

@@ -157,3 +157,13 @@ Name it `exp_01_{name_abbreviated}.py`.
 - The meta.yaml `status` defaults to `active` — the experiment is being worked on.
 - Script naming follows `exp_NN_description.py` convention.
 - If the user provides additional context about the experiment, incorporate it into the README approach section.
+
+## Vault Sync
+
+After scaffolding a new experiment, check if vault FDOs need updating:
+1. Does the parent project FDO (`proj-*`) need a new milestone or experiment reference?
+2. Do related theory FDOs need `source_paths` entries pointing to the new experiment?
+3. If this experiment is part of a milestone, update the milestone status in the project FDO
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.

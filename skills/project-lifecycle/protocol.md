@@ -134,6 +134,16 @@ Always include concrete code pointers:
 | Design | `design-{feature}` | `design-grim-ui-nextjs`, `design-claw-sandboxing` |
 | ADR | `adr-{decision}` | `adr-cliproxyapi-integration`, `adr-langgraph-over-ironclaw` |
 
+## Vault Sync
+
+After project lifecycle changes, verify related FDOs are current:
+1. Did the project status change? Update the `proj-*` FDO
+2. Did architecture or features change? Update architecture and skill FDOs
+3. Were new ADRs or designs created? Add bidirectional links to related FDOs
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

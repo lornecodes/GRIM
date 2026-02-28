@@ -360,6 +360,16 @@ Before writing the file, verify:
 | Expanding acronyms incorrectly | Use the source's own terminology. Don't guess what CIP stands for |
 | Mixing established and speculative | Separate clearly in text AND in confidence |
 
+## Vault Sync
+
+After ingesting new FDOs, check if existing vault FDOs need updating:
+1. Did the ingested content reveal new relationships with existing FDOs?
+2. Do project trackers (`proj-*`) or architecture specs need updated counts/inventories?
+3. Run `kronos_validate` to check for broken links or orphans
+4. Update `updated:` dates on any modified existing FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

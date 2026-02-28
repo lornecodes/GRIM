@@ -76,6 +76,16 @@ Refs: #issue-number (if applicable)
 4. **Clean working tree** — don't leave uncommitted changes after operations
 5. **Verify before push** — check branch, remote, and diff
 
+## Vault Sync
+
+After significant commits, check if vault FDOs need updating:
+1. Did the committed changes affect architecture, features, or project status?
+2. If yes, run the `vault-sync` skill or manually update affected FDOs
+3. Key FDOs to check: project trackers (`proj-*`), architecture specs, skill inventories
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

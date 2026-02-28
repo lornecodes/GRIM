@@ -21,7 +21,7 @@ This protocol governs ALL code changes made by agents on GRIM's behalf.
 Before writing any code:
 1. Read the relevant source files
 2. Understand the existing architecture and conventions
-3. Check for specs (`.spec/`), CIP (`.cip/`), or meta.yaml
+3. Check for specs (`.spec/`), CLAUDE.md, or meta.yaml
 4. Identify the minimal set of files to touch
 
 ### Phase 2: Plan
@@ -80,6 +80,16 @@ Return to GRIM:
 - [ ] No secrets in code
 - [ ] Diff is minimal and focused
 - [ ] Code is idiomatic
+
+## Vault Sync
+
+After completing this skill, check if vault FDOs need updating:
+1. Did this work change architecture, features, or project status?
+2. If yes, run the `vault-sync` skill or manually update affected FDOs
+3. Key FDOs to check: project trackers (`proj-*`), architecture specs, skill inventories
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
 
 ## Currency Check
 

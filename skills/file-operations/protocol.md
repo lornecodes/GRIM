@@ -60,6 +60,16 @@ The following paths must NEVER be modified without explicit user permission:
 4. **Encoding awareness** — detect and preserve file encoding
 5. **Path normalization** — handle Windows/Unix path differences
 
+## Vault Sync
+
+After file operations that change project structure, check if vault FDOs need updating:
+1. Were files moved or renamed that are referenced in FDO `source_paths`?
+2. Did directory restructuring invalidate any `kronos_navigate` metadata?
+3. If significant changes, run the `vault-sync` skill
+4. Update `updated:` dates on any modified FDOs
+
+> Skipping this step is how FDOs drift from reality. If you changed something meaningful, sync it.
+
 ## Currency Check
 
 After completing this skill, verify the protocol is still accurate:

@@ -119,3 +119,7 @@ These FDOs have source_repos but no source_paths — candidates for enrichment:
 - Some FDOs legitimately have no source_paths (pure theory/proof FDOs) — these are reported but not flagged as errors
 - This skill is read-only — it reports issues but does not fix them
 - Use `kronos_deep_dive` to interactively explore source_paths for a specific concept
+
+## Vault Sync
+
+If validation findings led to source_path fixes or FDO updates, ensure all changes are consistent. Run the `vault-sync` skill if significant corrections were made.
