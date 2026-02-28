@@ -44,6 +44,8 @@ beforeEach(() => {
     sessions: [],
     activeSessionId: "",
     chatPanelOpen: true,
+    activePage: "dashboard",
+    sidebarCollapsed: false,
     activeDashboardWidget: "tokens",
   });
 });
@@ -64,9 +66,11 @@ describe("ChatApp", () => {
     expect(screen.getByText("chat")).toBeInTheDocument();
   });
 
-  it("shows Mission Control label", () => {
+  it("shows Mission Control label in header", () => {
     render(<ChatApp />);
-    expect(screen.getByText("Mission Control")).toBeInTheDocument();
+    // AppHeader + DashboardHome both have "Mission Control" — check at least one exists
+    const elements = screen.getAllByText("Mission Control");
+    expect(elements.length).toBeGreaterThanOrEqual(1);
   });
 
   it("loadMessages returns correct data for pre-saved sessions", () => {
