@@ -41,6 +41,11 @@ DELEGATION_KEYWORDS = {
         "upload to zenodo", "sync vault", "commit",
         "git status", "push to github", "run command",
     ],
+    "ironclaw": [
+        "run sandboxed", "execute safely", "isolated shell",
+        "sandboxed execution", "run in sandbox", "claw execute",
+        "secure execute", "run securely",
+    ],
 }
 
 
@@ -161,6 +166,10 @@ def _skill_ctx_to_delegation(skill_ctx) -> str | None:
     # Operations skills → operator agent
     if name in ("vault-sync", "git-operations", "shell-execution"):
         return "operate"
+
+    # IronClaw skills → sandboxed execution agent
+    if name in ("sandboxed-execution", "secure-shell", "ironclaw-execute"):
+        return "ironclaw"
 
     # Check permissions for hints
     perms = skill_ctx.permissions

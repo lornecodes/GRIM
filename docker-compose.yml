@@ -92,6 +92,33 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # ── IronClaw Engine (sandboxed execution) ────────────────
+  ironclaw:
+    build:
+      context: ./engine
+      dockerfile: Dockerfile
+    container_name: ironclaw
+    volumes:
+      - ./engine/config/grim.yaml:/etc/ironclaw/config.yaml:ro
+      - ironclaw-logs:/app/logs
+    expose:
+      - "3100"
+    # No host ports — IronClaw only accessible via grim-net
+    networks:
+      - grim-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3100/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   # ── GRIM ──────────────────────────────────────────────────
   grim:
     build: .
@@ -101,6 +128,8 @@ services:
       ai-bridge:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ironclaw:
         condition: service_healthy
     ports:
       - "${GRIM_PORT:-8080}:8080"
@@ -112,6 +141,7 @@ services:
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0
       - GRIM_REDIS_URL=redis://redis:6379/0
+      - IRONCLAW_URL=http://ironclaw:3100
     volumes:
       - ${VAULT_PATH:-../kronos-vault}:/vault:ro
       - grim-sessions:/app/local/sessions
@@ -144,3 +174,5 @@ volumes:
     name: grim-sessions
   grim-evolution:
     name: grim-evolution
+  ironclaw-logs:
+    name: ironclaw-logs

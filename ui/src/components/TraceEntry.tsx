@@ -11,6 +11,7 @@ const catColors: Record<string, string> = {
   node: "text-trace-node",
   llm: "text-trace-llm",
   tool: "text-trace-tool",
+  claw: "text-orange-400",
   graph: "text-trace-graph",
 };
 

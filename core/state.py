@@ -139,8 +139,11 @@ class GrimState(TypedDict, total=False):
 
     # Routing decision
     mode: Literal["companion", "delegate"]
-    delegation_type: Optional[Literal["memory", "code", "research", "operate"]]
+    delegation_type: Optional[Literal["memory", "code", "research", "operate", "ironclaw"]]
     selected_model: Optional[str]  # model ID chosen by model router
+
+    # IronClaw engine state
+    ironclaw_available: bool
 
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]

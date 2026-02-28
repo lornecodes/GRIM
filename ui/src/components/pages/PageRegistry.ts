@@ -8,6 +8,7 @@ import {
   IconCalendar,
   IconMemory,
   IconEvolution,
+  IconEngine,
   IconSettings,
 } from "@/components/icons/NavIcons";
 import { DashboardHome } from "./DashboardHome";
@@ -18,6 +19,7 @@ import { TasksBoard } from "./TasksBoard";
 import { CalendarView } from "./CalendarView";
 import { MemoryView } from "./MemoryView";
 import { EvolutionView } from "./EvolutionView";
+import { EngineView } from "./EngineView";
 import { SettingsView } from "./SettingsView";
 
 export interface PageDef {
@@ -44,6 +46,7 @@ export const pages: PageDef[] = [
   { id: "calendar", label: "Calendar", icon: IconCalendar, component: CalendarView, section: "main" },
   { id: "memory", label: "Memory", icon: IconMemory, component: MemoryView, section: "main" },
   { id: "evolution", label: "Field State", icon: IconEvolution, component: EvolutionView, section: "main" },
+  { id: "engine", label: "Engine", icon: IconEngine, component: EngineView, section: "main" },
   // ── System ──
   { id: "settings", label: "Settings", icon: IconSettings, component: SettingsView, section: "system" },
 ];

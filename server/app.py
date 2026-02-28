@@ -92,6 +92,7 @@ _graph: Any = None
 _config: GrimConfig | None = None
 _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
 _checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifetime
+_ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
 
 
 def _grim_root() -> Path:
@@ -105,7 +106,7 @@ def _grim_root() -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start Kronos MCP, build graph, serve until shutdown."""
-    global _graph, _config, _mcp_cleanup, _checkpointer
+    global _graph, _config, _mcp_cleanup, _checkpointer, _ironclaw_bridge
 
     grim_root = _grim_root()
     load_dotenv(grim_root / ".env")
@@ -146,11 +147,44 @@ async def lifespan(app: FastAPI):
         from core.reasoning_cache import ReasoningCache
         reasoning_cache = await ReasoningCache.from_env()
 
+        # Initialize IronClaw bridge (optional — graceful if unavailable)
+        ironclaw_bridge = None
+        ironclaw_url = os.environ.get("IRONCLAW_URL", "http://localhost:3100")
+        try:
+            from core.bridge.ironclaw import IronClawBridge
+            bridge = IronClawBridge(base_url=ironclaw_url)
+            if await bridge.is_available():
+                ironclaw_bridge = bridge
+                _ironclaw_bridge = bridge
+                health = await bridge.health()
+                logger.info(
+                    "IronClaw connected: %s (v%s, uptime %.0fs)",
+                    ironclaw_url, health.version, health.uptime_secs,
+                )
+            else:
+                logger.info("IronClaw not available at %s — running without sandbox", ironclaw_url)
+                await bridge.close()
+        except Exception as exc:
+            logger.info("IronClaw bridge init failed: %s — running without sandbox", exc)
+
         # Build graph (once, shared across all connections)
-        _graph = build_graph(_config, mcp_session=mcp_session, checkpointer=checkpointer, reasoning_cache=reasoning_cache)
+        _graph = build_graph(
+            _config,
+            mcp_session=mcp_session,
+            checkpointer=checkpointer,
+            reasoning_cache=reasoning_cache,
+            ironclaw_bridge=ironclaw_bridge,
+        )
         logger.info("Graph built — server ready")
 
         yield
+
+        # Cleanup IronClaw bridge on shutdown
+        if _ironclaw_bridge:
+            try:
+                await _ironclaw_bridge.close()
+            except Exception:
+                pass
 
         # Cleanup MCP on shutdown
         if _mcp_cleanup:
@@ -217,6 +251,33 @@ async def health():
         "env": _config.env if _config else "unknown",
         "vault": str(_config.vault_path) if _config else None,
         "graph": _graph is not None,
+    })
+
+
+@app.get("/api/ironclaw/status")
+async def ironclaw_status():
+    """IronClaw engine status — gateway health, tools, metrics."""
+    if not _ironclaw_bridge:
+        return JSONResponse({
+            "available": False,
+            "message": "IronClaw bridge not initialized",
+        })
+
+    health = await _ironclaw_bridge.health()
+    tools = await _ironclaw_bridge.list_tools() if health.healthy else []
+    metrics = await _ironclaw_bridge.get_metrics() if health.healthy else None
+
+    return JSONResponse({
+        "available": health.healthy,
+        "version": health.version,
+        "uptime_secs": health.uptime_secs,
+        "tools": [{"name": t.name, "description": t.description, "risk_level": t.risk_level} for t in tools],
+        "metrics": {
+            "requests_total": metrics.requests_total,
+            "requests_failed": metrics.requests_failed,
+            "active_sessions": metrics.active_sessions,
+            "uptime_seconds": metrics.uptime_seconds,
+        } if metrics else None,
     })
 
 
@@ -527,16 +588,22 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     elif kind == "on_tool_start":
                         tool_name = event.get("name", "unknown")
                         tool_input = event.get("data", {}).get("input", {})
-                        await _trace("tool", f"⚡ {tool_name}",
+                        is_claw = tool_name.startswith("claw_")
+                        cat = "claw" if is_claw else "tool"
+                        await _trace(cat, f"⚡ {tool_name}",
                                      tool=tool_name, action="start",
+                                     sandboxed=is_claw,
                                      input=_safe_truncate(tool_input))
 
                     elif kind == "on_tool_end":
                         tool_name = event.get("name", "unknown")
                         tool_output = event.get("data", {}).get("output", "")
                         output_str = str(tool_output)
-                        await _trace("tool", f"✓ {tool_name}",
+                        is_claw = tool_name.startswith("claw_")
+                        cat = "claw" if is_claw else "tool"
+                        await _trace(cat, f"✓ {tool_name}",
                                      tool=tool_name, action="end",
+                                     sandboxed=is_claw,
                                      output_preview=output_str[:200])
 
                 total_ms = round((_time.monotonic() - _t0) * 1000)

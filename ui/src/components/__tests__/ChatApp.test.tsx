@@ -47,6 +47,7 @@ beforeEach(() => {
     activePage: "dashboard",
     sidebarCollapsed: false,
     activeDashboardWidget: "tokens",
+    ironclawStatus: "unknown",
   });
 });
 

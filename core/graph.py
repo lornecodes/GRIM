@@ -18,9 +18,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from core.agents.coder_agent import make_coder_agent
+from core.agents.ironclaw_agent import make_ironclaw_agent
 from core.agents.memory_agent import make_memory_agent
 from core.agents.operator_agent import make_operator_agent
 from core.agents.research_agent import make_research_agent
+from core.bridge.ironclaw import IronClawBridge
 from core.config import GrimConfig
 from core.nodes.companion import make_companion_node
 from core.nodes.compress import make_compress_node
@@ -43,6 +45,7 @@ def build_graph(
     mcp_session: Any = None,
     checkpointer: Any = None,
     reasoning_cache: Any = None,
+    ironclaw_bridge: IronClawBridge | None = None,
 ) -> Any:
     """Build and compile the GRIM state graph.
 
@@ -64,6 +67,11 @@ def build_graph(
         from core.tools.kronos_read import set_mcp_session
         set_mcp_session(mcp_session)
 
+    # Set IronClaw bridge for sandboxed tools
+    if ironclaw_bridge:
+        from core.tools.ironclaw_tools import set_bridge
+        set_bridge(ironclaw_bridge)
+
     # Create node closures with config/dependencies
     identity_fn = make_identity_node(config, mcp_session)
     compress_fn = make_compress_node(config)
@@ -73,7 +81,7 @@ def build_graph(
     companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
     evolve_fn = make_evolve_node(config)
 
-    # Create all four doer agents
+    # Create all doer agents
     memory_agent_fn = make_memory_agent(config)
     coder_agent_fn = make_coder_agent(config)
     research_agent_fn = make_research_agent(config)
@@ -85,6 +93,13 @@ def build_graph(
         "research": research_agent_fn,
         "operate": operator_agent_fn,
     }
+
+    # Register IronClaw agent if bridge is available
+    if ironclaw_bridge:
+        ironclaw_agent_fn = make_ironclaw_agent(config)
+        agents["ironclaw"] = ironclaw_agent_fn
+        logger.info("IronClaw agent registered (bridge: %s)", ironclaw_bridge.base_url)
+
     dispatch_fn = make_dispatch_node(agents)
 
     logger.info("Agents registered: %s", list(agents.keys()))
@@ -130,6 +145,7 @@ def build_graph(
         checkpointer = MemorySaver()
 
     compiled = graph.compile(checkpointer=checkpointer)
-    logger.info("GRIM state graph compiled — 9 nodes, 4 agents")
+    agent_count = len(agents)
+    logger.info("GRIM state graph compiled — 9 nodes, %d agents", agent_count)
 
     return compiled

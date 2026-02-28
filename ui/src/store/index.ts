@@ -34,6 +34,7 @@ interface UISlice {
   activePage: string;
   sidebarCollapsed: boolean;
   activeDashboardWidget: string;  // legacy alias — use activePage
+  ironclawStatus: "connected" | "disconnected" | "unknown";
   _commandHandlers: Set<UICommandHandler>;
   // Actions
   setChatPanelOpen: (v: boolean) => void;
@@ -41,6 +42,7 @@ interface UISlice {
   setActivePage: (id: string) => void;
   toggleSidebar: () => void;
   setActiveDashboardWidget: (name: string) => void;  // legacy alias
+  setIronclawStatus: (s: "connected" | "disconnected" | "unknown") => void;
   subscribeUICommand: (handler: UICommandHandler) => () => void;
   dispatchUICommand: (cmd: UICommand) => void;
 }
@@ -95,6 +97,7 @@ export const useGrimStore = create<GrimStore>()(
       activePage: "dashboard",
       sidebarCollapsed: false,
       activeDashboardWidget: "tokens",  // legacy alias
+      ironclawStatus: "unknown" as const,
       _commandHandlers: new Set(),
 
       setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
@@ -102,6 +105,7 @@ export const useGrimStore = create<GrimStore>()(
       setActivePage: (activePage) => set({ activePage }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setActiveDashboardWidget: (id) => set({ activeDashboardWidget: id, activePage: id }),
+      setIronclawStatus: (ironclawStatus) => set({ ironclawStatus }),
 
       subscribeUICommand: (handler) => {
         get()._commandHandlers.add(handler);
