@@ -1,0 +1,159 @@
+# IronClaw Configuration — GRIM Integration
+# Runs IronClaw as GRIM's sandboxed execution engine.
+# "Engine is the limbs, not the brain" — LangGraph controls all reasoning.
+
+[agent]
+system_prompt = """
+You are IronClaw, the sandboxed execution engine for GRIM.
+You do NOT make decisions — you execute tool calls from GRIM's LangGraph.
+Follow all security policies strictly.
+Never expose credentials or sensitive data.
+Always operate within the defined permissions.
+"""
+max_turns = 0           # No autonomous turns — GRIM controls the loop
+tool_timeout_secs = 30
+max_daily_cost_cents = 0  # No LLM spending — GRIM handles LLM calls
+
+[permissions.filesystem]
+read = ["./**"]
+write = ["./**"]
+deny = [
+    "/etc/shadow",
+    "/etc/gshadow",
+    "/etc/passwd",
+    "/root/.ssh",
+    "/root/.ssh/**",
+    "**/.ssh/id_*",
+    "**/.aws/credentials",
+    "**/.gnupg/private-keys",
+    "**/.env",
+    "**/.env.*",
+    "**/credentials*",
+    "**/secrets*",
+    "**/*.pem",
+    "**/*.key",
+    "/proc/**",
+    "/sys/**",
+]
+
+[permissions.network]
+allow_domains = [
+    "api.anthropic.com",
+    "api.openai.com",
+    "*.github.com",
+    "api.github.com",
+]
+block_domains = [
+    "metadata.google.internal",
+    "169.254.169.254",
+    "metadata.azure.com",
+]
+block_private = false
+max_requests_per_hour = 200
+
+[permissions.system]
+allow_shell = true
+require_approval = false  # GRIM already approved at dispatch
+max_concurrent = 4
+
+[permissions.tools.file_read]
+enabled = true
+require_approval = false
+rate_limit = 500
+
+[permissions.tools.file_write]
+enabled = true
+require_approval = false
+rate_limit = 100
+
+[permissions.tools.shell]
+enabled = true
+require_approval = false
+rate_limit = 50
+
+[permissions.tools.directory_list]
+enabled = true
+require_approval = false
+rate_limit = 500
+
+[permissions.tools.http_request]
+enabled = true
+require_approval = false
+rate_limit = 100
+
+[permissions.tools.search]
+enabled = true
+require_approval = false
+rate_limit = 200
+
+[guardian]
+blocked_patterns = [
+    "rm -rf /",
+    ":\\(\\)\\{ :\\|:& \\};:",
+    "mkfs",
+    "dd if=/dev",
+    "> /dev/sd",
+]
+allowed_commands = []
+block_pipes = false       # Allow pipes for normal shell usage
+block_redirects = false
+block_subshells = false
+
+[sandbox]
+backend = "native"        # Docker/Bubblewrap optional — native with security policies
+enforce = true
+network_policy = "allow"  # Controlled by permissions.network
+memory_limit = 1024       # MB
+cpu_limit = 2.0
+
+[memory]
+backend = "encrypted_sqlite"
+path = "/app/data/grim-memory.db"
+encrypt_at_rest = false   # GRIM manages its own persistence
+max_entries = 1000
+context_isolation = true
+
+[providers.anthropic]
+provider_type = "anthropic"
+model = "claude-sonnet-4-20250514"
+max_tokens = 0            # Disabled — GRIM is the brain
+temperature = 0.0
+
+[gateway]
+enabled = true
+bind_address = "0.0.0.0"
+port = 3100
+max_body_size = 10485760  # 10MB for large file operations
+cors_origins = []
+rate_limit = 6000         # 100 RPM → 6000 per hour
+auth_method = "api_key"
+api_keys = ["grim-internal-key"]
+
+[skills]
+directory = "~/.ironclaw/skills"
+require_signatures = false
+trusted_keys = []
+
+[audit]
+path = "./logs/ironclaw-audit.log"
+enabled = true
+max_size_mb = 50
+siem_export = false
+
+[observability]
+log_level = "info"
+structured_logs = true
+redact_pii = true
+redact_patterns = [
+    '(?i)(api[_-]?key|token|secret|password|credential)\s*[:=]\s*\S+',
+    '(?i)bearer\s+\S+',
+]
+
+[dlp]
+enabled = true
+
+[ui]
+enabled = true
+bind_address = "0.0.0.0"
+port = 3101            # UI on 3101, gateway on 3100
+require_auth = false

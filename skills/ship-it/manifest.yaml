@@ -1,0 +1,85 @@
+name: ship-it
+version: "1.0"
+description: >
+  Full production deployment pipeline — from code to running system.
+  Orchestrates unit tests, integration tests, Docker builds, deployment,
+  and post-deploy end-to-end verification in a gated pipeline.
+  One command to go from "code changed" to "verified in production."
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - shell:execute
+  - docker:build
+  - docker:run
+  - filesystem:read
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes when user wants to ship/deploy/release
+    reads: [triggers, quality_gates]
+  ops-agent:
+    role: execution
+    description: Executes the gated deployment pipeline
+    reads: [protocol.md, safety, quality_gates]
+  ironclaw:
+    role: execution
+    description: Can execute sandboxed test/build commands
+    reads: [protocol.md]
+
+inputs:
+  scope:
+    type: enum
+    values: [full, quick, test-only, deploy-only]
+    required: false
+    default: full
+    description: >
+      full: all gates (default). quick: skip container tests.
+      test-only: run all tests without deploying.
+      deploy-only: skip tests (dangerous, requires explicit confirmation).
+  skip_e2e:
+    type: boolean
+    required: false
+    default: false
+    description: Skip end-to-end tests after deployment
+  no_llm:
+    type: boolean
+    required: false
+    default: false
+    description: Skip LLM-dependent integration tests (tiers 3-4)
+
+outputs:
+  success: boolean
+  gates_passed: list
+  gates_failed: list
+  test_summary: string
+  image_tags: string
+  services_healthy: list
+  error: string
+
+triggers:
+  - explicit: "User says ship it, deploy, release, push to production"
+  - proactive: "After completing a significant code change, suggest shipping"
+  - keywords:
+      strong: ["ship it", "ship-it", "lets ship", "deploy everything", "release it", "push to prod", "go live"]
+      weak: ["deploy", "release", "production", "go live"]
+  - suppress: "User explicitly says they want to test only or build only"
+
+safety:
+  - "Never skip Gate 1 (unit tests) unless user explicitly says deploy-only"
+  - "Never deploy if any gate fails — abort and report"
+  - "Always verify all services are healthy after deployment"
+  - "Keep previous images for rollback (GRIM_KEEP=3)"
+  - "Never expose API keys in logs or build output"
+  - "If IronClaw container fails, GRIM can still deploy without it"
+  - "Post-deploy E2E failures do not auto-rollback — report and let user decide"
+
+quality_gates:
+  - "Gate 1: Unit tests — Python (pytest core + model routing + ironclaw + agent integration) + UI (vitest)"
+  - "Gate 2: Docker build — both ironclaw and grim images build successfully"
+  - "Gate 3: Service health — all 5 services start and pass health checks"
+  - "Gate 4: Integration tests — 35 live endpoint tests (infrastructure, MCP, REST, WebSocket, errors)"
+  - "Gate 5: Post-deploy verification — IronClaw gateway + GRIM API + UI all responding"
+  - "Gate 6: Cleanup — old images removed only after all gates pass"

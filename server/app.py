@@ -150,9 +150,10 @@ async def lifespan(app: FastAPI):
         # Initialize IronClaw bridge (optional — graceful if unavailable)
         ironclaw_bridge = None
         ironclaw_url = os.environ.get("IRONCLAW_URL", "http://localhost:3100")
+        ironclaw_api_key = os.environ.get("IRONCLAW_API_KEY", "grim-internal-key")
         try:
             from core.bridge.ironclaw import IronClawBridge
-            bridge = IronClawBridge(base_url=ironclaw_url)
+            bridge = IronClawBridge(base_url=ironclaw_url, api_key=ironclaw_api_key)
             if await bridge.is_available():
                 ironclaw_bridge = bridge
                 _ironclaw_bridge = bridge

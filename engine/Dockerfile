@@ -34,13 +34,14 @@ WORKDIR /app
 COPY --from=builder /build/target/release/ironclaw /usr/local/bin/ironclaw
 COPY config/ /etc/ironclaw/
 
-# Create logs directory
-RUN mkdir -p /app/logs
-
 # Non-root user
 RUN useradd -r -s /usr/sbin/nologin ironclaw
+
+# Create data directories (owned by ironclaw user)
+RUN mkdir -p /app/logs /app/data && chown -R ironclaw:ironclaw /app/logs /app/data
+
 USER ironclaw
 
 EXPOSE 3100
 
-CMD ["ironclaw", "ui", "--config", "/etc/ironclaw/config.yaml"]
+CMD ["ironclaw", "--config", "/etc/ironclaw/grim.toml", "ui"]

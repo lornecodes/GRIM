@@ -261,6 +261,19 @@ async fn main() -> anyhow::Result<()> {
                 (provider, model)
             };
 
+            // Start the API gateway if enabled in config
+            let _gateway = if config.gateway.enabled {
+                let gw_config = gateway::GatewayServerConfig::from(&config.gateway);
+                let gw_bind = gw_config.bind.clone();
+                let mut gw = gateway::GatewayServer::new(gw_config);
+                gw.start().await?;
+                info!("API Gateway available at http://{}", gw_bind);
+                println!("  API Gateway: http://{}", gw_bind);
+                Some(gw)
+            } else {
+                None
+            };
+
             let mut ui_config = ui::WebUiConfig::from(&config.ui);
             if let Some(p) = port {
                 ui_config.bind_addr.set_port(p);
@@ -293,7 +306,15 @@ async fn main() -> anyhow::Result<()> {
             })
             .await?;
 
-            engine.run_interactive().await?;
+            // If stdin is not a terminal (e.g. Docker), wait for shutdown
+            // signal instead of trying interactive input.
+            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                info!("No TTY detected — running as server (gateway + UI)");
+                println!("  Running as server. Press Ctrl+C to stop.\n");
+                tokio::signal::ctrl_c().await?;
+            } else {
+                engine.run_interactive().await?;
+            }
         }
         Commands::Models { .. } => unreachable!(), // handled above
         Commands::Onboard => unreachable!(),        // handled above

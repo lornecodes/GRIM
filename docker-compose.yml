@@ -99,7 +99,7 @@ services:
       dockerfile: Dockerfile
     container_name: ironclaw
     volumes:
-      - ./engine/config/grim.yaml:/etc/ironclaw/config.yaml:ro
+      - ./engine/config/grim.toml:/etc/ironclaw/grim.toml:ro
       - ironclaw-logs:/app/logs
     expose:
       - "3100"
