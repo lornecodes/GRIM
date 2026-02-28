@@ -620,28 +620,403 @@ class TestIdentityNode(unittest.TestCase):
     def test_identity_with_mcp(self):
         """Identity node enriches from Kronos FDO when MCP available."""
         from core.nodes.identity import make_identity_node
-        cfg = make_test_config()
-        mcp = MockMCPSession({
-            "kronos_get": {"body": "GRIM is the greatest AI companion ever built."},
-        })
-        node = make_identity_node(cfg, mcp_session=mcp)
-        result = run_async(node({}))
-        self.assertIn("greatest AI companion", result["system_prompt"])
-        # Verify MCP was actually called
-        self.assertEqual(len(mcp.calls), 1)
-        self.assertEqual(mcp.calls[0][0], "kronos_get")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            cfg = make_test_config(personality_cache_path=cache_path)
+            mcp = MockMCPSession({
+                "kronos_get": {"body": "GRIM is the greatest AI companion ever built."},
+            })
+            node = make_identity_node(cfg, mcp_session=mcp)
+            result = run_async(node({}))
+            self.assertIn("greatest AI companion", result["system_prompt"])
+            # Verify MCP was called for identity, personality, and caller (peter)
+            self.assertEqual(len(mcp.calls), 3)
+            self.assertEqual(mcp.calls[0][0], "kronos_get")  # grim-identity
+            self.assertEqual(mcp.calls[1][0], "kronos_get")  # grim-personality
+            self.assertEqual(mcp.calls[2][0], "kronos_get")  # peter (caller)
+            # Verify caller fields returned
+            self.assertEqual(result["caller_id"], "peter")
+            self.assertIsNotNone(result["caller_context"])
 
     def test_identity_mcp_failure_graceful(self):
         """Identity node works even if MCP call fails."""
         from core.nodes.identity import make_identity_node
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            cfg = make_test_config(personality_cache_path=cache_path)
+            mcp = MagicMock()
+            mcp.call_tool = AsyncMock(side_effect=Exception("MCP down"))
+            node = make_identity_node(cfg, mcp_session=mcp)
+            result = run_async(node({}))
+            # Should still have system prompt from local files
+            self.assertIn("system_prompt", result)
+            self.assertIn("GRIM", result["system_prompt"])
+
+    def test_identity_personality_cache_compiled(self):
+        """Identity node compiles personality cache when stale."""
+        from core.nodes.identity import make_identity_node
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            cfg = make_test_config(personality_cache_path=cache_path)
+            personality_body = textwrap.dedent("""\
+                ## Overview
+                Shade archetype.
+
+                ## Personality Trait Scales
+                ```yaml
+                traits:
+                  formality: 0.85
+                  wit: 0.70
+                  warmth: 0.60
+                  deference: 0.40
+                  opinion_strength: 0.70
+                ```
+                """)
+            mcp = MockMCPSession({
+                "kronos_get": {"body": personality_body},
+            })
+            node = make_identity_node(cfg, mcp_session=mcp)
+            result = run_async(node({}))
+            # Cache file should exist now
+            self.assertTrue(cache_path.exists())
+            cache_content = cache_path.read_text(encoding="utf-8")
+            self.assertIn("grim-personality-cache", cache_content)
+            self.assertIn("Formality", cache_content)
+
+    def test_identity_skips_fresh_cache(self):
+        """Identity node skips MCP fetch when cache is fresh."""
+        from core.nodes.identity import make_identity_node
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            # Pre-populate a fresh cache
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            cache_path.write_text(
+                f"<!-- grim-personality-cache | synced: {now} | source: grim-personality -->\n\n"
+                "## Voice & Character\nTest cache content\n",
+                encoding="utf-8",
+            )
+            cfg = make_test_config(personality_cache_path=cache_path)
+            # MCP returns identity FDO only — personality should NOT be fetched
+            mcp = MockMCPSession({
+                "kronos_get": {"body": "GRIM identity content."},
+            })
+            node = make_identity_node(cfg, mcp_session=mcp)
+            result = run_async(node({}))
+            # 2 MCP calls: identity + caller (peter). Personality skipped (cache fresh).
+            self.assertEqual(len(mcp.calls), 2)
+            self.assertEqual(mcp.calls[0][0], "kronos_get")  # grim-identity
+            self.assertEqual(mcp.calls[1][0], "kronos_get")  # peter (caller)
+            # Cache content should appear in system prompt
+            self.assertIn("Test cache content", result["system_prompt"])
+
+
+class TestUserCache(unittest.TestCase):
+    """Tests for user cache compilation and staleness."""
+
+    def test_is_user_cache_stale_missing_file(self):
+        """Missing cache file is stale."""
+        from core.personality.user_cache import is_user_cache_stale
+        self.assertTrue(is_user_cache_stale(Path("/nonexistent/user.cache.md")))
+
+    def test_is_user_cache_stale_fresh(self):
+        """Fresh cache file is not stale."""
+        from core.personality.user_cache import is_user_cache_stale
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "user.cache.md"
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            p.write_text(
+                f"<!-- grim-user-cache | synced: {now} | source: peter -->\n\n"
+                "## Caller: Peter Lorne (owner)\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(is_user_cache_stale(p))
+
+    def test_is_user_cache_stale_old(self):
+        """Cache older than max_age is stale."""
+        from core.personality.user_cache import is_user_cache_stale
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "user.cache.md"
+            p.write_text(
+                "<!-- grim-user-cache | synced: 2020-01-01T00:00:00 | source: peter -->\n\n"
+                "## Caller: Peter Lorne (owner)\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(is_user_cache_stale(p))
+
+    def test_compile_user_cache(self):
+        """compile_user_cache writes a cache file from a user FDO."""
+        from core.personality.user_cache import compile_user_cache
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "user.cache.md"
+            fdo = {
+                "frontmatter": {"id": "peter", "title": "Peter Lorne", "role": "owner"},
+                "body": textwrap.dedent("""\
+                    ## Working Style
+                    - Builds things to understand them
+                    - Theory and implementation inseparable
+
+                    ## Communication Preferences
+                    - Direct and honest
+                    - Push back when needed
+
+                    ## Current Priorities
+                    - DFT milestone 4
+                    - GRIM Phase 2
+                """),
+            }
+            compile_user_cache(fdo, cache_path)
+            self.assertTrue(cache_path.exists())
+            content = cache_path.read_text(encoding="utf-8")
+            self.assertIn("grim-user-cache", content)
+            self.assertIn("Peter Lorne", content)
+            self.assertIn("Builds things to understand them", content)
+            self.assertIn("Direct and honest", content)
+            self.assertIn("DFT milestone 4", content)
+
+    def test_compile_caller_summary_service(self):
+        """compile_caller_summary produces compact prompt for a service caller."""
+        from core.personality.user_cache import compile_caller_summary
+        fdo = {
+            "frontmatter": {"id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service"},
+            "body": textwrap.dedent("""\
+                ## Context
+                - Rust-based physics engine for DFT simulations
+                - Calls GRIM for knowledge lookups
+
+                ## Communication Style
+                - Structured responses preferred
+                - Machine-parseable when possible
+            """),
+        }
+        result = compile_caller_summary(fdo)
+        self.assertIn("IronClaw", result)
+        self.assertIn("service", result)
+        self.assertIn("Rust-based physics engine", result)
+        self.assertIn("Structured responses preferred", result)
+
+    def test_peter_fallback(self):
+        """PETER_FALLBACK constant is available and non-empty."""
+        from core.personality.user_cache import PETER_FALLBACK
+        self.assertIn("Peter Lorne", PETER_FALLBACK)
+        self.assertIn("owner", PETER_FALLBACK)
+
+
+class TestCallerResolution(unittest.TestCase):
+    """Tests for caller resolution in identity node."""
+
+    def test_caller_defaults_to_peter(self):
+        """Identity node defaults caller_id to 'peter' when not specified."""
+        from core.nodes.identity import make_identity_node
+        cfg = make_test_config()
+        node = make_identity_node(cfg, mcp_session=None)
+        result = run_async(node({}))
+        self.assertEqual(result["caller_id"], "peter")
+        # Should get fallback context
+        self.assertIn("Peter Lorne", result["caller_context"])
+
+    def test_caller_service_override(self):
+        """Identity node uses provided caller_id for non-Peter callers."""
+        from core.nodes.identity import make_identity_node
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            cfg = make_test_config(personality_cache_path=cache_path)
+            ironclaw_fdo = {
+                "frontmatter": {"id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service"},
+                "body": "## Context\n- Rust engine\n\n## Communication Style\n- Structured\n",
+            }
+            mcp = MockMCPSession({"kronos_get": ironclaw_fdo})
+            node = make_identity_node(cfg, mcp_session=mcp)
+            result = run_async(node({"caller_id": "ironclaw"}))
+            self.assertEqual(result["caller_id"], "ironclaw")
+            self.assertIn("IronClaw", result["caller_context"])
+
+    def test_caller_unknown_fallback(self):
+        """Unknown caller gets generic fallback when MCP lookup fails."""
+        from core.nodes.identity import make_identity_node
         cfg = make_test_config()
         mcp = MagicMock()
-        mcp.call_tool = AsyncMock(side_effect=Exception("MCP down"))
+        mcp.call_tool = AsyncMock(side_effect=Exception("not found"))
         node = make_identity_node(cfg, mcp_session=mcp)
-        result = run_async(node({}))
-        # Should still have system prompt from local files
-        self.assertIn("system_prompt", result)
-        self.assertIn("GRIM", result["system_prompt"])
+        result = run_async(node({"caller_id": "unknown-entity"}))
+        self.assertEqual(result["caller_id"], "unknown-entity")
+        self.assertIn("unknown-entity", result["caller_context"])
+        self.assertIn("Unknown caller", result["caller_context"])
+
+    def test_prompt_builder_includes_caller_context(self):
+        """Prompt builder includes caller context in output."""
+        from core.personality.prompt_builder import build_system_prompt
+        cfg = make_test_config()
+        from core.personality.prompt_builder import load_field_state
+        prompt = build_system_prompt(
+            prompt_path=cfg.identity_prompt_path,
+            personality_path=cfg.identity_personality_path,
+            field_state=load_field_state(cfg.identity_personality_path),
+            caller_id="peter",
+            caller_context="## Caller: Peter Lorne (owner)\n\nPhysicist, DFI founder.",
+        )
+        self.assertIn("Peter Lorne", prompt)
+        self.assertIn("Physicist", prompt)
+
+
+class TestPersonalityCache(unittest.TestCase):
+    def test_is_cache_stale_missing_file(self):
+        """Missing cache file is stale."""
+        from core.personality.cache import is_cache_stale
+        self.assertTrue(is_cache_stale(Path("/nonexistent/cache.md")))
+
+    def test_is_cache_stale_no_timestamp(self):
+        """Cache without timestamp is stale."""
+        from core.personality.cache import is_cache_stale
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "cache.md"
+            p.write_text("## Voice\nSome content without timestamp\n", encoding="utf-8")
+            self.assertTrue(is_cache_stale(p))
+
+    def test_is_cache_stale_fresh(self):
+        """Recent cache is not stale."""
+        from core.personality.cache import is_cache_stale
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "cache.md"
+            p.write_text(
+                f"<!-- grim-personality-cache | synced: {now} | source: grim-personality -->\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(is_cache_stale(p))
+
+    def test_is_cache_stale_old(self):
+        """Old cache is stale."""
+        from core.personality.cache import is_cache_stale
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "cache.md"
+            p.write_text(
+                "<!-- grim-personality-cache | synced: 2020-01-01T00:00:00 | source: grim-personality -->\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(is_cache_stale(p))
+
+    def test_compile_personality_cache(self):
+        """Cache compiler extracts traits and writes compact file."""
+        from core.personality.cache import compile_personality_cache
+        fdo = {
+            "body": textwrap.dedent("""\
+                ## Overview
+                Shade archetype character sheet.
+
+                ## Personality Trait Scales
+                ```yaml
+                traits:
+                  formality: 0.90
+                  wit: 0.60
+                  warmth: 0.50
+                  deference: 0.30
+                  opinion_strength: 0.80
+                ```
+
+                ### Things GRIM Would Say
+                - On a test failure: "A minor catastrophe, sir."
+                - On a breakthrough: "Most satisfactory."
+
+                ### Things GRIM Would NOT Say
+                - "Great question!"
+                - "I'd be happy to help"
+
+                ### Intellectual Interests
+                - Recursive structures
+                - Emergent behavior
+
+                ### Mild Disdains
+                - Cargo-cult engineering
+                - Unnecessary abstraction
+                """),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            compile_personality_cache(fdo, cache_path)
+            self.assertTrue(cache_path.exists())
+            content = cache_path.read_text(encoding="utf-8")
+            # Check header
+            self.assertIn("grim-personality-cache", content)
+            self.assertIn("synced:", content)
+            # Check traits extracted
+            self.assertIn("Formality: 0.9", content)
+            self.assertIn("Wit: 0.6", content)
+            self.assertIn("Opinion_Strength: 0.8", content)
+            # Check core guidelines
+            self.assertIn("Expression Guidelines", content)
+            self.assertIn("Understate problems", content)
+            # Check interests
+            self.assertIn("Recursive structures", content)
+            self.assertIn("Cargo-cult engineering", content)
+
+    def test_compile_empty_body(self):
+        """Cache compiler handles empty FDO body gracefully."""
+        from core.personality.cache import compile_personality_cache
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            compile_personality_cache({"body": ""}, cache_path)
+            self.assertTrue(cache_path.exists())
+            content = cache_path.read_text(encoding="utf-8")
+            # Should still have defaults
+            self.assertIn("Formality: 0.85", content)
+            self.assertIn("Voice & Character", content)
+
+
+class TestPromptBuilderPersonality(unittest.TestCase):
+    def test_build_with_personality_cache(self):
+        """Prompt builder includes personality cache content."""
+        from core.personality.prompt_builder import build_system_prompt
+        cfg = make_test_config()
+        fs = FieldState()
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "personality.cache.md"
+            cache_path.write_text(
+                "<!-- grim-personality-cache | synced: 2026-02-28T00:00:00 -->\n\n"
+                "## Voice & Character\n\nYou are Shade-archetype.\n",
+                encoding="utf-8",
+            )
+            prompt = build_system_prompt(
+                prompt_path=cfg.identity_prompt_path,
+                personality_path=cfg.identity_personality_path,
+                field_state=fs,
+                personality_cache_path=cache_path,
+            )
+            self.assertIn("Shade-archetype", prompt)
+            self.assertIn("Voice & Character", prompt)
+            # HTML comment should be stripped
+            self.assertNotIn("grim-personality-cache", prompt)
+
+    def test_build_without_personality_cache(self):
+        """Prompt builder works fine without personality cache."""
+        from core.personality.prompt_builder import build_system_prompt
+        cfg = make_test_config()
+        fs = FieldState()
+        prompt = build_system_prompt(
+            prompt_path=cfg.identity_prompt_path,
+            personality_path=cfg.identity_personality_path,
+            field_state=fs,
+            personality_cache_path=None,
+        )
+        self.assertIn("GRIM", prompt)
+        # No personality section
+        self.assertNotIn("Voice & Character", prompt)
+
+    def test_build_missing_cache_file(self):
+        """Prompt builder gracefully skips missing cache file."""
+        from core.personality.prompt_builder import build_system_prompt
+        cfg = make_test_config()
+        fs = FieldState()
+        prompt = build_system_prompt(
+            prompt_path=cfg.identity_prompt_path,
+            personality_path=cfg.identity_personality_path,
+            field_state=fs,
+            personality_cache_path=Path("/nonexistent/cache.md"),
+        )
+        self.assertIn("GRIM", prompt)
+        self.assertNotIn("Voice & Character", prompt)
 
 
 class TestMemoryNode(unittest.TestCase):

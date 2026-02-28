@@ -14,3 +14,17 @@ auth-dir: "/root/.cli-proxy-api"
 
 # No client API key auth — internal network only
 api-keys: []
+
+# Strip the system field from Claude requests.
+# CLIProxyAPI's checkSystemInstructions() prepends "You are Claude Code..."
+# to every request's system field, overriding GRIM's identity. By filtering
+# the system field, the injected prompt is removed. GRIM compensates by
+# passing its system prompt as the first message in the conversation.
+payload:
+  filter:
+    - models:
+        - name: "*"
+          protocol: "claude"
+      params:
+        - "system"
+

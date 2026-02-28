@@ -23,7 +23,7 @@ consumers:
 inputs:
   operation:
     type: enum
-    values: [build, test, up, down, status, clean, rebuild, prod]
+    values: [build, unit, test, up, down, status, clean, deploy, rebuild, prod]
     required: true
     description: Release operation to perform
   vault_path:
@@ -53,10 +53,9 @@ safety:
   - "Verify Docker daemon is running before any operation"
 
 quality_gates:
-  - "Image builds successfully (exit code 0) — includes Node.js UI build stage"
-  - "UI tests pass (30/30 — vitest: persistence, sessions, component)"
-  - "Core unit tests pass inside container"
-  - "MCP handler tests pass (functional — timing thresholds may vary)"
-  - "Integration tests pass (35/35 — health, MCP, REST, WebSocket, errors)"
+  - "Gate 1: Host-side unit tests pass (pytest core + vitest UI)"
+  - "Gate 2: Image builds successfully (exit code 0) — includes Node.js UI build stage"
+  - "Gate 3: Container tests pass (core unit + MCP handler)"
+  - "Gate 4: Integration tests pass (35/35 — health, MCP, REST, WebSocket, errors)"
+  - "Gate 5: Old images cleaned up only after all gates pass (keeps last GRIM_KEEP tags)"
   - "Health check responds after deployment"
-  - "Old images cleaned up (keeps last GRIM_KEEP tags)"

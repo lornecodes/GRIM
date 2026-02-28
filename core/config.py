@@ -25,6 +25,7 @@ class GrimConfig:
     skills_path: Path = field(default_factory=lambda: Path("skills"))
     identity_prompt_path: Path = field(default_factory=lambda: Path("identity/system_prompt.md"))
     identity_personality_path: Path = field(default_factory=lambda: Path("identity/personality.yaml"))
+    personality_cache_path: Path = field(default_factory=lambda: Path("identity/personality.cache.md"))
     local_dir: Path = field(default_factory=lambda: Path("local"))
 
     # LLM
@@ -104,6 +105,7 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.skills_path = _resolve(cfg.skills_path, grim_root)
     cfg.identity_prompt_path = _resolve(cfg.identity_prompt_path, grim_root)
     cfg.identity_personality_path = _resolve(cfg.identity_personality_path, grim_root)
+    cfg.personality_cache_path = _resolve(cfg.personality_cache_path, grim_root)
     cfg.local_dir = _resolve(cfg.local_dir, grim_root)
     cfg.checkpoint_path = _resolve(cfg.checkpoint_path, grim_root)
     cfg.evolution_dir = _resolve(cfg.evolution_dir, grim_root)

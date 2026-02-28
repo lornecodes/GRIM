@@ -67,11 +67,33 @@ cd ui && npm run test
 - Starts with production overrides (resource limits, always-restart)
 - Uses `docker-compose.yml` + `docker-compose.prod.yml`
 
-### Full Redeploy
+### Gated Deploy (Recommended)
+```bash
+./scripts/release.sh deploy
+```
+The safe path from code change to running container with 5 gates:
+1. **Gate 1: Unit tests** — host-side pytest + vitest (fast, no Docker)
+2. **Gate 2: Build** — Docker image with version tag
+3. **Gate 3: Container tests** — MCP handler + E2E inside container
+4. **Gate 4: Integration** — bring up + live endpoint tests
+5. **Gate 5: Cleanup** — remove old images (only after all gates pass)
+
+Each gate must pass before proceeding. If any gate fails, deploy aborts
+and the previous working image is preserved.
+
+### Unit Tests (host-side)
+```bash
+./scripts/release.sh unit
+```
+- Runs core pytest + UI vitest on the host (no Docker needed)
+- Use as a fast pre-flight check before building
+
+### Full Redeploy (Legacy)
 ```bash
 ./scripts/release.sh rebuild
 ```
-The one-command path: `down` -> `clean` -> `build` -> `test` -> `up`
+Original path: `down` -> `clean` -> `build` -> `test` -> `up`.
+Prefer `deploy` — it runs unit tests first and only cleans after success.
 
 ### Stop
 ```bash
@@ -119,16 +141,21 @@ Shows: container health, images, volumes, disk usage.
 
 ## Standard Workflow
 
-1. Make code changes (backend or UI)
-2. If UI changed: `cd ui && npm run test` — verify UI tests locally
-3. If UI changed: `cd ui && npm run build` — verify static export succeeds
-4. `./scripts/release.sh build` — build Docker image (includes UI build stage)
-5. `./scripts/release.sh test` — verify backend tests in container
-6. `./scripts/release.sh up` — deploy
-7. `./scripts/release.sh integration` — verify live endpoints
-8. Periodically: `./scripts/release.sh clean` — reclaim disk space
+**Recommended: one command**
+```bash
+./scripts/release.sh deploy
+```
+This runs the full gated pipeline: unit → build → container tests → up → integration → clean.
+Each gate must pass before proceeding. Old images only cleaned after everything succeeds.
 
-Or one command: `./scripts/release.sh rebuild` (does steps 4-7)
+**Manual steps (if you prefer control):**
+1. Make code changes (backend or UI)
+2. `./scripts/release.sh unit` — fast host-side tests (pytest + vitest)
+3. `./scripts/release.sh build` — build Docker image
+4. `./scripts/release.sh test` — verify tests in container
+5. `./scripts/release.sh up` — deploy
+6. `./scripts/release.sh integration` — verify live endpoints
+7. `./scripts/release.sh clean` — reclaim disk space
 
 ### UI Development (dev server)
 ```bash

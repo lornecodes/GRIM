@@ -260,6 +260,7 @@ async def test_mcp():
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    caller_id: str | None = None  # default: "peter" — services pass their own id
 
 
 class ChatResponse(BaseModel):
@@ -279,11 +280,14 @@ async def chat_rest(req: ChatRequest):
     session_id = req.session_id or str(uuid.uuid4())[:8]
     graph_config = {"configurable": {"thread_id": f"grim-web-{session_id}"}}
 
+    caller_id = req.caller_id or "peter"
+
     try:
         result = await _graph.ainvoke(
             {
                 "messages": [HumanMessage(content=req.message)],
                 "session_start": datetime.now(),
+                "caller_id": caller_id,
             },
             config=graph_config,
         )
@@ -326,8 +330,10 @@ async def websocket_chat(ws: WebSocket, session_id: str):
             try:
                 payload = json.loads(data)
                 message = payload.get("message", data)
+                caller_id = payload.get("caller_id", "peter")
             except json.JSONDecodeError:
                 message = data
+                caller_id = "peter"
 
             if not message:
                 continue
@@ -358,6 +364,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     {
                         "messages": [HumanMessage(content=message)],
                         "session_start": datetime.now(),
+                        "caller_id": caller_id,
                     },
                     config=graph_config,
                     version="v2",

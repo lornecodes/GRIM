@@ -19,6 +19,9 @@ def build_system_prompt(
     knowledge_context: list[FDOSummary] | None = None,
     matched_skills: list[SkillContext] | None = None,
     identity_fdo: dict | None = None,
+    personality_cache_path: Path | None = None,
+    caller_id: str | None = None,
+    caller_context: str | None = None,
 ) -> str:
     """Build the full system prompt for the GRIM companion.
 
@@ -26,6 +29,8 @@ def build_system_prompt(
     1. Base identity from system_prompt.md
     2. Field state modulation (expression mode)
     3. Identity FDO enrichment from Kronos (if available)
+    3b. Personality profile from compiled cache (if available)
+    3c. Caller context from people FDO (if available)
     4. Knowledge context summary (if available)
     5. Matched skill context (if available)
     """
@@ -55,6 +60,24 @@ def build_system_prompt(
         body = identity_fdo.get("body", "")
         if body:
             sections.append(f"\n## Extended Identity (from Kronos)\n\n{body}")
+
+    # 3b. Personality profile (from compiled cache)
+    if personality_cache_path and personality_cache_path.exists():
+        cache_content = personality_cache_path.read_text(encoding="utf-8").strip()
+        # Skip the HTML comment header line (contains sync metadata)
+        lines = cache_content.split("\n")
+        body = "\n".join(l for l in lines if not l.strip().startswith("<!--"))
+        if body.strip():
+            sections.append(body.strip())
+
+    # 3c. Caller context (from people FDO)
+    if caller_context:
+        sections.append(caller_context)
+    elif caller_id and caller_id != "peter":
+        sections.append(
+            f"\n## Current Caller\n\nCaller: {caller_id}\n"
+            "Not the owner. Respond helpfully but without personal familiarity."
+        )
 
     # 4. Knowledge context
     if knowledge_context:

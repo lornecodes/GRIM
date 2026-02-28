@@ -37,19 +37,50 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  # ── AI Bridge (token tracking proxy) ─────────────────────
+  ai-bridge:
+    build: bridge/
+    container_name: ai-bridge
+    depends_on:
+      cliproxyapi:
+        condition: service_healthy
+    environment:
+      - UPSTREAM_URL=http://cliproxyapi:8317
+      - BRIDGE_DB_PATH=/data/tokens.db
+    volumes:
+      - bridge-data:/data
+    expose:
+      - "8318"
+    ports:
+      - "127.0.0.1:8318:8318"   # Dashboard API — localhost only
+    networks:
+      - grim-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8318/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   # ── GRIM ──────────────────────────────────────────────────
   grim:
     build: .
     image: grim:latest
     container_name: grim
     depends_on:
-      cliproxyapi:
-        condition: service_started
+      ai-bridge:
+        condition: service_healthy
     ports:
       - "${GRIM_PORT:-8080}:8080"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-placeholder-for-proxy}
-      - ANTHROPIC_BASE_URL=http://cliproxyapi:8317
+      - ANTHROPIC_BASE_URL=http://ai-bridge:8318
       - GRIM_ENV=${GRIM_ENV:-debug}
       - KRONOS_VAULT_PATH=/vault
       - KRONOS_SKILLS_PATH=/app/skills
@@ -79,6 +110,8 @@ networks:
 volumes:
   cliproxyapi-auths:
     name: cliproxyapi-auths
+  bridge-data:
+    name: bridge-data
   grim-sessions:
     name: grim-sessions
   grim-evolution:

@@ -1,0 +1,76 @@
+name: kronos-journal
+version: "1.0"
+description: >
+  Structured journal entries and technical notes in the Kronos vault.
+  Journals capture learnings, debugging sessions, discoveries, and
+  decisions as dated FDOs in journal/ or notes/. Unlike kronos-capture
+  (quick inbox notes), this produces full FDOs with frontmatter,
+  connections, and source references — the permanent record.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:write
+  - vault:read
+
+consumers:
+  memory-agent:
+    role: execution
+    description: Creates journal/notes FDOs via Kronos MCP tools
+    reads: [protocol.md, inputs, outputs, quality_gates]
+  grim:
+    role: recognition
+    description: Identifies when learnings should be journaled
+    reads: [triggers, quality_gates]
+
+inputs:
+  type:
+    type: enum
+    values: [journal, note]
+    required: true
+    description: >
+      journal: dated entry about a session, discovery, or debugging experience.
+      note: standalone technical reference (not date-specific).
+  title:
+    type: string
+    required: true
+    description: Descriptive title for the entry
+  tags:
+    type: list
+    required: true
+    description: Tags for search and cross-referencing
+  related:
+    type: list
+    required: false
+    description: IDs of related FDOs to link
+  source_paths:
+    type: list
+    required: false
+    description: Paths to source files referenced in the entry
+
+outputs:
+  fdo_path: string
+  fdo_id: string
+
+triggers:
+  - explicit: "User says 'journal this', 'write this up', 'record this learning'"
+  - explicit: "User says 'make a note about', 'save a note on'"
+  - proactive: "A debugging session reveals non-obvious insights worth preserving"
+  - proactive: "A workaround or architectural decision is made that future sessions need"
+  - keywords:
+      strong: ["journal this", "write this up", "record this", "make a note"]
+      weak: ["we should remember", "for next time", "learning", "discovery"]
+
+safety:
+  - "Never overwrite existing FDOs — create new entries"
+  - "Always search vault first to avoid duplicating existing knowledge"
+  - "Include source_paths for any code/config files referenced"
+  - "Link to related FDOs via the related field"
+
+quality_gates:
+  - "Frontmatter is complete (id, title, domain, dates, status, tags, related)"
+  - "Entry captures the WHY, not just the what — include context and reasoning"
+  - "Source paths point to real files"
+  - "Related FDOs are linked bidirectionally where appropriate"
+  - "Search confirms no duplicate entries exist"

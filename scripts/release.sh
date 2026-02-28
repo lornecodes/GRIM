@@ -6,13 +6,15 @@
 #
 # Usage:
 #   ./scripts/release.sh build     Build image with version tag
+#   ./scripts/release.sh unit      Run host-side unit tests (no Docker)
 #   ./scripts/release.sh test      Run all tests inside container
 #   ./scripts/release.sh up        Start GRIM (detached)
 #   ./scripts/release.sh down      Stop GRIM
 #   ./scripts/release.sh logs      Tail container logs
 #   ./scripts/release.sh status    Show container health + image info
 #   ./scripts/release.sh clean     Remove old images + dangling layers
-#   ./scripts/release.sh rebuild   Full redeploy: clean → build → test → up
+#   ./scripts/release.sh deploy    Gated: unit → build → test → up → integration → clean
+#   ./scripts/release.sh rebuild   Full redeploy: clean → build → test → up (legacy)
 #   ./scripts/release.sh prod      Production deploy (with prod override)
 #
 # Environment:
@@ -254,6 +256,33 @@ cmd_clean() {
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
 }
 
+cmd_unit() {
+    _log "Running host-side unit tests ..."
+
+    # Core unit tests (no Docker, no vault needed)
+    _log "── Core unit tests (host) ──"
+    (cd "$GRIM_DIR" && python -m pytest tests/test_grim_core.py -v --tb=short) || {
+        _err "Core unit tests FAILED — aborting"
+        return 1
+    }
+
+    # UI tests (if available)
+    local ui_dir="$GRIM_DIR/ui"
+    if [[ -d "$ui_dir" && -f "$ui_dir/package.json" ]]; then
+        _log "── UI tests (vitest) ──"
+        if command -v npm &>/dev/null; then
+            (cd "$ui_dir" && npm run test) || {
+                _err "UI tests FAILED — aborting"
+                return 1
+            }
+        else
+            _warn "npm not found — skipping UI tests"
+        fi
+    fi
+
+    _ok "All host-side unit tests passed"
+}
+
 cmd_rebuild() {
     _log "Full rebuild: clean → build → test → up → integration"
     cmd_down 2>/dev/null || true
@@ -265,6 +294,41 @@ cmd_rebuild() {
     _ok "Rebuild complete — GRIM is running on port ${GRIM_PORT:-8080}"
 }
 
+cmd_deploy() {
+    _log "Gated deploy: unit → build → container tests → up → integration → clean"
+    _log ""
+
+    # Gate 1: Host-side unit tests (fast, no Docker)
+    _log "━━━ Gate 1: Unit Tests ━━━"
+    cmd_unit || { _err "Deploy aborted at Gate 1 (unit tests)"; return 1; }
+    _log ""
+
+    # Gate 2: Build Docker image
+    _log "━━━ Gate 2: Build Image ━━━"
+    cmd_build || { _err "Deploy aborted at Gate 2 (build)"; return 1; }
+    _log ""
+
+    # Gate 3: Container tests (MCP handler + E2E inside Docker)
+    _log "━━━ Gate 3: Container Tests ━━━"
+    cmd_test || { _err "Deploy aborted at Gate 3 (container tests)"; return 1; }
+    _log ""
+
+    # Gate 4: Bring up + integration tests against live container
+    _log "━━━ Gate 4: Integration ━━━"
+    cmd_down 2>/dev/null || true
+    cmd_up || { _err "Deploy aborted at Gate 4 (startup)"; return 1; }
+    cmd_integration || { _err "Deploy aborted at Gate 4 (integration tests)"; return 1; }
+    _log ""
+
+    # Gate 5: Clean old versions (only after everything passes)
+    _log "━━━ Gate 5: Cleanup ━━━"
+    cmd_clean
+
+    _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    _ok "Deploy complete — GRIM is running on port ${GRIM_PORT:-8080}"
+    _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
 cmd_integration() {
     _log "Running integration tests against live container ..."
     local flags="--no-start"
@@ -273,13 +337,16 @@ cmd_integration() {
         flags="$flags --no-llm"
     fi
     python "$GRIM_DIR/tests/test_integration.py" \
-        --port "${GRIM_PORT:-8080}" $flags || \
-        _warn "Some integration tests failed (check output above)"
+        --port "${GRIM_PORT:-8080}" $flags || {
+        _err "Integration tests failed"
+        return 1
+    }
 }
 
 cmd_prod() {
     GRIM_PROD=1
     _log "Production deploy ..."
+    cmd_unit || { _err "Unit tests failed — aborting prod deploy"; return 1; }
     cmd_build
     GRIM_PROD=1 _compose up -d
     _ok "Production GRIM running"
@@ -290,12 +357,14 @@ cmd_prod() {
 case "${1:-up}" in
     build)       cmd_build ;;
     test)        cmd_test ;;
+    unit)        cmd_unit ;;
     up)          cmd_up ;;
     down)        cmd_down ;;
     logs)        cmd_logs ;;
     status)      cmd_status ;;
     clean)       cmd_clean ;;
     rebuild)     cmd_rebuild ;;
+    deploy)      cmd_deploy ;;
     integration) cmd_integration ;;
     prod)        cmd_prod ;;
     help|-h|--help)
@@ -307,14 +376,16 @@ case "${1:-up}" in
         echo "Commands:"
         echo "  up            Start GRIM (default — docker compose up -d)"
         echo "  build         Build Docker image with version tag"
+        echo "  unit          Run host-side unit tests (no Docker)"
         echo "  test          Run unit + handler tests inside container"
         echo "  integration   Run integration tests against live container"
+        echo "  deploy        Gated pipeline: unit → build → test → up → integration → clean"
         echo "  down          Stop GRIM"
         echo "  logs          Tail container logs"
         echo "  status        Show containers, images, volumes, disk usage"
         echo "  clean         Remove old images + dangling layers (keeps last $KEEP_IMAGES)"
-        echo "  rebuild       Full redeploy: clean → build → test → up → integration"
-        echo "  prod          Production deploy (with resource limits)"
+        echo "  rebuild       Full redeploy: clean → build → test → up → integration (legacy)"
+        echo "  prod          Production deploy (unit tests + build + resource limits)"
         echo ""
         echo "Environment:"
         echo "  GRIM_KEEP=N          Images to keep during clean (default: 3)"

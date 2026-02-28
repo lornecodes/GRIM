@@ -280,10 +280,15 @@ async def websocket_chat(ws: WebSocket):
                 # Invoke the GRIM graph
                 graph_config = {"configurable": {"thread_id": session_info["thread_id"]}}
 
+                # Default caller is Peter (web UI).
+                # Services can override via message payload: {"caller_id": "ironclaw"}
+                caller_id = data.get("caller_id", "peter")
+
                 result = await _graph.ainvoke(
                     {
                         "messages": [HumanMessage(content=content)],
                         "session_start": datetime.now(),
+                        "caller_id": caller_id,
                     },
                     config=graph_config,
                 )

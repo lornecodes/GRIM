@@ -144,6 +144,10 @@ class GrimState(TypedDict, total=False):
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]
 
+    # Caller identity (resolved at session start)
+    caller_id: str  # "peter", "ironclaw", etc. — defaults to "peter"
+    caller_context: Optional[str]  # compiled caller profile for prompt injection
+
     # Evolution tracking
     session_topics: list[str]
     session_start: datetime

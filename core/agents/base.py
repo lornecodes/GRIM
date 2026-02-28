@@ -35,6 +35,7 @@ class BaseAgent:
             model=config.model,
             temperature=0.3,  # lower temp for agents — precision matters
             max_tokens=config.max_tokens,
+            default_headers={"X-Caller-ID": "grim"},
         )
         if tools:
             self.llm_with_tools = self.llm.bind_tools(tools)
@@ -72,8 +73,12 @@ class BaseAgent:
 
         system_prompt = "\n".join(system_parts)
 
+        # Pass system prompt via messages (not the API system field).
+        # CLIProxyAPI injects "You are Claude Code..." into the system field;
+        # the proxy config filters it out, so we use messages instead.
         messages = [
-            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"[SYSTEM INSTRUCTIONS — follow exactly]\n{system_prompt}\n[END SYSTEM INSTRUCTIONS]"),
+            AIMessage(content=f"Understood. I am the {self.agent_name} agent and will follow these instructions."),
             HumanMessage(content=task),
         ]
 
