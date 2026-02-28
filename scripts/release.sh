@@ -9,7 +9,8 @@
 #   ironclaw   — Rust sandboxed execution engine (REST gateway)
 #
 # Usage:
-#   ./scripts/release.sh build     Build GRIM + IronClaw images
+#   ./scripts/release.sh setup     Full local setup (Python + UI + IronClaw + tests)
+#   ./scripts/release.sh build     Build GRIM + IronClaw Docker images
 #   ./scripts/release.sh unit      Run host-side unit tests (no Docker)
 #   ./scripts/release.sh test      Run all tests inside container
 #   ./scripts/release.sh up        Start GRIM + IronClaw (detached)
@@ -408,6 +409,106 @@ cmd_prod() {
     _ok "Production GRIM running"
 }
 
+cmd_setup() {
+    _log "Setting up GRIM + IronClaw (local development) ..."
+    _log ""
+
+    # ── 1. Python deps ──
+    _log "━━━ Python Dependencies ━━━"
+    if command -v python &>/dev/null; then
+        (cd "$GRIM_DIR" && pip install -e ".[server,cache]") || {
+            _err "Python dependency install failed"
+            return 1
+        }
+        # Kronos MCP
+        if [[ -d "$GRIM_DIR/mcp/kronos" ]]; then
+            (cd "$GRIM_DIR" && pip install -e "./mcp/kronos[cache]") || {
+                _warn "Kronos MCP install failed (non-fatal)"
+            }
+        fi
+        _ok "Python deps installed"
+    else
+        _err "Python not found — install Python 3.11+"
+        return 1
+    fi
+    _log ""
+
+    # ── 2. UI setup ──
+    _log "━━━ UI Setup (Next.js) ━━━"
+    local ui_dir="$GRIM_DIR/ui"
+    if [[ -d "$ui_dir" && -f "$ui_dir/package.json" ]]; then
+        if command -v npm &>/dev/null; then
+            (cd "$ui_dir" && npm ci) || {
+                _err "npm ci failed"
+                return 1
+            }
+            _log "Building UI ..."
+            (cd "$ui_dir" && npm run build) || {
+                _err "UI build failed"
+                return 1
+            }
+            _ok "UI built (output in ui/out/)"
+        else
+            _err "npm not found — install Node.js 20+"
+            return 1
+        fi
+    else
+        _warn "UI directory not found at $ui_dir"
+    fi
+    _log ""
+
+    # ── 3. IronClaw engine (Rust) ──
+    _log "━━━ IronClaw Engine (Rust) ━━━"
+    if [[ -d "$ENGINE_DIR" && -f "$ENGINE_DIR/Cargo.toml" ]]; then
+        if command -v cargo &>/dev/null; then
+            _log "Building IronClaw (this may take a few minutes on first run) ..."
+            (cd "$ENGINE_DIR" && cargo build --release) || {
+                _err "IronClaw build failed"
+                return 1
+            }
+            local binary
+            if [[ -f "$ENGINE_DIR/target/release/ironclaw.exe" ]]; then
+                binary="$ENGINE_DIR/target/release/ironclaw.exe"
+            elif [[ -f "$ENGINE_DIR/target/release/ironclaw" ]]; then
+                binary="$ENGINE_DIR/target/release/ironclaw"
+            fi
+            if [[ -n "$binary" ]]; then
+                _ok "IronClaw built: $binary"
+            else
+                _warn "Build succeeded but binary not found in expected location"
+            fi
+        else
+            _warn "Rust/cargo not found — IronClaw engine won't be available locally"
+            _warn "Install: https://rustup.rs/ or use Docker (release.sh deploy)"
+        fi
+    else
+        _warn "IronClaw engine not found at $ENGINE_DIR"
+    fi
+    _log ""
+
+    # ── 4. Local directories ──
+    _log "━━━ Local Directories ━━━"
+    mkdir -p "$GRIM_DIR/local/evolution" "$GRIM_DIR/local/objectives" "$GRIM_DIR/logs"
+    _ok "Created local/, logs/"
+    _log ""
+
+    # ── 5. Run tests ──
+    _log "━━━ Verification ━━━"
+    cmd_unit || {
+        _warn "Some tests failed — check output above"
+    }
+    _log ""
+
+    _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    _ok "Setup complete!"
+    _ok ""
+    _ok "Next steps:"
+    _ok "  Local dev:   uvicorn server.app:app --reload --port 8080"
+    _ok "  Docker:      ./scripts/release.sh deploy"
+    _ok "  IronClaw:    ironclaw ui --config engine/config/grim.yaml"
+    _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
 # ── Main ──────────────────────────────────────────────────────
 
 case "${1:-up}" in
@@ -422,6 +523,7 @@ case "${1:-up}" in
     rebuild)     cmd_rebuild ;;
     deploy)      cmd_deploy ;;
     integration) cmd_integration ;;
+    setup)       cmd_setup ;;
     prod)        cmd_prod ;;
     help|-h|--help)
         echo ""
@@ -430,6 +532,7 @@ case "${1:-up}" in
         echo "Usage: $0 <command>"
         echo ""
         echo "Commands:"
+        echo "  setup         Full local setup: Python deps + UI build + IronClaw + tests"
         echo "  up            Start GRIM + IronClaw (default — docker compose up -d)"
         echo "  build         Build GRIM + IronClaw Docker images with version tag"
         echo "  unit          Run host-side unit tests (no Docker)"
