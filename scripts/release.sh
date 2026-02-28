@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # ── GRIM Release Manager ─────────────────────────────────────
 #
-# Single script for the full Docker lifecycle:
+# Single script for the full Docker lifecycle (GRIM + IronClaw):
 #   build, test, deploy, clean, status.
 #
+# Builds TWO images:
+#   grim       — Python/FastAPI/LangGraph AI companion
+#   ironclaw   — Rust sandboxed execution engine (REST gateway)
+#
 # Usage:
-#   ./scripts/release.sh build     Build image with version tag
+#   ./scripts/release.sh build     Build GRIM + IronClaw images
 #   ./scripts/release.sh unit      Run host-side unit tests (no Docker)
 #   ./scripts/release.sh test      Run all tests inside container
-#   ./scripts/release.sh up        Start GRIM (detached)
-#   ./scripts/release.sh down      Stop GRIM
+#   ./scripts/release.sh up        Start GRIM + IronClaw (detached)
+#   ./scripts/release.sh down      Stop GRIM + IronClaw
 #   ./scripts/release.sh logs      Tail container logs
 #   ./scripts/release.sh status    Show container health + image info
 #   ./scripts/release.sh clean     Remove old images + dangling layers
@@ -29,11 +33,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRIM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMAGE_NAME="grim"
+IRONCLAW_IMAGE_NAME="ironclaw"
 KEEP_IMAGES="${GRIM_KEEP:-3}"
 
 # Compose file paths (quoted separately to handle spaces in paths)
 COMPOSE_FILE="$GRIM_DIR/docker-compose.yml"
 COMPOSE_PROD_FILE="$GRIM_DIR/docker-compose.prod.yml"
+
+# IronClaw engine
+ENGINE_DIR="$GRIM_DIR/engine"
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -66,24 +74,23 @@ cmd_build() {
     local tag
     tag=$(_version_tag)
 
+    # ── Build IronClaw engine image ──
+    if [[ -d "$ENGINE_DIR" && -f "$ENGINE_DIR/Dockerfile" ]]; then
+        _log "Building $IRONCLAW_IMAGE_NAME:$tag ..."
+        docker build -t "$IRONCLAW_IMAGE_NAME:$tag" -t "$IRONCLAW_IMAGE_NAME:latest" "$ENGINE_DIR"
+        _ok "Built: $IRONCLAW_IMAGE_NAME:$tag + $IRONCLAW_IMAGE_NAME:latest"
+
+        _clean_old_images "$IRONCLAW_IMAGE_NAME"
+    else
+        _warn "IronClaw engine not found at $ENGINE_DIR — skipping engine build"
+    fi
+
+    # ── Build GRIM image ──
     _log "Building $IMAGE_NAME:$tag ..."
     docker build -t "$IMAGE_NAME:$tag" -t "$IMAGE_NAME:latest" "$GRIM_DIR"
-
     _ok "Built: $IMAGE_NAME:$tag + $IMAGE_NAME:latest"
 
-    # Auto-cleanup: remove old image tags (keeps last KEEP_IMAGES + latest)
-    _log "Cleaning old images (keeping last $KEEP_IMAGES) ..."
-    local all_tags
-    all_tags=$(docker images "$IMAGE_NAME" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r)
-    local count=0
-    while IFS= read -r old_tag; do
-        [[ -z "$old_tag" ]] && continue
-        count=$((count + 1))
-        if [[ $count -gt $KEEP_IMAGES ]]; then
-            _log "Removing old image: $IMAGE_NAME:$old_tag"
-            docker rmi "$IMAGE_NAME:$old_tag" 2>/dev/null || true
-        fi
-    done <<< "$all_tags"
+    _clean_old_images "$IMAGE_NAME"
 
     # Remove dangling images from this build
     local dangling
@@ -92,7 +99,26 @@ cmd_build() {
         echo "$dangling" | xargs docker rmi -f 2>/dev/null || true
     fi
 
-    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+    _log "── Images ──"
+    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null
+    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
+}
+
+_clean_old_images() {
+    # Remove old image tags for a given image name (keeps last KEEP_IMAGES + latest)
+    local img_name="$1"
+    _log "Cleaning old $img_name images (keeping last $KEEP_IMAGES) ..."
+    local all_tags
+    all_tags=$(docker images "$img_name" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r)
+    local count=0
+    while IFS= read -r old_tag; do
+        [[ -z "$old_tag" ]] && continue
+        count=$((count + 1))
+        if [[ $count -gt $KEEP_IMAGES ]]; then
+            _log "Removing old image: $img_name:$old_tag"
+            docker rmi "$img_name:$old_tag" 2>/dev/null || true
+        fi
+    done <<< "$all_tags"
 }
 
 cmd_test() {
@@ -121,18 +147,18 @@ cmd_test() {
         vault=""
     fi
 
-    # Core unit tests — no vault needed, uses mocks
-    _log "── Core unit tests ──"
+    # Core + model routing + IronClaw + agent integration tests — no vault needed
+    _log "── Core + routing + IronClaw + agent tests (container) ──"
     MSYS_NO_PATHCONV=1 docker run --rm \
         -e KRONOS_VAULT_PATH=/app/tests/vault \
         -e KRONOS_SKILLS_PATH=/app/skills \
         "$IMAGE_NAME:latest" \
-        python -m pytest tests/test_grim_core.py -v --tb=short 2>/dev/null || \
-    MSYS_NO_PATHCONV=1 docker run --rm \
-        -e KRONOS_VAULT_PATH=/app/tests/vault \
-        -e KRONOS_SKILLS_PATH=/app/skills \
-        "$IMAGE_NAME:latest" \
-        python tests/test_grim_core.py
+        python -m pytest \
+            tests/test_grim_core.py \
+            tests/test_model_routing.py \
+            tests/test_ironclaw.py \
+            tests/test_agent_integration.py \
+            -v --tb=short
 
     if [[ -n "$vault" ]]; then
         # MCP handler tests (57) — needs real vault (rw for write tests)
@@ -165,14 +191,26 @@ cmd_test() {
 }
 
 cmd_up() {
-    _log "Starting GRIM ..."
+    _log "Starting GRIM + IronClaw ..."
 
-    # Use pre-built image — don't rebuild (compose cache can serve stale layers).
+    # Use pre-built images — don't rebuild (compose cache can serve stale layers).
     # Run 'release.sh build' first if code changed.
     _compose up -d
-    _log "Waiting for health check ..."
-    sleep 3
+    _log "Waiting for health checks ..."
+    sleep 5
 
+    # Check IronClaw health
+    local ic_health
+    ic_health=$(docker inspect --format='{{.State.Health.Status}}' ironclaw 2>/dev/null || echo "not found")
+    if [[ "$ic_health" == "healthy" ]]; then
+        _ok "IronClaw is healthy (port 3100, internal network)"
+    elif [[ "$ic_health" == "not found" ]]; then
+        _warn "IronClaw container not found — running GRIM without sandbox"
+    else
+        _warn "IronClaw health: $ic_health (may still be starting)"
+    fi
+
+    # Check GRIM health
     local health
     health=$(docker inspect --format='{{.State.Health.Status}}' grim 2>/dev/null || echo "unknown")
     if [[ "$health" == "healthy" ]]; then
@@ -196,17 +234,20 @@ cmd_logs() {
 cmd_status() {
     echo ""
     _log "── Container Status ──"
-    docker ps --filter "name=grim" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No containers"
+    docker ps --filter "name=grim" --filter "name=ironclaw" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No containers"
 
     echo ""
     _log "── Health ──"
-    local health
-    health=$(docker inspect --format='{{.State.Health.Status}}' grim 2>/dev/null || echo "not running")
-    echo "  Health: $health"
+    local grim_health ic_health
+    grim_health=$(docker inspect --format='{{.State.Health.Status}}' grim 2>/dev/null || echo "not running")
+    ic_health=$(docker inspect --format='{{.State.Health.Status}}' ironclaw 2>/dev/null || echo "not running")
+    echo "  GRIM:     $grim_health"
+    echo "  IronClaw: $ic_health"
 
     echo ""
     _log "── Images ──"
-    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || echo "No images"
+    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || echo "No GRIM images"
+    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || echo "No IronClaw images"
 
     echo ""
     _log "── Volumes ──"
@@ -220,26 +261,19 @@ cmd_status() {
 cmd_clean() {
     _log "Cleaning up Docker resources ..."
 
-    # 1. Remove stopped grim containers
+    # 1. Remove stopped grim + ironclaw containers
     local stopped
-    stopped=$(docker ps -a --filter "name=grim" --filter "status=exited" -q 2>/dev/null)
-    if [[ -n "$stopped" ]]; then
-        _log "Removing stopped containers ..."
-        echo "$stopped" | xargs docker rm -f
-    fi
-
-    # 2. Remove old image tags (keep KEEP_IMAGES most recent + latest)
-    local all_tags
-    all_tags=$(docker images "$IMAGE_NAME" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r)
-    local count=0
-    while IFS= read -r tag; do
-        [[ -z "$tag" ]] && continue
-        count=$((count + 1))
-        if [[ $count -gt $KEEP_IMAGES ]]; then
-            _log "Removing old image: $IMAGE_NAME:$tag"
-            docker rmi "$IMAGE_NAME:$tag" 2>/dev/null || true
+    for name in grim ironclaw; do
+        stopped=$(docker ps -a --filter "name=$name" --filter "status=exited" -q 2>/dev/null)
+        if [[ -n "$stopped" ]]; then
+            _log "Removing stopped $name containers ..."
+            echo "$stopped" | xargs docker rm -f
         fi
-    done <<< "$all_tags"
+    done
+
+    # 2. Remove old image tags for both images
+    _clean_old_images "$IMAGE_NAME"
+    _clean_old_images "$IRONCLAW_IMAGE_NAME"
 
     # 3. Remove dangling images
     local dangling
@@ -254,6 +288,7 @@ cmd_clean() {
 
     _ok "Cleanup complete"
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
+    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
 }
 
 cmd_unit() {
@@ -263,6 +298,27 @@ cmd_unit() {
     _log "── Core unit tests (host) ──"
     (cd "$GRIM_DIR" && python -m pytest tests/test_grim_core.py -v --tb=short) || {
         _err "Core unit tests FAILED — aborting"
+        return 1
+    }
+
+    # Model routing tests
+    _log "── Model routing tests (host) ──"
+    (cd "$GRIM_DIR" && python -m pytest tests/test_model_routing.py -v --tb=short) || {
+        _err "Model routing tests FAILED — aborting"
+        return 1
+    }
+
+    # IronClaw bridge tests
+    _log "── IronClaw bridge tests (host) ──"
+    (cd "$GRIM_DIR" && python -m pytest tests/test_ironclaw.py -v --tb=short) || {
+        _err "IronClaw tests FAILED — aborting"
+        return 1
+    }
+
+    # Agent integration tests
+    _log "── Agent integration tests (host) ──"
+    (cd "$GRIM_DIR" && python -m pytest tests/test_agent_integration.py -v --tb=short) || {
+        _err "Agent integration tests FAILED — aborting"
         return 1
     }
 
@@ -291,7 +347,7 @@ cmd_rebuild() {
     cmd_test
     cmd_up
     cmd_integration
-    _ok "Rebuild complete — GRIM is running on port ${GRIM_PORT:-8080}"
+    _ok "Rebuild complete — GRIM + IronClaw running on port ${GRIM_PORT:-8080}"
 }
 
 cmd_deploy() {
@@ -325,7 +381,7 @@ cmd_deploy() {
     cmd_clean
 
     _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    _ok "Deploy complete — GRIM is running on port ${GRIM_PORT:-8080}"
+    _ok "Deploy complete — GRIM + IronClaw running on port ${GRIM_PORT:-8080}"
     _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -374,13 +430,13 @@ case "${1:-up}" in
         echo "Usage: $0 <command>"
         echo ""
         echo "Commands:"
-        echo "  up            Start GRIM (default — docker compose up -d)"
-        echo "  build         Build Docker image with version tag"
+        echo "  up            Start GRIM + IronClaw (default — docker compose up -d)"
+        echo "  build         Build GRIM + IronClaw Docker images with version tag"
         echo "  unit          Run host-side unit tests (no Docker)"
         echo "  test          Run unit + handler tests inside container"
-        echo "  integration   Run integration tests against live container"
+        echo "  integration   Run integration tests against live containers"
         echo "  deploy        Gated pipeline: unit → build → test → up → integration → clean"
-        echo "  down          Stop GRIM"
+        echo "  down          Stop GRIM + IronClaw"
         echo "  logs          Tail container logs"
         echo "  status        Show containers, images, volumes, disk usage"
         echo "  clean         Remove old images + dangling layers (keeps last $KEEP_IMAGES)"
