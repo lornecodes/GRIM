@@ -32,6 +32,8 @@ TOOL_TTLS: dict[str, int | None] = {
     "kronos_skill_load": 600,   # 10 min
     "kronos_navigate":   300,   # 5 min
     "kronos_deep_dive":  300,   # 5 min
+    "kronos_read_source":   120,   # 2 min — source files change during dev
+    "kronos_search_source": 120,   # 2 min
     # Write tools — never cached, trigger invalidation
     "kronos_create":     None,
     "kronos_update":     None,

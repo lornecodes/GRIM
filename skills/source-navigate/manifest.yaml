@@ -1,0 +1,55 @@
+name: source-navigate
+version: "1.0"
+description: >
+  Navigate from vault concepts to actual source code, experiments, and documentation.
+  Combines kronos_deep_dive path resolution with kronos_read_source file reading and
+  kronos_search_source content grep to close the concept-to-code loop.
+type: instruction-protocol
+entry_point: protocol.md
+
+permissions:
+  - vault:read
+  - filesystem:read
+
+inputs:
+  concept:
+    type: string
+    required: true
+    description: "FDO ID, search query, or natural language concept to navigate to"
+  goal:
+    type: enum
+    required: false
+    default: browse
+    description: "What the agent wants to do with the source material"
+    values: [browse, search, understand]
+
+outputs:
+  source_content: "File content or grep matches from source material"
+  navigation_path: "Chain of tools used to reach the source"
+
+triggers:
+  - explicit: "User asks 'find the code for X', 'where is Y implemented', 'show me the source'"
+  - explicit: "User asks 'search the experiments for X', 'grep for Y in the physics code'"
+  - explicit: "User asks 'how does X work in the codebase'"
+  - delegation: "GRIM needs to inspect source material referenced by an FDO"
+
+consumers:
+  grim:
+    role: delegation
+    description: "GRIM delegates source navigation when user asks about implementations"
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: "Memory agent executes the navigation chain using MCP tools"
+    reads: [protocol.md, inputs, outputs, phases, quality_gates]
+
+phases:
+  1_discover: "Find the concept FDO using kronos_search"
+  2_map: "Gather source_paths using kronos_deep_dive"
+  3_navigate: "Browse directories and read files using kronos_navigate + kronos_read_source"
+  4_search: "Grep across source files using kronos_search_source"
+
+quality_gates:
+  - "Source paths resolve to existing files/directories"
+  - "File content is returned without path traversal errors"
+  - "Search results include line numbers and context"

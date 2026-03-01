@@ -3,19 +3,23 @@ Kronos MCP Server — knowledge vault + skills for AI agents.
 
 Tools:
   Vault:
-    kronos_search       — Full-text search across all FDOs
-    kronos_get          — Read a specific FDO by ID
-    kronos_list         — List FDOs (optionally filtered by domain)
-    kronos_graph        — Traverse the relationship graph around an FDO
-    kronos_validate     — Run vault-wide validation checks
-    kronos_create       — Create a new FDO
-    kronos_update       — Update fields on an existing FDO
-    kronos_deep_dive    — Gather source material paths for a concept
-    kronos_navigate     — Read directory metadata (meta.yaml) for repo navigation
+    kronos_search         — Full-text search across all FDOs
+    kronos_get            — Read a specific FDO by ID
+    kronos_list           — List FDOs (optionally filtered by domain)
+    kronos_graph          — Traverse the relationship graph around an FDO
+    kronos_validate       — Run vault-wide validation checks
+    kronos_create         — Create a new FDO
+    kronos_update         — Update fields on an existing FDO
+    kronos_deep_dive      — Gather source material paths for a concept
+    kronos_navigate       — Read directory metadata (meta.yaml) for repo navigation
+
+  Source Navigation:
+    kronos_read_source    — Read file content from a repo source path
+    kronos_search_source  — Grep across source files referenced by an FDO
 
   Skills:
-    kronos_skills       — List all available GRIM skills
-    kronos_skill_load   — Load a skill's full instruction protocol
+    kronos_skills         — List all available GRIM skills
+    kronos_skill_load     — Load a skill's full instruction protocol
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Sequence
 from datetime import date
@@ -366,6 +371,85 @@ TOOLS: list[Tool] = [
             "required": ["path"],
         },
     ),
+    # ── Source navigation tools ──
+    Tool(
+        name="kronos_read_source",
+        description=(
+            "Read file content from a source path within the workspace. Use after "
+            "kronos_deep_dive or kronos_navigate to inspect actual code, experiments, "
+            "scripts, or documentation referenced in FDO source_paths. "
+            "Supports line-range selection for large files via offset/max_lines."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name (e.g., 'dawn-field-theory', 'fracton', 'reality-engine')",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Relative path within the repo (e.g., 'fracton/core/pac_regulation.py')",
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "Maximum lines to return (default 200, max 500). Use offset for pagination.",
+                    "default": 200,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Line offset to start reading from (0-based, default 0).",
+                    "default": 0,
+                },
+            },
+            "required": ["repo", "path"],
+        },
+    ),
+    Tool(
+        name="kronos_search_source",
+        description=(
+            "Search within source files referenced by an FDO's source_paths. "
+            "Combines concept resolution with content grep — go from FDO ID to "
+            "matching code lines in one call. Accepts an FDO ID or search query, "
+            "then greps across its source files for the given pattern. "
+            "Use to find function definitions, constants, or patterns within "
+            "a concept's source material."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "FDO ID (exact) or search query to find the concept",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Text pattern to search for in source files (case-insensitive substring match)",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Hops of related FDOs to include (default 0 = just the root FDO, max 3)",
+                    "default": 0,
+                },
+                "type_filter": {
+                    "type": "string",
+                    "description": "Filter source_paths by type before searching",
+                    "enum": ["experiment", "script", "module", "doc", "config", "data"],
+                },
+                "max_matches": {
+                    "type": "integer",
+                    "description": "Maximum total file match groups to return (default 30, max 100)",
+                    "default": 30,
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Lines of context before and after each match (default 2, max 5)",
+                    "default": 2,
+                },
+            },
+            "required": ["query", "pattern"],
+        },
+    ),
 ]
 
 
@@ -411,6 +495,225 @@ def _fdo_full(fdo: FDO) -> dict:
     if fdo.extra:
         d.update(fdo.extra)
     return d
+
+
+# ── Source navigation helpers ────────────────────────────────────────────────
+
+_SOURCE_EXTENSIONS = frozenset((
+    ".py", ".md", ".yaml", ".yml", ".json", ".toml", ".txt",
+    ".rst", ".cfg", ".ini", ".sh", ".bash", ".ps1", ".tex",
+))
+
+
+def _validate_workspace_path(repo: str, rel_path: str) -> tuple[Path | None, str | None]:
+    """Resolve and validate a repo/path pair within the workspace.
+
+    Returns (resolved_path, error_message). error_message is None on success.
+    """
+    workspace = Path(vault_path).parent
+    target = (workspace / repo / rel_path).resolve()
+    if not target.is_relative_to(workspace.resolve()):
+        return None, "Path traversal blocked — path must be within workspace"
+    return target, None
+
+
+def _normalize_source_path(sp: Any) -> tuple[str, str, str]:
+    """Normalize both structured and legacy flat-string source_paths.
+
+    Returns (repo, path, type).
+    """
+    if isinstance(sp, dict):
+        return sp.get("repo", ""), sp.get("path", ""), sp.get("type", "unknown")
+    if isinstance(sp, str):
+        parts = sp.strip().split("/", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1], "unknown"
+        return parts[0], "", "unknown"
+    return "", "", "unknown"
+
+
+# ── Source navigation handlers ───────────────────────────────────────────────
+
+def handle_read_source(args: dict) -> str:
+    """Read file content from a repo source path."""
+    repo = args.get("repo", "").strip().strip("/\\")
+    rel_path = args.get("path", "").strip().strip("/\\")
+    max_lines = min(args.get("max_lines", 200), 500)
+    offset = max(args.get("offset", 0), 0)
+
+    if not repo or not rel_path:
+        return _json({"error": "repo and path parameters required"})
+
+    target, err = _validate_workspace_path(repo, rel_path)
+    if err:
+        return _json({"error": err})
+
+    if not target.exists():
+        return _json({"error": f"Not found: {repo}/{rel_path}"})
+
+    if target.is_dir():
+        return _json({
+            "error": f"Path is a directory: {repo}/{rel_path}",
+            "hint": "Use kronos_navigate for directories, or specify a file within it",
+        })
+
+    size = target.stat().st_size
+    if size > 1_000_000:
+        return _json({
+            "error": f"File too large: {size:,} bytes",
+            "hint": "This tool is for source code and docs, not binary/data files",
+        })
+
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return _json({"error": f"Cannot read file: {e}"})
+
+    lines = text.splitlines()
+    total_lines = len(lines)
+    selected = lines[offset : offset + max_lines]
+
+    return _json({
+        "repo": repo,
+        "path": rel_path,
+        "total_lines": total_lines,
+        "offset": offset,
+        "lines_returned": len(selected),
+        "truncated": (offset + max_lines) < total_lines,
+        "content": "\n".join(selected),
+    })
+
+
+def handle_search_source(args: dict) -> str:
+    """Grep across source files referenced by an FDO's source_paths."""
+    vault._ensure_index()
+    query = args["query"]
+    pattern = args["pattern"]
+    depth = min(args.get("depth", 0), 3)
+    type_filter = args.get("type_filter")
+    max_matches = min(args.get("max_matches", 30), 100)
+    context_lines = min(args.get("context_lines", 2), 5)
+
+    # Resolve FDO (same logic as deep_dive)
+    root_fdo = vault.get(query)
+    if not root_fdo:
+        results = vault.search(query, max_results=1)
+        if results:
+            root_fdo = results[0]
+    if not root_fdo:
+        return _json({
+            "error": f"No FDO found for: {query}",
+            "hint": "Use kronos_search to find concepts first",
+        })
+
+    # Collect source_paths from FDO graph
+    workspace = Path(vault_path).parent
+    visited: set[str] = set()
+    all_paths: list[tuple[str, str, str, str]] = []  # (repo, path, type, from_fdo)
+
+    def collect(fdo_id: str, d: int):
+        if fdo_id in visited or d > depth:
+            return
+        visited.add(fdo_id)
+        fdo = vault.get(fdo_id)
+        if not fdo:
+            return
+        for sp in fdo.source_paths:
+            repo, path, sp_type = _normalize_source_path(sp)
+            if type_filter and sp_type != type_filter:
+                continue
+            if repo and path:
+                all_paths.append((repo, path, sp_type, fdo_id))
+        if d < depth:
+            for rel_id in fdo.related:
+                collect(rel_id, d + 1)
+
+    collect(root_fdo.id, 0)
+
+    if not all_paths:
+        return _json({
+            "root": root_fdo.id,
+            "pattern": pattern,
+            "error": "No source_paths found",
+            "hint": "This FDO has no source_paths, or none match the type_filter",
+        })
+
+    # Compile search pattern
+    try:
+        pat = re.compile(re.escape(pattern), re.IGNORECASE)
+    except re.error as e:
+        return _json({"error": f"Invalid pattern: {e}"})
+
+    matches: list[dict] = []
+    files_searched = 0
+    files_with_matches = 0
+
+    for repo, rel_path, sp_type, from_fdo in all_paths:
+        if len(matches) >= max_matches:
+            break
+
+        target, err = _validate_workspace_path(repo, rel_path)
+        if err or target is None:
+            continue
+
+        # If directory, search files within it (one level)
+        if target.is_dir():
+            file_targets = [
+                f for f in sorted(target.iterdir())
+                if f.is_file()
+                and f.stat().st_size < 500_000
+                and f.suffix in _SOURCE_EXTENSIONS
+            ]
+        elif target.is_file() and target.stat().st_size < 500_000:
+            file_targets = [target]
+        else:
+            continue
+
+        for fpath in file_targets:
+            if len(matches) >= max_matches:
+                break
+            files_searched += 1
+            try:
+                text = fpath.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+
+            lines = text.splitlines()
+            file_hits: list[dict] = []
+            for i, line in enumerate(lines):
+                if pat.search(line):
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    file_hits.append({
+                        "line": i + 1,
+                        "context": "\n".join(lines[start:end]),
+                    })
+                    if len(file_hits) >= 20:  # cap per file
+                        break
+
+            if file_hits:
+                files_with_matches += 1
+                rel = str(fpath.relative_to(workspace))
+                matches.append({
+                    "file": rel.replace("\\", "/"),
+                    "from_fdo": from_fdo,
+                    "type": sp_type,
+                    "hits": file_hits,
+                })
+
+    total_hits = sum(len(m["hits"]) for m in matches)
+
+    return _json({
+        "root": root_fdo.id,
+        "root_title": root_fdo.title,
+        "pattern": pattern,
+        "depth": depth,
+        "files_searched": files_searched,
+        "files_with_matches": files_with_matches,
+        "total_hits": total_hits,
+        "truncated": len(matches) >= max_matches,
+        "matches": matches,
+    })
 
 
 def handle_search(args: dict) -> str:
@@ -780,6 +1083,8 @@ HANDLERS = {
     "kronos_skills": handle_skills,
     "kronos_skill_load": handle_skill_load,
     "kronos_navigate": handle_navigate,
+    "kronos_read_source": handle_read_source,
+    "kronos_search_source": handle_search_source,
 }
 
 
