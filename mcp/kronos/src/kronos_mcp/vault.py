@@ -244,8 +244,19 @@ class VaultEngine:
         scored.sort(key=lambda t: t[0], reverse=True)
         return [fdo for _, fdo in scored[:max_results]]
 
-    def graph_neighbors(self, fdo_id: str, depth: int = 1) -> dict[str, Any]:
-        """Get the local graph around an FDO."""
+    # ── Graph scope prefixes ─────────────────────────────────────────────
+    _TASK_PREFIXES = ("proj-", "feat-")
+    _ARCH_PREFIXES = ("design-", "adr-")
+
+    def graph_neighbors(self, fdo_id: str, depth: int = 1, scope: str = "all") -> dict[str, Any]:
+        """Get the local graph around an FDO.
+
+        scope controls which edges to follow:
+          "all"          — traverse everything (default, original behavior)
+          "tasks"        — only edges involving proj-* / feat-* nodes
+          "architecture" — only edges involving design-* / adr-* nodes
+          "knowledge"    — exclude proj-*, feat-*, design-*, adr-* nodes
+        """
         fdo = self.get(fdo_id)
         if not fdo:
             return {"error": f"FDO not found: {fdo_id}"}
@@ -253,6 +264,18 @@ class VaultEngine:
         visited: set[str] = set()
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
+
+        def _scope_ok(node_id: str) -> bool:
+            """Check if a neighbor should be followed given the scope."""
+            if scope == "all":
+                return True
+            if scope == "tasks":
+                return node_id.startswith(self._TASK_PREFIXES)
+            if scope == "architecture":
+                return node_id.startswith(self._ARCH_PREFIXES)
+            if scope == "knowledge":
+                return not node_id.startswith(self._TASK_PREFIXES + self._ARCH_PREFIXES)
+            return True
 
         def walk(current_id: str, d: int):
             if current_id in visited or d > depth:
@@ -271,15 +294,21 @@ class VaultEngine:
             }
             # Related links
             for rel_id in current.related:
-                edges.append({"from": current_id, "to": rel_id, "type": "related"})
-                walk(rel_id, d + 1)
+                if _scope_ok(rel_id) or d == 0:
+                    edges.append({"from": current_id, "to": rel_id, "type": "related"})
+                    if _scope_ok(rel_id):
+                        walk(rel_id, d + 1)
             # PAC hierarchy
             if current.pac_parent:
-                edges.append({"from": current_id, "to": current.pac_parent, "type": "pac_parent"})
-                walk(current.pac_parent, d + 1)
+                if _scope_ok(current.pac_parent) or d == 0:
+                    edges.append({"from": current_id, "to": current.pac_parent, "type": "pac_parent"})
+                    if _scope_ok(current.pac_parent):
+                        walk(current.pac_parent, d + 1)
             for child_id in current.pac_children:
-                edges.append({"from": current_id, "to": child_id, "type": "pac_child"})
-                walk(child_id, d + 1)
+                if _scope_ok(child_id) or d == 0:
+                    edges.append({"from": current_id, "to": child_id, "type": "pac_child"})
+                    if _scope_ok(child_id):
+                        walk(child_id, d + 1)
 
         walk(fdo_id, 0)
 
@@ -292,7 +321,7 @@ class VaultEngine:
                 seen_edges.add(key)
                 unique_edges.append(e)
 
-        return {"center": fdo_id, "nodes": nodes, "edges": unique_edges}
+        return {"center": fdo_id, "scope": scope, "nodes": nodes, "edges": unique_edges}
 
     # ── Validation ───────────────────────────────────────────────────────
 

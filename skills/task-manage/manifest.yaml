@@ -1,0 +1,82 @@
+name: task-manage
+version: "1.0"
+description: >
+  Manage stories and tasks on the ADO-style board. Create, update, move,
+  groom, and review work items embedded in feat-* FDOs. Stories flow through
+  kanban columns (NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED).
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - tasks:read
+  - tasks:write
+  - vault:read
+  - vault:write
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes task/story/board references and suggests actions
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: Creates and updates stories/tasks via MCP tools
+    reads: [protocol.md, phases, quality_gates]
+
+inputs:
+  action:
+    type: enum
+    values: [create, update, move, groom, review]
+    required: true
+    description: >
+      create: Create a story or task
+      update: Update fields on a story or task
+      move: Move a story between board columns
+      groom: Review and reprioritize backlog
+      review: Show board state and progress
+  feat_id:
+    type: string
+    required: false
+    description: Feature FDO ID (for story creation)
+  story_id:
+    type: string
+    required: false
+    description: Story ID (for task creation, moves, updates)
+
+outputs:
+  created_items: list
+  updated_items: list
+  board_state: object
+
+triggers:
+  - explicit: "User asks to create/update/move tasks or stories"
+  - proactive: "User mentions work items, priorities, or board state"
+  - keywords:
+      strong: ["create task", "create story", "add story", "move to active",
+               "move to in progress", "show board", "show backlog", "groom backlog"]
+      weak: ["task", "story", "board", "backlog", "priority", "estimate"]
+
+phases:
+  1_assess: "Understand the request — which action, which items"
+  2_execute: "Perform the action via MCP tools"
+  3_link: "Ensure feature FDO references and board consistency"
+  4_display: "Show the updated board or backlog"
+
+safety:
+  - "Never delete stories without explicit confirmation"
+  - "Always confirm before moving items to CLOSED"
+  - "Stories must have acceptance criteria before moving to IN_PROGRESS"
+
+quality_gates:
+  story:
+    - "Has a clear title"
+    - "Has priority set"
+    - "Has estimate_days set"
+    - "Has acceptance criteria before moving past NEW"
+  task:
+    - "Has a clear title"
+    - "Has estimate_days set"
+  board:
+    - "No orphaned story IDs (all board entries link to real stories)"
+    - "Story status matches its board column"

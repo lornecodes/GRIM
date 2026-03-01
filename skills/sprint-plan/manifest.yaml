@@ -1,0 +1,64 @@
+name: sprint-plan
+version: "1.0"
+description: >
+  Plan work sprints by selecting stories from the backlog, loading them
+  onto the board, checking capacity against estimates, and syncing the
+  calendar. Also supports sprint review and close operations.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - tasks:read
+  - tasks:write
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes sprint planning moments
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: Executes sprint planning via MCP tools
+    reads: [protocol.md, phases, quality_gates]
+
+inputs:
+  action:
+    type: enum
+    values: [plan, review, close]
+    required: true
+    description: >
+      plan: Select stories from backlog, load onto board, sync calendar
+      review: Review sprint progress and blockers
+      close: Close sprint — archive resolved, update calendar
+  project_id:
+    type: string
+    required: false
+    description: Filter to a specific project
+
+outputs:
+  board_state: object
+  calendar: object
+
+triggers:
+  - explicit: "User asks to plan a sprint or decide what to work on next"
+  - proactive: "Board is empty and backlog has items"
+  - keywords:
+      strong: ["plan sprint", "what should I work on", "load up the board",
+               "close sprint", "sprint review"]
+      weak: ["sprint", "plan", "next up", "capacity"]
+
+phases:
+  1_review_backlog: "Show backlog sorted by priority"
+  2_select: "User picks stories for the board"
+  3_load: "Move selected stories to board"
+  4_sync: "Rebuild calendar from board state"
+
+safety:
+  - "Always confirm story selection with user before loading board"
+  - "Warn if total estimates exceed reasonable capacity"
+
+quality_gates:
+  - "All selected stories have estimates"
+  - "Board is not overloaded (warn if > 10 active stories)"
+  - "Calendar is synced after loading"

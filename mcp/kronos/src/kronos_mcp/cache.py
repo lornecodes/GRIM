@@ -43,6 +43,20 @@ TOOL_TTLS: dict[str, int | None] = {
     # Write tools — never cached, trigger invalidation
     "kronos_create":     None,
     "kronos_update":     None,
+    # Task management tools
+    "kronos_task_list":      120,   # 2 min
+    "kronos_task_get":       120,   # 2 min
+    "kronos_board_view":     120,   # 2 min
+    "kronos_backlog_view":   120,   # 2 min
+    "kronos_calendar_view":  120,   # 2 min
+    # Task write tools — never cached
+    "kronos_task_create":    None,
+    "kronos_task_update":    None,
+    "kronos_task_move":      None,
+    "kronos_task_archive":   None,
+    "kronos_calendar_add":   None,
+    "kronos_calendar_update": None,
+    "kronos_calendar_sync":  None,
 }
 
 # Tools that modify vault state (FDOs)
@@ -50,6 +64,13 @@ WRITE_TOOLS = {"kronos_create", "kronos_update"}
 
 # Tools that modify memory (separate from vault FDOs)
 MEMORY_WRITE_TOOLS = {"kronos_memory_update"}
+
+# Tools that modify task/board/calendar state
+TASK_WRITE_TOOLS = {
+    "kronos_task_create", "kronos_task_update", "kronos_task_move",
+    "kronos_task_archive", "kronos_calendar_add", "kronos_calendar_update",
+    "kronos_calendar_sync",
+}
 
 
 def _make_key(tool_name: str, arguments: dict) -> str:
@@ -140,6 +161,17 @@ class KronosCache:
                 self._delete_patterns([
                     "kronos:kronos_memory_read:*",
                     "kronos:kronos_memory_sections:*",
+                ])
+                return
+
+            # Task writes invalidate all task/board/calendar read caches
+            if tool_name in TASK_WRITE_TOOLS:
+                self._delete_patterns([
+                    "kronos:kronos_task_list:*",
+                    "kronos:kronos_task_get:*",
+                    "kronos:kronos_board_view:*",
+                    "kronos:kronos_backlog_view:*",
+                    "kronos:kronos_calendar_view:*",
                 ])
                 return
 

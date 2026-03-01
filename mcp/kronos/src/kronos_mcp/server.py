@@ -1,5 +1,5 @@
 """
-Kronos MCP Server — knowledge vault + skills for AI agents.
+Kronos MCP Server — knowledge vault + skills + task management for AI agents.
 
 Tools:
   Vault:
@@ -21,6 +21,20 @@ Tools:
   Source Navigation:
     kronos_read_source    — Read file content from a repo source path
     kronos_search_source  — Grep across source files referenced by an FDO
+
+  Tasks:
+    kronos_task_create    — Create story or task in a feature FDO
+    kronos_task_update    — Update story/task fields
+    kronos_task_get       — Get story/task by ID
+    kronos_task_list      — List stories with filters
+    kronos_task_move      — Move story on the kanban board
+    kronos_task_archive   — Archive closed stories
+    kronos_board_view     — Get kanban board state
+    kronos_backlog_view   — Get stories not on board
+    kronos_calendar_view  — Get calendar for date range
+    kronos_calendar_add   — Add personal calendar event
+    kronos_calendar_update — Update/delete personal event
+    kronos_calendar_sync  — Rebuild schedule from board
 
   Skills:
     kronos_skills         — List all available GRIM skills
@@ -52,6 +66,9 @@ from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
 from .vault import VaultEngine, FDO, VALID_DOMAINS, VALID_STATUSES
 from .search import SearchEngine
 from .skills import SkillsEngine
+from .tasks import TaskEngine
+from .board import BoardEngine
+from .calendar import CalendarEngine
 
 load_dotenv()
 
@@ -73,8 +90,13 @@ vault = VaultEngine(vault_path)
 search_engine = SearchEngine(vault)
 skills_engine = SkillsEngine(skills_path) if skills_path else None
 
+# ── Task management engines ──────────────────────────────────────────────────
+task_engine = TaskEngine(vault_path)
+board_engine = BoardEngine(vault_path, task_engine)
+calendar_engine = CalendarEngine(vault_path, board_engine)
+
 # ── Redis cache (optional) ────────────────────────────────────────────────────
-from .cache import KronosCache, WRITE_TOOLS, MEMORY_WRITE_TOOLS
+from .cache import KronosCache, WRITE_TOOLS, MEMORY_WRITE_TOOLS, TASK_WRITE_TOOLS
 cache = KronosCache.from_env()
 
 # Pre-load semantic index in background thread so first search is fast.
@@ -173,7 +195,9 @@ TOOLS: list[Tool] = [
         description=(
             "Traverse the knowledge graph around an FDO. Returns nodes and edges "
             "(related links, PAC parent/children) up to the specified depth. "
-            "Use this to understand how concepts connect."
+            "Use this to understand how concepts connect. "
+            "Use scope to filter: 'tasks' for project/feature edges, "
+            "'architecture' for design/ADR edges, 'knowledge' to exclude both."
         ),
         inputSchema={
             "type": "object",
@@ -186,6 +210,12 @@ TOOLS: list[Tool] = [
                     "type": "integer",
                     "description": "How many hops to traverse (default: 1, max: 3)",
                     "default": 1,
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["all", "tasks", "architecture", "knowledge"],
+                    "description": "Filter graph traversal scope (default: all)",
+                    "default": "all",
                 },
             },
             "required": ["id"],
@@ -541,6 +571,331 @@ TOOLS: list[Tool] = [
             "properties": {},
         },
     ),
+
+    # ── Task management tools ──
+    Tool(
+        name="kronos_task_create",
+        description=(
+            "Create a new story or task. Stories live inside feat-* FDOs. "
+            "Tasks are nested under stories. Provide feat_id for stories, "
+            "or story_id for tasks."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["story", "task"],
+                    "description": "Item type to create",
+                },
+                "feat_id": {
+                    "type": "string",
+                    "description": "Feature FDO ID (required for stories, e.g. 'feat-grim-taskman')",
+                },
+                "story_id": {
+                    "type": "string",
+                    "description": "Parent story ID (required for tasks)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title of the story or task",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low"],
+                    "description": "Priority level (stories only, default: medium)",
+                    "default": "medium",
+                },
+                "estimate_days": {
+                    "type": "number",
+                    "description": "Estimated days to complete (default: 1 for stories, 0.5 for tasks)",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Story description (stories only)",
+                },
+                "acceptance_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of acceptance criteria (stories only)",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for the story",
+                },
+                "assignee": {
+                    "type": "string",
+                    "description": "Assignee (tasks only)",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Notes (tasks only)",
+                },
+            },
+            "required": ["type", "title"],
+        },
+    ),
+    Tool(
+        name="kronos_task_update",
+        description=(
+            "Update fields on a story or task. Pass the item ID and a dict of "
+            "fields to update. Auto-logs status changes."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "Story or task ID to update",
+                },
+                "fields": {
+                    "type": "object",
+                    "description": (
+                        "Fields to update. Stories: title, status, priority, estimate_days, "
+                        "description, acceptance_criteria, tags. "
+                        "Tasks: title, status, estimate_days, assignee, notes."
+                    ),
+                },
+            },
+            "required": ["item_id", "fields"],
+        },
+    ),
+    Tool(
+        name="kronos_task_get",
+        description=(
+            "Get full details of a story or task by ID. Returns all fields "
+            "including tasks (for stories) and parent info."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "Story or task ID",
+                },
+            },
+            "required": ["item_id"],
+        },
+    ),
+    Tool(
+        name="kronos_task_list",
+        description=(
+            "List stories with optional filters. Returns summary info for each "
+            "story including task progress. Sorted by priority then creation date."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Filter by project (e.g. 'proj-grim')",
+                },
+                "feat_id": {
+                    "type": "string",
+                    "description": "Filter by feature (e.g. 'feat-grim-taskman')",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["new", "active", "in_progress", "resolved", "closed"],
+                    "description": "Filter by status",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low"],
+                    "description": "Filter by priority",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_task_move",
+        description=(
+            "Move a story on the kanban board. If not on the board yet, adds it. "
+            "Auto-updates story status to match the column. "
+            "Columns: new, active, in_progress, resolved, closed."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "story_id": {
+                    "type": "string",
+                    "description": "Story ID to move",
+                },
+                "column": {
+                    "type": "string",
+                    "enum": ["new", "active", "in_progress", "resolved", "closed"],
+                    "description": "Target board column",
+                },
+            },
+            "required": ["story_id", "column"],
+        },
+    ),
+    Tool(
+        name="kronos_task_archive",
+        description=(
+            "Archive closed stories in feature FDOs. Moves closed stories from "
+            "the active stories list to an archived_stories section."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "feat_id": {
+                    "type": "string",
+                    "description": "Feature to archive (omit to archive all closed stories across all features)",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_board_view",
+        description=(
+            "Get the current kanban board state. Returns all columns with "
+            "enriched story data (title, priority, estimate, task progress). "
+            "Optionally filter by project."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Filter board to a specific project",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_backlog_view",
+        description=(
+            "Get stories NOT currently on the board (the backlog). "
+            "Filter by project, feature, or priority."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Filter by project",
+                },
+                "feat_id": {
+                    "type": "string",
+                    "description": "Filter by feature",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low"],
+                    "description": "Filter by priority",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_calendar_view",
+        description=(
+            "Get calendar entries for a date range. Merges work schedule "
+            "(from board items + estimates) with personal events."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date (YYYY-MM-DD)",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date (YYYY-MM-DD)",
+                },
+                "include_personal": {
+                    "type": "boolean",
+                    "description": "Include personal events (default: true)",
+                    "default": True,
+                },
+            },
+            "required": ["start_date", "end_date"],
+        },
+    ),
+    Tool(
+        name="kronos_calendar_add",
+        description=(
+            "Add a personal calendar event (non-project). "
+            "For work items, use kronos_task_create + kronos_task_move instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Event title",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Event date (YYYY-MM-DD)",
+                },
+                "time": {
+                    "type": "string",
+                    "description": "Event time (HH:MM, optional)",
+                },
+                "duration_hours": {
+                    "type": "number",
+                    "description": "Duration in hours (optional)",
+                },
+                "recurring": {
+                    "type": "boolean",
+                    "description": "Is this a recurring event? (default: false)",
+                    "default": False,
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Additional notes",
+                },
+            },
+            "required": ["title", "date"],
+        },
+    ),
+    Tool(
+        name="kronos_calendar_update",
+        description=(
+            "Update or delete a personal calendar event. "
+            "Pass action='update' with fields, or action='delete' to remove."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "description": "Personal event ID (e.g. 'personal-001')",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["update", "delete"],
+                    "description": "Whether to update fields or delete the event",
+                },
+                "fields": {
+                    "type": "object",
+                    "description": "Fields to update (ignored for delete). Supported: title, date, time, duration_hours, recurring, notes.",
+                },
+            },
+            "required": ["event_id", "action"],
+        },
+    ),
+    Tool(
+        name="kronos_calendar_sync",
+        description=(
+            "Rebuild the work schedule from active board items + estimates. "
+            "Sequences stories by priority, computes start/end dates. "
+            "Call after moving items on the board or updating estimates."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date for scheduling (YYYY-MM-DD, default: today)",
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -554,6 +909,11 @@ TOOL_GROUPS = {
     "memory:write": ["kronos_memory_update"],
     "source:read":  ["kronos_navigate", "kronos_read_source", "kronos_search_source"],
     "system":       ["kronos_skills", "kronos_skill_load", "kronos_tool_groups"],
+    "tasks:read":   ["kronos_task_list", "kronos_task_get", "kronos_board_view",
+                      "kronos_backlog_view", "kronos_calendar_view"],
+    "tasks:write":  ["kronos_task_create", "kronos_task_update", "kronos_task_move",
+                      "kronos_task_archive", "kronos_calendar_add",
+                      "kronos_calendar_update", "kronos_calendar_sync"],
 }
 
 
@@ -1055,7 +1415,8 @@ def handle_graph(args: dict) -> str:
     # Read-only: only need the vault FDO dict, not BM25/graph indices.
     vault._ensure_index()
     depth = min(args.get("depth", 1), 3)
-    result = vault.graph_neighbors(args["id"], depth)
+    scope = args.get("scope", "all")
+    result = vault.graph_neighbors(args["id"], depth, scope=scope)
     return _json(result)
 
 
@@ -1341,6 +1702,167 @@ def handle_navigate(args: dict) -> str:
     return _json(result)
 
 
+# ── Task management handlers ─────────────────────────────────────────────────
+
+def handle_task_create(args: dict) -> str:
+    item_type = args.get("type") or "story"
+    title = (args.get("title") or "").strip()
+    if not title:
+        return _json({"error": "title required"})
+
+    if item_type == "story":
+        feat_id = (args.get("feat_id") or "").strip()
+        if not feat_id:
+            return _json({"error": "feat_id required for stories"})
+        return _json(task_engine.create_story(
+            feat_id=feat_id,
+            title=title,
+            priority=args.get("priority") or "medium",
+            estimate_days=float(args.get("estimate_days") or 1.0),
+            description=args.get("description") or "",
+            acceptance_criteria=args.get("acceptance_criteria"),
+            tags=args.get("tags"),
+        ))
+    elif item_type == "task":
+        story_id = (args.get("story_id") or "").strip()
+        if not story_id:
+            return _json({"error": "story_id required for tasks"})
+        return _json(task_engine.create_task(
+            story_id=story_id,
+            title=title,
+            estimate_days=float(args.get("estimate_days") or 0.5),
+            assignee=args.get("assignee") or "",
+            notes=args.get("notes") or "",
+        ))
+    else:
+        return _json({"error": f"Invalid type: {item_type}", "valid": ["story", "task"]})
+
+
+def handle_task_update(args: dict) -> str:
+    item_id = (args.get("item_id") or "").strip()
+    if not item_id:
+        return _json({"error": "item_id required"})
+    fields = args.get("fields") or {}
+    if not fields:
+        return _json({"error": "fields required"})
+    return _json(task_engine.update_item(item_id, fields))
+
+
+def handle_task_get(args: dict) -> str:
+    item_id = (args.get("item_id") or "").strip()
+    if not item_id:
+        return _json({"error": "item_id required"})
+    item = task_engine.get_item(item_id)
+    if not item:
+        return _json({"error": f"Item not found: {item_id}"})
+    return _json(item)
+
+
+def handle_task_list(args: dict) -> str:
+    items = task_engine.list_items(
+        project_id=args.get("project_id"),
+        feat_id=args.get("feat_id"),
+        status=args.get("status"),
+        priority=args.get("priority"),
+    )
+    return _json({"stories": items, "count": len(items)})
+
+
+def handle_task_move(args: dict) -> str:
+    story_id = (args.get("story_id") or "").strip()
+    if not story_id:
+        return _json({"error": "story_id required"})
+    column = (args.get("column") or "").strip()
+    if not column:
+        return _json({"error": "column required"})
+    return _json(board_engine.move_story(story_id, column))
+
+
+def handle_task_archive(args: dict) -> str:
+    result = task_engine.archive_closed(feat_id=args.get("feat_id"))
+    # Remove archived stories from the board
+    archived_ids = []
+    if result.get("archived", 0) > 0:
+        board = board_engine._load_board()
+        changed = False
+        for col, ids in board["columns"].items():
+            before = len(ids)
+            # Check which IDs no longer exist as active stories
+            surviving = []
+            for sid in ids:
+                item = task_engine.get_item(sid)
+                if item:
+                    surviving.append(sid)
+                else:
+                    archived_ids.append(sid)
+            if len(surviving) != before:
+                board["columns"][col] = surviving
+                changed = True
+        if changed:
+            board_engine._save_board(board)
+        result["removed_from_board"] = archived_ids
+    return _json(result)
+
+
+def handle_board_view(args: dict) -> str:
+    return _json(board_engine.board_view(project_id=args.get("project_id")))
+
+
+def handle_backlog_view(args: dict) -> str:
+    return _json(board_engine.backlog_view(
+        project_id=args.get("project_id"),
+        feat_id=args.get("feat_id"),
+        priority=args.get("priority"),
+    ))
+
+
+def handle_calendar_view(args: dict) -> str:
+    start_date = (args.get("start_date") or "").strip()
+    end_date = (args.get("end_date") or "").strip()
+    if not start_date or not end_date:
+        return _json({"error": "start_date and end_date required"})
+    return _json(calendar_engine.calendar_view(
+        start_date=start_date,
+        end_date=end_date,
+        include_personal=args.get("include_personal", True),
+    ))
+
+
+def handle_calendar_add(args: dict) -> str:
+    title = (args.get("title") or "").strip()
+    event_date = (args.get("date") or "").strip()
+    if not title or not event_date:
+        return _json({"error": "title and date required"})
+    return _json(calendar_engine.add_personal(
+        title=title,
+        event_date=event_date,
+        time=args.get("time"),
+        duration_hours=args.get("duration_hours"),
+        recurring=args.get("recurring", False),
+        notes=args.get("notes", ""),
+    ))
+
+
+def handle_calendar_update(args: dict) -> str:
+    event_id = (args.get("event_id") or "").strip()
+    if not event_id:
+        return _json({"error": "event_id required"})
+    action = args.get("action") or "update"
+    if action == "delete":
+        return _json(calendar_engine.delete_personal(event_id))
+    elif action == "update":
+        fields = args.get("fields") or {}
+        if not fields:
+            return _json({"error": "fields required for update"})
+        return _json(calendar_engine.update_personal(event_id, fields))
+    else:
+        return _json({"error": f"Invalid action: {action}", "valid": ["update", "delete"]})
+
+
+def handle_calendar_sync(args: dict) -> str:
+    return _json(calendar_engine.sync_schedule(start_date=args.get("start_date")))
+
+
 HANDLERS = {
     "kronos_search": handle_search,
     "kronos_get": handle_get,
@@ -1362,6 +1884,19 @@ HANDLERS = {
     "kronos_memory_sections": handle_memory_sections,
     # System tools
     "kronos_tool_groups": handle_tool_groups,
+    # Task management tools
+    "kronos_task_create": handle_task_create,
+    "kronos_task_update": handle_task_update,
+    "kronos_task_get": handle_task_get,
+    "kronos_task_list": handle_task_list,
+    "kronos_task_move": handle_task_move,
+    "kronos_task_archive": handle_task_archive,
+    "kronos_board_view": handle_board_view,
+    "kronos_backlog_view": handle_backlog_view,
+    "kronos_calendar_view": handle_calendar_view,
+    "kronos_calendar_add": handle_calendar_add,
+    "kronos_calendar_update": handle_calendar_update,
+    "kronos_calendar_sync": handle_calendar_sync,
 }
 
 
@@ -1402,7 +1937,7 @@ async def call_tool(
         return [TextContent(type="text", text=_json({"error": str(e)}))]
 
     # ── Cache write / invalidation ────────────────────────────────────────────
-    if name in WRITE_TOOLS or name in MEMORY_WRITE_TOOLS:
+    if name in WRITE_TOOLS or name in MEMORY_WRITE_TOOLS or name in TASK_WRITE_TOOLS:
         cache.invalidate_for_write(name, arguments)
     else:
         cache.set(name, arguments, result)

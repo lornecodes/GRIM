@@ -1,0 +1,55 @@
+name: calendar-manage
+version: "1.0"
+description: >
+  View and manage the calendar. Shows merged work schedule (from board)
+  and personal events. Add, update, or delete personal events. Sync
+  the work schedule from active board items.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - tasks:read
+  - tasks:write
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes calendar and scheduling references
+    reads: [triggers, phases]
+  memory-agent:
+    role: execution
+    description: Manages calendar via MCP tools
+    reads: [protocol.md, phases]
+
+inputs:
+  action:
+    type: enum
+    values: [view, add, update, delete, sync]
+    required: true
+    description: >
+      view: Show calendar for date range
+      add: Add personal event
+      update: Update personal event
+      delete: Delete personal event
+      sync: Rebuild work schedule from board
+
+outputs:
+  calendar: object
+  event: object
+
+triggers:
+  - explicit: "User asks about calendar, schedule, or appointments"
+  - keywords:
+      strong: ["what's on my calendar", "add appointment", "sync calendar",
+               "schedule for", "what's coming up"]
+      weak: ["calendar", "schedule", "appointment", "meeting", "event"]
+
+phases:
+  1_assess: "Determine action and parameters"
+  2_execute: "Perform the calendar operation"
+  3_display: "Show updated calendar"
+
+quality_gates:
+  - "Personal events have title and date at minimum"
+  - "Calendar sync runs after board changes"
