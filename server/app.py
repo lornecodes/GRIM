@@ -282,6 +282,120 @@ async def ironclaw_status():
     })
 
 
+# ---------------------------------------------------------------------------
+# Agent Team endpoints
+# ---------------------------------------------------------------------------
+
+# Static GRIM agent metadata — matches the LangGraph node structure
+GRIM_AGENTS = [
+    {
+        "id": "companion",
+        "name": "Companion",
+        "role": "thinker",
+        "description": "Primary conversational agent — reasoning, identity, natural language",
+        "tools": ["reasoning_cache", "identity_reflect", "model_select"],
+        "color": "#7c6fef",
+    },
+    {
+        "id": "memory",
+        "name": "Memory",
+        "role": "vault_ops",
+        "description": "Kronos vault operations — search, retrieve, create, update FDOs",
+        "tools": ["kronos_search", "kronos_get", "kronos_create", "kronos_update", "kronos_graph"],
+        "color": "#8b5cf6",
+    },
+    {
+        "id": "coder",
+        "name": "Coder",
+        "role": "code_files",
+        "description": "Code generation, file operations, refactoring, debugging",
+        "tools": ["file_read", "file_write", "file_search", "directory_list", "shell", "git_status", "git_diff", "git_commit", "code_search", "code_analyze"],
+        "color": "#34d399",
+    },
+    {
+        "id": "research",
+        "name": "Researcher",
+        "role": "analysis",
+        "description": "Web research, document analysis, information synthesis",
+        "tools": ["web_search", "web_fetch", "document_analyze", "summarize", "citation_extract", "data_transform", "compare_sources", "timeline_build", "deep_dive", "kronos_deep_dive", "navigate"],
+        "color": "#3b82f6",
+    },
+    {
+        "id": "operator",
+        "name": "Operator",
+        "role": "git_shell",
+        "description": "System operations — git, shell, Docker, CI/CD, deployments",
+        "tools": ["shell", "git_status", "git_diff", "git_commit", "git_push", "git_branch", "docker_build", "docker_compose", "ci_trigger", "env_check", "process_list", "port_check", "disk_usage", "system_info"],
+        "color": "#f59e0b",
+    },
+    {
+        "id": "ironclaw",
+        "name": "IronClaw",
+        "role": "sandbox",
+        "description": "Sandboxed execution via IronClaw engine — secure tool runs",
+        "tools": ["ic_file_read", "ic_file_write", "ic_shell", "ic_http_request", "ic_directory_list", "ic_search", "ic_health", "ic_metrics"],
+        "color": "#ef4444",
+    },
+]
+
+
+@app.get("/api/agents")
+async def list_agents():
+    """GRIM agent roster — static metadata for the brain tier."""
+    return JSONResponse({"agents": GRIM_AGENTS})
+
+
+@app.get("/api/ironclaw/agents")
+async def ironclaw_agents():
+    """IronClaw agent roster — limbs tier via bridge."""
+    if not _ironclaw_bridge:
+        return JSONResponse({
+            "enabled": False,
+            "roles": [],
+            "active_sessions": 0,
+            "max_concurrent_sessions": 0,
+            "message": "IronClaw bridge not initialized",
+        })
+
+    try:
+        data = await _ironclaw_bridge.list_agents()
+        return JSONResponse(data)
+    except Exception as exc:
+        logger.warning("Failed to list IronClaw agents: %s", exc)
+        return JSONResponse({
+            "enabled": False,
+            "roles": [],
+            "active_sessions": 0,
+            "max_concurrent_sessions": 0,
+            "error": str(exc),
+        })
+
+
+class WorkflowRequest(BaseModel):
+    task: str
+    pattern: dict
+
+
+@app.post("/api/ironclaw/workflow")
+async def ironclaw_workflow(req: WorkflowRequest):
+    """Run an IronClaw agent workflow — proxy to bridge."""
+    if not _ironclaw_bridge:
+        return JSONResponse(
+            {"error": "IronClaw bridge not initialized"},
+            status_code=503,
+        )
+
+    try:
+        result = await _ironclaw_bridge.run_workflow(req.task, req.pattern)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.error("IronClaw workflow failed: %s", exc)
+        return JSONResponse(
+            {"error": str(exc)},
+            status_code=500,
+        )
+
+
 @app.get("/api/sessions")
 async def list_sessions():
     """List unique session thread IDs from the checkpointer."""

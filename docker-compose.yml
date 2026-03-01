@@ -101,6 +101,7 @@ services:
     volumes:
       - ./engine/config/grim.toml:/etc/ironclaw/grim.toml:ro
       - ironclaw-logs:/app/logs
+      - grim-staging:/workspace/staging
     expose:
       - "3100"
     # No host ports — IronClaw only accessible via grim-net
@@ -142,10 +143,13 @@ services:
       - KRONOS_REDIS_URL=redis://redis:6379/0
       - GRIM_REDIS_URL=redis://redis:6379/0
       - IRONCLAW_URL=http://ironclaw:3100
+      - STAGING_PATH=/workspace/staging
+    command: ["sh", "-c", "chmod 1777 /workspace/staging && exec uvicorn server.app:app --host 0.0.0.0 --port 8080 --log-level info"]
     volumes:
       - ${VAULT_PATH:-../kronos-vault}:/vault:ro
       - grim-sessions:/app/local/sessions
       - grim-evolution:/app/local/evolution
+      - grim-staging:/workspace/staging
     networks:
       - grim-net
     restart: unless-stopped
@@ -176,3 +180,5 @@ volumes:
     name: grim-evolution
   ironclaw-logs:
     name: ironclaw-logs
+  grim-staging:
+    name: grim-staging

@@ -263,7 +263,9 @@ async fn main() -> anyhow::Result<()> {
 
             // Start the API gateway if enabled in config
             let _gateway = if config.gateway.enabled {
-                let gw_config = gateway::GatewayServerConfig::from(&config.gateway);
+                let mut gw_config = gateway::GatewayServerConfig::from(&config.gateway);
+                gw_config.agents_enabled = config.agents.enabled;
+                gw_config.agents_max_concurrent = config.agents.max_concurrent_sessions;
                 let gw_bind = gw_config.bind.clone();
                 let mut gw = gateway::GatewayServer::new(gw_config);
                 gw.start().await?;

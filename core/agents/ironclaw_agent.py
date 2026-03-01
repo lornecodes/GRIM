@@ -82,6 +82,21 @@ def make_ironclaw_agent(config: GrimConfig):
         context["ironclaw_status"] = "connected" if ironclaw_available else "disconnected"
         context["sandbox"] = "All tool calls execute through IronClaw's sandboxed environment with security policies."
 
+        # Staging pipeline (Phase 4): direct output to shared staging volume
+        job_id = state.get("staging_job_id")
+        if job_id:
+            context["staging_path"] = f"/workspace/staging/{job_id}/output/"
+            context["staging_instructions"] = (
+                "Write ALL output files to the staging path above. "
+                "Do NOT write to any other location. Files written here "
+                "will be reviewed by the audit agent before acceptance."
+            )
+
+        # Feedback from previous audit failure (re-dispatch cycle)
+        audit_feedback = state.get("audit_feedback")
+        if audit_feedback:
+            task = f"{task}\n\n{audit_feedback}"
+
         return await agent.execute(
             task=task,
             skill_protocol=protocol,

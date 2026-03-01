@@ -1,0 +1,58 @@
+name: ironclaw-review
+version: "1.0"
+description: >
+  Protocol for reviewing staged IronClaw execution output.
+  The audit agent inspects files for security, correctness, and style
+  before they are accepted into the workspace.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - staging:read
+  - vault:read
+
+consumers:
+  audit-agent:
+    role: execution
+    description: Reviews staged output and returns a structured verdict
+    reads: [protocol.md, review_criteria, verdict_format]
+
+inputs:
+  job_id:
+    type: string
+    required: true
+    description: Staging job identifier to review
+  original_task:
+    type: string
+    required: true
+    description: The original task that produced the output
+
+outputs:
+  verdict:
+    type: object
+    description: AuditVerdict with passed, issues, suggestions, security_flags, summary
+
+triggers:
+  - automatic: "IronClaw execution produces staged artifacts"
+  - explicit: "User says 'review staging', 'audit output', 'check staged'"
+
+review_criteria:
+  security:
+    - "No hardcoded secrets, API keys, or credentials"
+    - "No destructive commands (rm -rf, DROP TABLE, etc.)"
+    - "No suspicious outbound connections or downloads"
+  correctness:
+    - "Output matches the original task intent"
+    - "Code has valid syntax"
+    - "Output is complete, not truncated"
+  style:
+    - "Follows project conventions where visible"
+    - "Reasonable file naming"
+    - "No obvious code smell or anti-patterns"
+
+quality_gates:
+  - "All files in staging inspected"
+  - "Structured JSON verdict returned"
+  - "Security flags raised for any concern"
+  - "Issues are specific and actionable"

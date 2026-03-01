@@ -2,7 +2,11 @@
 
 This is the central wiring file. It builds the full graph:
 
-    identity → memory → skill_match → router → [companion | dispatch] → integrate → evolve
+    identity → compress → memory → skill_match → router →
+        [companion | dispatch] → audit_gate → [audit | integrate] → evolve
+
+The audit gate (Phase 4) routes IronClaw dispatches through a zero-trust
+staging pipeline: dispatch → audit_gate → audit → {integrate | re_dispatch → loop}
 
 The graph is stateful, checkpointed to SQLite, and supports multi-turn
 conversation with session persistence.
@@ -17,6 +21,7 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from core.agents.audit_agent import make_audit_agent
 from core.agents.coder_agent import make_coder_agent
 from core.agents.ironclaw_agent import make_ironclaw_agent
 from core.agents.memory_agent import make_memory_agent
@@ -24,6 +29,7 @@ from core.agents.operator_agent import make_operator_agent
 from core.agents.research_agent import make_research_agent
 from core.bridge.ironclaw import IronClawBridge
 from core.config import GrimConfig
+from core.nodes.audit_gate import audit_gate_decision, audit_gate_node
 from core.nodes.companion import make_companion_node
 from core.nodes.compress import make_compress_node
 from core.nodes.dispatch import make_dispatch_node
@@ -31,6 +37,7 @@ from core.nodes.evolve import make_evolve_node
 from core.nodes.identity import make_identity_node
 from core.nodes.integrate import integrate_node
 from core.nodes.memory import make_memory_node
+from core.nodes.re_dispatch import audit_decision, re_dispatch_node
 from core.nodes.router import make_router_node, route_decision
 from core.nodes.skill_match import make_skill_match_node
 from core.skills.loader import load_skills
@@ -86,12 +93,14 @@ def build_graph(
     coder_agent_fn = make_coder_agent(config)
     research_agent_fn = make_research_agent(config)
     operator_agent_fn = make_operator_agent(config)
+    audit_agent_fn = make_audit_agent(config)
 
     agents = {
         "memory": memory_agent_fn,
         "code": coder_agent_fn,
         "research": research_agent_fn,
         "operate": operator_agent_fn,
+        "audit": audit_agent_fn,
     }
 
     # Register IronClaw agent if bridge is available
@@ -107,7 +116,7 @@ def build_graph(
     # Build the state graph
     graph = StateGraph(GrimState)
 
-    # Add nodes
+    # Add nodes (12 total)
     graph.add_node("identity", identity_fn)
     graph.add_node("compress", compress_fn)
     graph.add_node("memory", memory_fn)
@@ -115,6 +124,9 @@ def build_graph(
     graph.add_node("router", router_fn)
     graph.add_node("companion", companion_fn)
     graph.add_node("dispatch", dispatch_fn)
+    graph.add_node("audit_gate", audit_gate_node)
+    graph.add_node("audit", audit_agent_fn)
+    graph.add_node("re_dispatch", re_dispatch_node)
     graph.add_node("integrate", integrate_node)
     graph.add_node("evolve", evolve_fn)
 
@@ -132,9 +144,28 @@ def build_graph(
         {"companion": "companion", "dispatch": "dispatch"},
     )
 
-    # Both paths converge at integrate
+    # Companion goes straight to integrate (no audit needed)
     graph.add_edge("companion", "integrate")
-    graph.add_edge("dispatch", "integrate")
+
+    # Dispatch goes through audit gate (Phase 4)
+    graph.add_edge("dispatch", "audit_gate")
+
+    # Audit gate: IronClaw dispatches with artifacts → audit, else → integrate
+    graph.add_conditional_edges(
+        "audit_gate",
+        audit_gate_decision,
+        {"audit": "audit", "skip": "integrate"},
+    )
+
+    # Audit decision: pass → integrate, fail → re_dispatch, escalate → integrate
+    graph.add_conditional_edges(
+        "audit",
+        audit_decision,
+        {"pass": "integrate", "fail": "re_dispatch", "escalate": "integrate"},
+    )
+
+    # Re-dispatch loops back through dispatch (with feedback)
+    graph.add_edge("re_dispatch", "dispatch")
 
     # integrate → evolve → END
     graph.add_edge("integrate", "evolve")
@@ -146,6 +177,6 @@ def build_graph(
 
     compiled = graph.compile(checkpointer=checkpointer)
     agent_count = len(agents)
-    logger.info("GRIM state graph compiled — 9 nodes, %d agents", agent_count)
+    logger.info("GRIM state graph compiled — 12 nodes, %d agents", agent_count)
 
     return compiled

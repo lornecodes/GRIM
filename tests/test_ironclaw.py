@@ -675,6 +675,134 @@ class TestGraphIronClawWiring(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Bridge: Agent listing + workflow tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestIronClawAgents(unittest.TestCase):
+    """Tests for the agent listing and workflow bridge methods."""
+
+    def test_list_agents_success(self):
+        """list_agents() returns parsed response from /v1/agents."""
+        mock_data = {
+            "enabled": True,
+            "roles": [
+                {"id": "researcher", "name": "Researcher", "capabilities": ["research"]},
+                {"id": "coder", "name": "Coder", "capabilities": ["code_generation"]},
+            ],
+            "active_sessions": 0,
+            "max_concurrent_sessions": 4,
+        }
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+        resp = make_httpx_response(200, mock_data)
+        bridge._client.get = AsyncMock(return_value=resp)
+
+        result = run_async(bridge.list_agents())
+        self.assertTrue(result["enabled"])
+        self.assertEqual(len(result["roles"]), 2)
+        self.assertEqual(result["roles"][0]["id"], "researcher")
+        bridge._client.get.assert_called_once_with("/v1/agents")
+
+    def test_list_agents_failure_returns_default(self):
+        """list_agents() returns disabled response on error."""
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+        bridge._client.get = AsyncMock(side_effect=Exception("connection refused"))
+
+        result = run_async(bridge.list_agents())
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["roles"], [])
+
+    def test_run_workflow_sequential(self):
+        """run_workflow() sends POST to /v1/agents/workflow."""
+        mock_response = {
+            "session_id": "abc-123",
+            "status": "completed",
+            "agents_executed": ["planner", "coder", "reviewer"],
+            "results": {
+                "planner": "[Planner analysis]",
+                "coder": "[Coder analysis]",
+                "reviewer": "[Reviewer analysis]",
+            },
+            "duration_ms": 42,
+        }
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+        resp = make_httpx_response(200, mock_response)
+        bridge._client.post = AsyncMock(return_value=resp)
+
+        pattern = {"type": "sequential", "agent_order": ["planner", "coder", "reviewer"]}
+        result = run_async(bridge.run_workflow("Write hello world", pattern))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["agents_executed"]), 3)
+        self.assertIn("planner", result["results"])
+        bridge._client.post.assert_called_once_with(
+            "/v1/agents/workflow",
+            json={"task": "Write hello world", "pattern": pattern},
+        )
+
+    def test_run_workflow_parallel(self):
+        """run_workflow() with parallel pattern."""
+        mock_response = {
+            "session_id": "def-456",
+            "status": "completed",
+            "agents_executed": ["researcher", "coder"],
+            "results": {
+                "researcher": "[Researcher analysis]",
+                "coder": "[Coder analysis]",
+            },
+            "duration_ms": 15,
+        }
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+        resp = make_httpx_response(200, mock_response)
+        bridge._client.post = AsyncMock(return_value=resp)
+
+        pattern = {"type": "parallel", "agents": ["researcher", "coder"]}
+        result = run_async(bridge.run_workflow("Research and code", pattern))
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["agents_executed"]), 2)
+
+    def test_run_workflow_invalid_agent_returns_error(self):
+        """run_workflow() handles HTTP 400 for invalid agents."""
+        error_body = {
+            "error": "Bad Request",
+            "message": "Agent role 'ghost' not found",
+            "request_id": "req-789",
+        }
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+
+        error_resp = make_httpx_response(400, error_body)
+        error_resp.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError(
+                "400 Bad Request",
+                request=httpx.Request("POST", "http://localhost:3100/v1/agents/workflow"),
+                response=error_resp,
+            )
+        )
+        bridge._client.post = AsyncMock(return_value=error_resp)
+
+        pattern = {"type": "sequential", "agent_order": ["ghost"]}
+        result = run_async(bridge.run_workflow("Test", pattern))
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("ghost", result.get("error", ""))
+
+    def test_run_workflow_connection_error(self):
+        """run_workflow() handles connection failures gracefully."""
+        bridge = IronClawBridge("http://localhost:3100")
+        bridge._client = AsyncMock()
+        bridge._client.post = AsyncMock(side_effect=Exception("connection refused"))
+
+        result = run_async(bridge.run_workflow("Test", {"type": "sequential", "agent_order": ["coder"]}))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("connection refused", result.get("error", ""))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Run
 # ═══════════════════════════════════════════════════════════════════════════
 

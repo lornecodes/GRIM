@@ -54,6 +54,7 @@ COPY --from=ui-build /ui/out/ ui/out/
 ENV GRIM_ENV=production
 ENV KRONOS_VAULT_PATH=/vault
 ENV KRONOS_SKILLS_PATH=/app/skills
+ENV STAGING_PATH=/workspace/staging
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

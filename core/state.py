@@ -105,11 +105,36 @@ class FDOSummary:
 class AgentResult:
     """Result returned by a doer agent."""
 
-    agent: str  # e.g. "memory", "coder", "researcher", "operator"
+    agent: str  # e.g. "memory", "coder", "researcher", "operator", "audit"
     success: bool
     summary: str
     details: dict[str, Any] = field(default_factory=dict)
     artifacts: list[str] = field(default_factory=list)  # created/modified file paths
+
+
+# ---------------------------------------------------------------------------
+# Staging pipeline — Phase 4 zero-trust audit
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StagingArtifact:
+    """A file in the staging area pending review."""
+
+    path: str  # relative to /workspace/staging/{job_id}/output/
+    size_bytes: int
+    artifact_type: str  # "file", "script_output", "log"
+    created_by: str  # "ironclaw"
+
+
+@dataclass
+class AuditVerdict:
+    """Result from the audit agent's review of staged artifacts."""
+
+    passed: bool
+    issues: list[str] = field(default_factory=list)  # blocking problems
+    suggestions: list[str] = field(default_factory=list)  # non-blocking improvements
+    security_flags: list[str] = field(default_factory=list)  # security concerns
+    summary: str = ""  # one-line verdict
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +164,9 @@ class GrimState(TypedDict, total=False):
 
     # Routing decision
     mode: Literal["companion", "delegate"]
-    delegation_type: Optional[Literal["memory", "code", "research", "operate", "ironclaw"]]
+    delegation_type: Optional[
+        Literal["memory", "code", "research", "operate", "ironclaw", "audit"]
+    ]
     selected_model: Optional[str]  # model ID chosen by model router
 
     # IronClaw engine state
@@ -147,6 +174,14 @@ class GrimState(TypedDict, total=False):
 
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]
+
+    # Staging pipeline — Phase 4 zero-trust audit
+    staging_job_id: Optional[str]  # UUID for current staging session
+    staging_artifacts: list[StagingArtifact]  # files pending review
+    audit_verdict: Optional[AuditVerdict]  # result from audit agent
+    review_count: int  # audit cycles so far (0-based)
+    max_reviews: int  # cap (default 3)
+    audit_feedback: Optional[str]  # structured feedback for re-dispatch
 
     # Caller identity (resolved at session start)
     caller_id: str  # "peter", "ironclaw", etc. — defaults to "peter"

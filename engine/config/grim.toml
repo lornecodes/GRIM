@@ -15,8 +15,8 @@ tool_timeout_secs = 30
 max_daily_cost_cents = 0  # No LLM spending — GRIM handles LLM calls
 
 [permissions.filesystem]
-read = ["./**"]
-write = ["./**"]
+read = ["./**", "/workspace/staging/**"]
+write = ["./**", "/workspace/staging/**"]
 deny = [
     "/etc/shadow",
     "/etc/gshadow",
@@ -151,6 +151,10 @@ redact_patterns = [
 
 [dlp]
 enabled = true
+
+[agents]
+enabled = true
+max_concurrent_sessions = 4
 
 [ui]
 enabled = true

@@ -11,6 +11,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use crate::agents::{AgentOrchestrator, CoordinationPattern, PipelineStage};
 use dashmap::DashMap;
 use governor::{
     clock::DefaultClock,
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, watch, RwLock};
@@ -74,6 +76,18 @@ pub struct GatewayServerConfig {
     /// Whether localhost connections skip authentication
     #[serde(default = "default_true")]
     pub loopback_no_auth: bool,
+
+    /// Whether the agent orchestrator is enabled
+    #[serde(default)]
+    pub agents_enabled: bool,
+
+    /// Max concurrent agent sessions
+    #[serde(default = "default_max_concurrent_agents")]
+    pub agents_max_concurrent: usize,
+}
+
+fn default_max_concurrent_agents() -> usize {
+    4
 }
 
 fn default_bind() -> String {
@@ -102,6 +116,8 @@ impl Default for GatewayServerConfig {
             tls_key: None,
             rate_limit_rps: default_rate_limit(),
             loopback_no_auth: true,
+            agents_enabled: false,
+            agents_max_concurrent: default_max_concurrent_agents(),
         }
     }
 }
@@ -139,6 +155,9 @@ pub struct AppState {
 
     /// Audit log callback — writes JSON lines.
     audit_log: Arc<dyn Fn(&serde_json::Value) + Send + Sync>,
+
+    /// Agent orchestrator (if enabled).
+    orchestrator: Option<Arc<Mutex<AgentOrchestrator>>>,
 }
 
 /// Simple in-memory Prometheus-compatible counters.
@@ -470,6 +489,18 @@ impl GatewayServer {
                 }
             });
 
+        let orchestrator = if self.config.agents_enabled {
+            let orch = AgentOrchestrator::new(self.config.agents_max_concurrent);
+            info!(
+                roles = orch.list_roles().len(),
+                max_concurrent = self.config.agents_max_concurrent,
+                "Agent orchestrator enabled in gateway"
+            );
+            Some(Arc::new(Mutex::new(orch)))
+        } else {
+            None
+        };
+
         Ok(AppState {
             config: self.config.clone(),
             jwt_decoding_key,
@@ -480,6 +511,7 @@ impl GatewayServer {
             started_at: Instant::now(),
             metrics: Arc::new(Metrics::default()),
             audit_log,
+            orchestrator,
         })
     }
 
@@ -515,6 +547,8 @@ impl GatewayServer {
             .route("/v1/tools/{name}/execute", post(handle_tool_execute))
             .route("/v1/sessions", get(handle_list_sessions))
             .route("/v1/skills/scan", post(handle_skill_scan))
+            .route("/v1/agents", get(handle_list_agents))
+            .route("/v1/agents/workflow", post(handle_run_workflow))
             .route("/v1/metrics", get(handle_metrics))
             // Middleware: auth + rate-limit + request-id + audit
             .layer(middleware::from_fn_with_state(
@@ -1051,6 +1085,231 @@ async fn handle_skill_scan(
 }
 
 // ---------------------------------------------------------------------------
+// Agent endpoints
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct AgentRoleInfo {
+    id: String,
+    name: String,
+    description: String,
+    capabilities: Vec<String>,
+    can_delegate: bool,
+    max_tokens_per_turn: u32,
+    preferred_provider: Option<String>,
+    preferred_model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ListAgentsResponse {
+    enabled: bool,
+    roles: Vec<AgentRoleInfo>,
+    active_sessions: usize,
+    max_concurrent_sessions: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkflowRequest {
+    task: String,
+    pattern: WorkflowPatternRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WorkflowPatternRequest {
+    Sequential { agent_order: Vec<String> },
+    Parallel { agents: Vec<String> },
+    Debate {
+        agents: Vec<String>,
+        #[serde(default = "default_debate_rounds")]
+        max_rounds: u32,
+        #[serde(default = "default_consensus_threshold")]
+        consensus_threshold: f64,
+    },
+    Hierarchical {
+        lead: String,
+        specialists: Vec<String>,
+    },
+    Pipeline {
+        stages: Vec<PipelineStageRequest>,
+    },
+}
+
+fn default_debate_rounds() -> u32 {
+    3
+}
+fn default_consensus_threshold() -> f64 {
+    0.7
+}
+
+#[derive(Debug, Deserialize)]
+struct PipelineStageRequest {
+    agent_id: String,
+    instruction: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkflowResponse {
+    session_id: String,
+    status: String,
+    agents_executed: Vec<String>,
+    results: HashMap<String, String>,
+    duration_ms: u64,
+}
+
+impl WorkflowPatternRequest {
+    fn into_coordination_pattern(self) -> CoordinationPattern {
+        match self {
+            Self::Sequential { agent_order } => CoordinationPattern::Sequential { agent_order },
+            Self::Parallel { agents } => CoordinationPattern::Parallel { agents },
+            Self::Debate { agents, max_rounds, consensus_threshold } => {
+                CoordinationPattern::Debate { agents, max_rounds, consensus_threshold }
+            }
+            Self::Hierarchical { lead, specialists } => {
+                CoordinationPattern::Hierarchical { lead, specialists }
+            }
+            Self::Pipeline { stages } => CoordinationPattern::Pipeline {
+                stages: stages
+                    .into_iter()
+                    .map(|s| PipelineStage {
+                        agent_id: s.agent_id,
+                        instruction: s.instruction,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+/// `GET /v1/agents` -- list available agent roles.
+async fn handle_list_agents(State(state): State<AppState>) -> impl IntoResponse {
+    match &state.orchestrator {
+        Some(orch) => {
+            let orch = orch.lock();
+            let roles: Vec<AgentRoleInfo> = orch
+                .list_roles()
+                .into_iter()
+                .map(|r| AgentRoleInfo {
+                    id: r.id.clone(),
+                    name: r.name.clone(),
+                    description: r.description.clone(),
+                    capabilities: r.capabilities.iter().map(|c| c.to_string()).collect(),
+                    can_delegate: r.can_delegate,
+                    max_tokens_per_turn: r.max_tokens_per_turn,
+                    preferred_provider: r.preferred_provider.clone(),
+                    preferred_model: r.preferred_model.clone(),
+                })
+                .collect();
+            let active = orch.active_sessions();
+            Json(ListAgentsResponse {
+                enabled: true,
+                roles,
+                active_sessions: active,
+                max_concurrent_sessions: 4,
+            })
+            .into_response()
+        }
+        None => {
+            Json(ListAgentsResponse {
+                enabled: false,
+                roles: vec![],
+                active_sessions: 0,
+                max_concurrent_sessions: 0,
+            })
+            .into_response()
+        }
+    }
+}
+
+/// `POST /v1/agents/workflow` -- run a collaboration workflow.
+async fn handle_run_workflow(
+    State(state): State<AppState>,
+    Json(req): Json<WorkflowRequest>,
+) -> impl IntoResponse {
+    let request_id = Uuid::new_v4().to_string();
+
+    let orch = match &state.orchestrator {
+        Some(o) => o,
+        None => {
+            let (status, body) = ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Agent orchestrator is not enabled",
+                &request_id,
+            );
+            return (status, body).into_response();
+        }
+    };
+
+    let pattern = req.pattern.into_coordination_pattern();
+    let start = Instant::now();
+
+    let mut orch = orch.lock();
+
+    // Start session
+    let session_id = match orch.start_session(&req.task, pattern) {
+        Ok(id) => id,
+        Err(e) => {
+            let (status, body) = ApiError::with_detail(
+                StatusCode::BAD_REQUEST,
+                "Failed to start workflow",
+                e.to_string(),
+                &request_id,
+            );
+            return (status, body).into_response();
+        }
+    };
+
+    // Execute round
+    let executed = match orch.execute_round(&session_id) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = orch.cancel_session(&session_id);
+            let (status, body) = ApiError::with_detail(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Workflow execution failed",
+                e.to_string(),
+                &request_id,
+            );
+            return (status, body).into_response();
+        }
+    };
+
+    // Complete session
+    let _ = orch.complete_session(&session_id);
+
+    // Gather results
+    let results: HashMap<String, String> = if let Some(session) = orch.get_session(&session_id) {
+        session
+            .results
+            .iter()
+            .map(|(k, v)| (k.clone(), v.output.clone()))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    (state.audit_log)(&serde_json::json!({
+        "event": "agent_workflow",
+        "request_id": request_id,
+        "session_id": session_id,
+        "task_length": req.task.len(),
+        "agents_executed": executed,
+        "duration_ms": duration_ms,
+    }));
+
+    Json(WorkflowResponse {
+        session_id,
+        status: "completed".to_string(),
+        agents_executed: executed,
+        results,
+        duration_ms,
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
 // Bridge: core::config::GatewayConfig → GatewayServerConfig
 // ---------------------------------------------------------------------------
 
@@ -1067,6 +1326,8 @@ impl From<&crate::core::config::GatewayConfig> for GatewayServerConfig {
             tls_key: c.tls_key.clone(),
             rate_limit_rps: c.rate_limit,
             loopback_no_auth: true,
+            agents_enabled: false,
+            agents_max_concurrent: default_max_concurrent_agents(),
         }
     }
 }

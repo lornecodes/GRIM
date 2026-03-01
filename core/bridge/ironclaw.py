@@ -228,6 +228,46 @@ class IronClawBridge:
             logger.warning("IronClaw list_tools failed: %s", exc)
             return []
 
+    # ── Agents ──
+
+    async def list_agents(self) -> dict:
+        """List IronClaw's built-in agent roles."""
+        try:
+            resp = await self._client.get("/v1/agents")
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            logger.warning("IronClaw list_agents failed: %s", exc)
+            return {"enabled": False, "roles": [], "active_sessions": 0, "max_concurrent_sessions": 0}
+
+    async def run_workflow(self, task: str, pattern: dict) -> dict:
+        """Run a simple agent workflow via IronClaw orchestrator."""
+        try:
+            resp = await self._client.post(
+                "/v1/agents/workflow",
+                json={"task": task, "pattern": pattern},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            error_body = exc.response.json() if exc.response.content else {}
+            return {
+                "session_id": "",
+                "status": "failed",
+                "agents_executed": [],
+                "results": {},
+                "error": error_body.get("message", str(exc)),
+            }
+        except Exception as exc:
+            logger.error("IronClaw workflow execution failed: %s", exc)
+            return {
+                "session_id": "",
+                "status": "failed",
+                "agents_executed": [],
+                "results": {},
+                "error": str(exc),
+            }
+
     # ── Metrics ──
 
     async def get_metrics(self) -> EngineMetrics:

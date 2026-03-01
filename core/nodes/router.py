@@ -21,30 +21,63 @@ from core.state import GrimState
 
 logger = logging.getLogger(__name__)
 
-# Fallback keywords for delegation when no skill consumer matches
+# Fallback keywords for delegation when no skill consumer matches.
+# Uses substring matching (keyword in message.lower()), so keep terms
+# short and atomic — "echo" matches "do an echo command in powershell".
 DELEGATION_KEYWORDS = {
     "memory": [
         "capture this", "remember this", "save this",
         "promote", "organize vault", "triage inbox",
         "connect these", "relate these", "link these",
         "review vault", "vault health",
+        "store this", "add to vault", "update the vault",
+        "create an fdo", "new knowledge entry",
     ],
     "code": [
         "write code", "implement", "create file",
         "fix this code", "refactor", "add a test",
+        "write a function", "write a class", "edit the code",
+        "modify the file", "update the code", "debug this",
+        "write a script", "code this", "build this",
     ],
     "research": [
         "analyze this", "ingest", "summarize this paper",
         "deep dive", "review this document",
+        "research this", "look into this", "investigate",
+        "what does the literature say", "find papers on",
+        "summarize this", "break this down",
     ],
     "operate": [
-        "upload to zenodo", "sync vault", "commit",
-        "git status", "push to github", "run command",
+        # Shell / commands
+        "run command", "run this", "execute this",
+        "shell", "powershell", "bash", "terminal",
+        "echo ", "mkdir", "ls ", "dir ", "pwd",
+        "curl ", "wget ",
+        # Git
+        "git status", "git log", "git diff", "git pull",
+        "git push", "commit", "push to github",
+        # Files
+        "list files", "show me the directory", "what files",
+        "read the file", "show me the file", "cat ",
+        # HTTP
+        "http request", "fetch ", "call the api",
+        "check the weather", "hit the endpoint",
+        "make a request",
+        # Ops
+        "upload to zenodo", "sync vault", "deploy",
+        "check the status", "test execution",
     ],
     "ironclaw": [
         "run sandboxed", "execute safely", "isolated shell",
-        "sandboxed execution", "run in sandbox", "claw execute",
+        "sandboxed execution", "run in sandbox",
         "secure execute", "run securely",
+        "run this safely", "execute in sandbox",
+        "run isolated", "safe execution",
+    ],
+    "audit": [
+        "review staging", "audit output", "check staged",
+        "staging review", "review the output",
+        "audit the files", "review execution output",
     ],
 }
 
@@ -170,6 +203,12 @@ def _skill_ctx_to_delegation(skill_ctx) -> str | None:
     # IronClaw skills → sandboxed execution agent
     if name in ("sandboxed-execution", "secure-shell", "ironclaw-execute"):
         return "ironclaw"
+
+    # Audit/staging skills → audit or operator agent
+    if name in ("ironclaw-review",):
+        return "audit"
+    if name in ("staging-organize", "staging-cleanup"):
+        return "operate"
 
     # Check permissions for hints
     perms = skill_ctx.permissions
