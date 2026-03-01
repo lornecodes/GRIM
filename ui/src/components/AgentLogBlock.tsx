@@ -41,8 +41,8 @@ function extractTotalMs(traces: TraceEvent[]): number {
   return Math.max(...traces.map((t) => t.ms));
 }
 
-function summarizeTools(tools: { tool: string; input?: string }[]): string {
-  if (tools.length === 0) return "processing";
+function summarizeTools(tools: { tool: string; input?: string }[], streaming?: boolean): string {
+  if (tools.length === 0) return streaming ? "processing" : "done";
   if (tools.length === 1) {
     const t = tools[0];
     if (t.input && t.input.length < 40) return `${t.tool}(${t.input})`;
@@ -73,7 +73,7 @@ export function AgentLogBlock({ content, traces, streaming, node }: AgentLogBloc
   const agentType = extractAgentType(traces);
   const toolCalls = extractToolCalls(traces);
   const totalMs = extractTotalMs(traces);
-  const summary = summarizeTools(toolCalls);
+  const summary = summarizeTools(toolCalls, streaming);
 
   const accentColor = node === "dispatch" ? "#34d399" : "#3e5c72";
 
