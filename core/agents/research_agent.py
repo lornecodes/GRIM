@@ -41,7 +41,7 @@ def make_research_agent(config: GrimConfig):
     """
     agent = ResearchAgent(config)
 
-    async def research_agent_fn(state: GrimState) -> AgentResult:
+    async def research_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Execute a research task following skill protocols."""
         messages = state.get("messages", [])
         skill_protocols = state.get("skill_protocols", {})
@@ -66,6 +66,15 @@ def make_research_agent(config: GrimConfig):
             first_key = next(iter(skill_protocols))
             protocol = skill_protocols[first_key]
 
+        if protocol is None:
+            protocol = (
+                "You are a research agent with Kronos vault access and file reading tools.\n"
+                "Use kronos tools to search, retrieve, and analyze FDOs from the knowledge graph.\n"
+                "Use file tools to read source material and documents.\n"
+                "Always execute the task — do not say you can't do something "
+                "if you have a tool that can do it."
+            )
+
         # Build rich context for research tasks
         context = {}
         knowledge_context = state.get("knowledge_context", [])
@@ -83,6 +92,7 @@ def make_research_agent(config: GrimConfig):
             task=task,
             skill_protocol=protocol,
             context=context,
+            event_queue=event_queue,
         )
 
     return research_agent_fn

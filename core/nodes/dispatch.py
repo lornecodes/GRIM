@@ -20,6 +20,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from langchain_core.runnables import RunnableConfig
+
 from core.state import AgentResult, GrimState, StagingArtifact
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ def make_dispatch_node(agents: dict):
                 e.g. {"memory": memory_agent_fn, "code": coder_agent_fn}
     """
 
-    async def dispatch_node(state: GrimState) -> dict:
+    async def dispatch_node(state: GrimState, config: RunnableConfig = {}) -> dict:
         """Dispatch to the appropriate agent based on delegation_type."""
         delegation_type = state.get("delegation_type")
         if not delegation_type:
@@ -130,8 +132,14 @@ def make_dispatch_node(agents: dict):
             staging_update["staging_job_id"] = job_id
             staging_update["review_count"] = 0
 
+        # Read the live-monitoring event queue from RunnableConfig (not state,
+        # because asyncio.Queue is not serializable by LangGraph's checkpointer).
+        event_queue = None
+        if config and "configurable" in config:
+            event_queue = config["configurable"].get("agent_event_queue")
+
         try:
-            result = await agent_fn(state | staging_update)
+            result = await agent_fn(state | staging_update, event_queue=event_queue)
 
             update = {"agent_result": result}
             update.update(staging_update)

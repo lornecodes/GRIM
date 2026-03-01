@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time as _time
 from typing import Any
 
 from langchain_anthropic import ChatAnthropic
@@ -49,11 +51,20 @@ class BaseAgent:
         else:
             self.llm_with_tools = self.llm
 
+    def _emit(self, queue: asyncio.Queue | None, event: dict) -> None:
+        """Push a trace event onto the live-monitoring queue (non-blocking)."""
+        if queue is not None:
+            try:
+                queue.put_nowait(event)
+            except Exception:
+                pass  # never block agent execution for monitoring
+
     async def execute(
         self,
         task: str,
         skill_protocol: str | None = None,
         context: dict[str, Any] | None = None,
+        event_queue: asyncio.Queue | None = None,
     ) -> AgentResult:
         """Execute a task following the skill protocol.
 
@@ -67,6 +78,18 @@ class BaseAgent:
         """
         # Build system prompt from skill protocol
         system_parts = [f"You are the {self.agent_name} agent for GRIM."]
+
+        # Explicitly list available tools so the agent knows its capabilities
+        if self.tools:
+            tool_lines = []
+            for t in self.tools:
+                desc = t.description.split("\n")[0] if t.description else ""
+                tool_lines.append(f"  - **{t.name}**: {desc}")
+            system_parts.append(
+                "\n## Your Tools (USE THEM)\n\n"
+                "You have the following tools available. Use them to accomplish your task.\n"
+                + "\n".join(tool_lines)
+            )
 
         if skill_protocol:
             system_parts.append(
@@ -104,23 +127,59 @@ class BaseAgent:
             "yes" if skill_protocol else "no",
         )
 
+        _t0 = _time.monotonic()
+        self._emit(event_queue, {
+            "cat": "node", "node": self.agent_name, "action": "start",
+            "text": f"→ {self.agent_name}",
+        })
+
         try:
             # Agent tool-calling loop (max 10 tool calls per task)
             for step in range(10):
+                self._emit(event_queue, {
+                    "cat": "llm", "node": self.agent_name, "action": "start",
+                    "text": f"LLM call (step {step + 1})",
+                })
+
                 response = await self.llm_with_tools.ainvoke(messages)
                 messages.append(response)
 
                 # Check for tool calls
                 if hasattr(response, "tool_calls") and response.tool_calls:
                     for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_input = tool_call.get("args", {})
+                        self._emit(event_queue, {
+                            "cat": "tool", "node": self.agent_name, "action": "start",
+                            "text": f"tool: {tool_name}",
+                            "tool": tool_name,
+                            "input": str(tool_input)[:200],
+                        })
+
                         tool_result = await self._execute_tool(tool_call)
                         messages.append(tool_result)
+
+                        output_preview = str(tool_result.content)[:200] if hasattr(tool_result, "content") else ""
+                        self._emit(event_queue, {
+                            "cat": "tool", "node": self.agent_name, "action": "end",
+                            "text": f"✓ {tool_name}",
+                            "tool": tool_name,
+                            "output_preview": output_preview,
+                        })
                 else:
                     # No more tool calls — agent is done
                     break
 
             # Extract final response
             final_content = response.content if hasattr(response, "content") else str(response)
+
+            elapsed_ms = round((_time.monotonic() - _t0) * 1000)
+            self._emit(event_queue, {
+                "cat": "node", "node": self.agent_name, "action": "end",
+                "text": f"✓ {self.agent_name} ({elapsed_ms}ms)",
+                "duration_ms": elapsed_ms,
+                "step_content": final_content[:300],
+            })
 
             return AgentResult(
                 agent=self.agent_name,
@@ -130,6 +189,12 @@ class BaseAgent:
 
         except Exception as exc:
             logger.exception("%s agent: task failed", self.agent_name)
+            elapsed_ms = round((_time.monotonic() - _t0) * 1000)
+            self._emit(event_queue, {
+                "cat": "node", "node": self.agent_name, "action": "end",
+                "text": f"✗ {self.agent_name} failed ({elapsed_ms}ms)",
+                "duration_ms": elapsed_ms,
+            })
             return AgentResult(
                 agent=self.agent_name,
                 success=False,

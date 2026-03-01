@@ -40,7 +40,7 @@ def make_ironclaw_agent(config: GrimConfig):
     """
     agent = IronClawAgent(config)
 
-    async def ironclaw_agent_fn(state: GrimState) -> AgentResult:
+    async def ironclaw_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Execute a task using IronClaw's sandboxed tools."""
         messages = state.get("messages", [])
         skill_protocols = state.get("skill_protocols", {})
@@ -69,6 +69,15 @@ def make_ironclaw_agent(config: GrimConfig):
         if protocol is None and skill_protocols:
             first_key = next(iter(skill_protocols))
             protocol = skill_protocols[first_key]
+
+        if protocol is None:
+            protocol = (
+                "You are the IronClaw sandbox agent for secure code execution.\n"
+                "All tool calls execute through IronClaw's sandboxed environment.\n"
+                "Use your tools to run code safely with security policies enforced.\n"
+                "Always execute the task — do not say you can't do something "
+                "if you have a tool that can do it."
+            )
 
         # Build context from knowledge + IronClaw availability
         context = {}
@@ -101,6 +110,7 @@ def make_ironclaw_agent(config: GrimConfig):
             task=task,
             skill_protocol=protocol,
             context=context,
+            event_queue=event_queue,
         )
 
     return ironclaw_agent_fn

@@ -1,0 +1,52 @@
+name: memory-update
+version: "1.0"
+description: >
+  Update GRIM's persistent working memory. Covers adding new learnings,
+  updating objectives, recording user preferences, and capturing session
+  notes in the vault-stored memory.md file.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - memory:write
+  - vault:write
+
+consumers:
+  memory-agent:
+    role: execution
+    description: Updates specific sections of memory.md
+    reads: [protocol.md]
+
+inputs:
+  section:
+    type: string
+    required: true
+    description: Which section to update
+  content:
+    type: string
+    required: true
+    description: New content for the section
+
+outputs:
+  updated: boolean
+  section: string
+
+triggers:
+  explicit: "remember this, update your memory, save to memory, don't forget"
+  proactive: "User shares a preference, learning, or important context worth persisting"
+  keywords:
+    - "remember this"
+    - "update your memory"
+    - "save to memory"
+    - "don't forget"
+    - "add to memory"
+    - "note this"
+    - "keep in mind"
+    - "for future reference"
+    - "always remember"
+    - "update objectives"
+  intents:
+    - "update-memory"
+    - "save-preference"
+    - "capture-learning"

@@ -47,6 +47,13 @@ DELEGATION_KEYWORDS = {
         "what does the literature say", "find papers on",
         "summarize this", "break this down",
     ],
+    "ironclaw": [
+        "run sandboxed", "execute safely", "isolated shell",
+        "sandboxed execution", "run in sandbox",
+        "secure execute", "run securely",
+        "run this safely", "execute in sandbox",
+        "run isolated", "safe execution",
+    ],
     "operate": [
         # Shell / commands
         "run command", "run this", "execute this",
@@ -75,13 +82,6 @@ DELEGATION_KEYWORDS = {
         "which ", "where ",
         "what os", "what operating system",
         "system info", "disk space", "memory usage",
-    ],
-    "ironclaw": [
-        "run sandboxed", "execute safely", "isolated shell",
-        "sandboxed execution", "run in sandbox",
-        "secure execute", "run securely",
-        "run this safely", "execute in sandbox",
-        "run isolated", "safe execution",
     ],
     "audit": [
         "review staging", "audit output", "check staged",
@@ -140,6 +140,10 @@ def make_router_node(config: GrimConfig):
                     "same thing", "do it", "try ", "what about",
                     "how about", "can you also", "one more",
                     "run that", "do that", "test that",
+                    "don't you", "dont you", "can't you", "cant you",
+                    "just use", "use the same", "you just",
+                    "why didn't", "why didnt", "why can't", "why cant",
+                    "i just asked", "you have", "you already",
                 ]
                 if any(sig in message for sig in _FOLLOW_UP_SIGNALS):
                     logger.info(
@@ -174,7 +178,8 @@ def make_router_node(config: GrimConfig):
             _ACTION_TARGETS = [
                 "command", "shell", "ip", "system", "server",
                 "network", "file", "directory", "process",
-                "port", "dns", "connection",
+                "port", "dns", "connection", "cli", "terminal",
+                "bash", "tool", "access", "capability",
             ]
             for verb in _ACTION_VERBS:
                 if verb in message and any(t in message for t in _ACTION_TARGETS):
@@ -232,8 +237,8 @@ def _skill_ctx_to_delegation(skill_ctx) -> str | None:
     """
     name = skill_ctx.name
 
-    # Kronos vault skills → memory agent
-    if name.startswith("kronos-"):
+    # Kronos vault skills + GRIM memory skills → memory agent
+    if name.startswith("kronos-") or name.startswith("memory-"):
         return "memory"
 
     # Code/file skills → coder agent

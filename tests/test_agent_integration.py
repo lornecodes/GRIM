@@ -70,8 +70,9 @@ class TestAgentConstruction:
     def test_memory_agent_tools(self):
         from core.agents.memory_agent import MemoryAgent
         from core.tools.kronos_write import MEMORY_AGENT_TOOLS
+        from core.tools.memory_tools import MEMORY_TOOLS
         agent = MemoryAgent(self._make_config())
-        assert len(agent.tools) == len(MEMORY_AGENT_TOOLS)
+        assert len(agent.tools) == len(MEMORY_AGENT_TOOLS) + len(MEMORY_TOOLS)
 
     def test_research_agent_name(self):
         from core.agents.research_agent import ResearchAgent
@@ -704,6 +705,196 @@ class TestBaseAgentToolBinding:
         agent = TestAgent(cfg, tools=[])
         # No tools → llm_with_tools IS the raw llm
         assert agent.llm_with_tools is agent.llm
+
+
+# ─── Event Queue Serialization Safety ────────────────────────────────────
+
+
+class TestEventQueueSerialization:
+    """Verify that the agent event queue is NOT in graph state (would crash
+    LangGraph's checkpointer with 'Queue is not msgpack serializable')."""
+
+    def test_queue_not_in_grim_state(self):
+        """GrimState must not have _agent_event_queue — it's not serializable."""
+        from core.state import GrimState
+        annotations = getattr(GrimState, "__annotations__", {})
+        assert "_agent_event_queue" not in annotations, (
+            "asyncio.Queue must not be in GrimState — LangGraph checkpointer "
+            "cannot serialize it. Pass via RunnableConfig['configurable'] instead."
+        )
+
+    def test_state_keys_are_serializable(self):
+        """All GrimState typed keys should be JSON/msgpack-safe types (not Queue)."""
+        import asyncio as _aio
+        from core.state import GrimState
+        annotations = getattr(GrimState, "__annotations__", {})
+        for key, _type in annotations.items():
+            type_str = str(_type)
+            assert "Queue" not in type_str, (
+                f"GrimState['{key}'] has type {_type} which contains Queue — "
+                "not serializable by LangGraph checkpointer."
+            )
+
+
+# ─── Dispatch Config Propagation ─────────────────────────────────────────
+
+
+class TestDispatchConfigPropagation:
+    """Test that dispatch reads event queue from config, not state."""
+
+    def _make_agents(self):
+        agents = {}
+        for name in ["memory", "code", "research", "operate", "ironclaw"]:
+            mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
+            mock_fn.__name__ = f"{name}_agent_fn"
+            agents[name] = mock_fn
+        return agents
+
+    @pytest.mark.asyncio
+    async def test_dispatch_passes_queue_from_config(self):
+        """Dispatch should extract event_queue from config['configurable']."""
+        import asyncio as _aio
+        from core.nodes.dispatch import make_dispatch_node
+
+        agents = self._make_agents()
+        dispatch_fn = make_dispatch_node(agents)
+        queue = _aio.Queue()
+
+        config = {"configurable": {"agent_event_queue": queue}}
+        await dispatch_fn({"delegation_type": "memory"}, config=config)
+
+        # The agent_fn should have been called with event_queue=queue
+        call_kwargs = agents["memory"].call_args[1]
+        assert call_kwargs.get("event_queue") is queue
+
+    @pytest.mark.asyncio
+    async def test_dispatch_works_without_config(self):
+        """Dispatch should work when config is None (backward compat)."""
+        from core.nodes.dispatch import make_dispatch_node
+
+        agents = self._make_agents()
+        dispatch_fn = make_dispatch_node(agents)
+
+        result = await dispatch_fn({"delegation_type": "memory"})
+        agents["memory"].assert_called_once()
+        # event_queue should be None
+        call_kwargs = agents["memory"].call_args[1]
+        assert call_kwargs.get("event_queue") is None
+
+    @pytest.mark.asyncio
+    async def test_dispatch_works_without_queue_in_config(self):
+        """Dispatch should work when config has no agent_event_queue key."""
+        from core.nodes.dispatch import make_dispatch_node
+
+        agents = self._make_agents()
+        dispatch_fn = make_dispatch_node(agents)
+
+        config = {"configurable": {"thread_id": "test-thread"}}
+        result = await dispatch_fn({"delegation_type": "code"}, config=config)
+        agents["code"].assert_called_once()
+        call_kwargs = agents["code"].call_args[1]
+        assert call_kwargs.get("event_queue") is None
+
+
+# ─── BaseAgent Event Emission ────────────────────────────────────────────
+
+
+class TestBaseAgentEventEmission:
+    """Test that BaseAgent._emit() pushes events to queue correctly."""
+
+    def test_emit_pushes_to_queue(self):
+        import asyncio as _aio
+        from core.agents.base import BaseAgent
+
+        cfg = GrimConfig()
+
+        class TestAgent(BaseAgent):
+            agent_name = "test"
+
+        agent = TestAgent(cfg, tools=[])
+        queue = _aio.Queue()
+        event = {"cat": "node", "action": "start", "text": "test"}
+
+        agent._emit(queue, event)
+        assert not queue.empty()
+        assert queue.get_nowait() == event
+
+    def test_emit_noop_when_queue_is_none(self):
+        from core.agents.base import BaseAgent
+
+        cfg = GrimConfig()
+
+        class TestAgent(BaseAgent):
+            agent_name = "test"
+
+        agent = TestAgent(cfg, tools=[])
+        # Should not raise
+        agent._emit(None, {"cat": "test"})
+
+    def test_emit_does_not_block_on_full_queue(self):
+        import asyncio as _aio
+        from core.agents.base import BaseAgent
+
+        cfg = GrimConfig()
+
+        class TestAgent(BaseAgent):
+            agent_name = "test"
+
+        agent = TestAgent(cfg, tools=[])
+        # Create a queue with max size 1, fill it
+        queue = _aio.Queue(maxsize=1)
+        queue.put_nowait({"dummy": True})
+
+        # Should not raise even though queue is full
+        agent._emit(queue, {"cat": "overflow"})
+
+    @pytest.mark.asyncio
+    async def test_execute_emits_start_and_end_events(self):
+        """BaseAgent.execute() should emit node start and end events."""
+        import asyncio as _aio
+        from core.agents.base import BaseAgent
+
+        cfg = GrimConfig()
+
+        class TestAgent(BaseAgent):
+            agent_name = "tester"
+
+        agent = TestAgent(cfg, tools=[])
+        queue = _aio.Queue()
+
+        # Mock LLM to return a simple response (no tool calls)
+        mock_response = MagicMock()
+        mock_response.content = "Hello from test"
+        mock_response.tool_calls = []
+        agent.llm_with_tools = AsyncMock()
+        agent.llm_with_tools.ainvoke = AsyncMock(return_value=mock_response)
+
+        result = await agent.execute(
+            task="test task",
+            event_queue=queue,
+        )
+
+        # Collect all events
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        # Should have: node start, llm start, node end
+        cats = [e["cat"] for e in events]
+        assert "node" in cats
+        assert "llm" in cats
+
+        # First event should be node start
+        assert events[0]["cat"] == "node"
+        assert events[0]["action"] == "start"
+        assert events[0]["node"] == "tester"
+
+        # Last event should be node end with duration_ms
+        assert events[-1]["cat"] == "node"
+        assert events[-1]["action"] == "end"
+        assert "duration_ms" in events[-1]
+
+        assert result.success is True
 
 
 if __name__ == "__main__":

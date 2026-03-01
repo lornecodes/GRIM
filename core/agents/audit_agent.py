@@ -125,7 +125,7 @@ def make_audit_agent(config: GrimConfig):
     """
     agent = AuditAgent(config)
 
-    async def audit_agent_fn(state: GrimState) -> AgentResult:
+    async def audit_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Review staged IronClaw output."""
         job_id = state.get("staging_job_id")
         if not job_id:
@@ -170,6 +170,7 @@ def make_audit_agent(config: GrimConfig):
             task=task,
             skill_protocol=AUDIT_SYSTEM_PREAMBLE,
             context=context,
+            event_queue=event_queue,
         )
 
         # Parse the verdict from the agent's response

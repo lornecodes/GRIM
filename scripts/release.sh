@@ -159,6 +159,7 @@ cmd_test() {
             tests/test_model_routing.py \
             tests/test_ironclaw.py \
             tests/test_agent_integration.py \
+            tests/test_memory_system.py \
             -v --tb=short
 
     if [[ -n "$vault" ]]; then
@@ -320,6 +321,13 @@ cmd_unit() {
     _log "── Agent integration tests (host) ──"
     (cd "$GRIM_DIR" && python -m pytest tests/test_agent_integration.py -v --tb=short) || {
         _err "Agent integration tests FAILED — aborting"
+        return 1
+    }
+
+    # Memory system tests
+    _log "── Memory system tests (host) ──"
+    (cd "$GRIM_DIR" && python -m pytest tests/test_memory_system.py -v --tb=short) || {
+        _err "Memory system tests FAILED — aborting"
         return 1
     }
 

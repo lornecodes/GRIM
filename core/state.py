@@ -198,3 +198,7 @@ class GrimState(TypedDict, total=False):
     # Evolution tracking
     session_topics: list[str]
     session_start: datetime
+
+    # NOTE: agent_event_queue is NOT in state — it's passed via
+    # RunnableConfig["configurable"]["agent_event_queue"] to avoid
+    # serialization by LangGraph's checkpointer (Queue is not serializable).

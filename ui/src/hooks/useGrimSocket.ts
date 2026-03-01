@@ -71,6 +71,9 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
               currentNode.current = trace.node;
             }
 
+            // Tag every trace with the active node so we can filter later
+            const taggedTrace = { ...trace, _activeNode: currentNode.current } as TraceEvent & { _activeNode: string };
+
             // When a node ends with step_content, finalize its step bubble
             if (trace.cat === "node" && trace.action === "end" && trace.node && trace.step_content) {
               const stepId = stepBubbleIds.current.get(trace.node);
@@ -82,9 +85,24 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
               }
             }
 
-            currentTraces.current.push(trace);
+            currentTraces.current.push(taggedTrace);
             // Attach traces to the main response bubble
             state.updateMessage(id, { traces: [...currentTraces.current] });
+
+            // Also attach traces to the relevant step bubble (for AgentLogBlock)
+            const activeNode = currentNode.current;
+            if (activeNode) {
+              const stepId = stepBubbleIds.current.get(activeNode);
+              if (stepId) {
+                const nodeTraces = currentTraces.current.filter(
+                  (t) => {
+                    const an = (t as TraceEvent & { _activeNode?: string })._activeNode;
+                    return an === activeNode;
+                  }
+                );
+                state.updateMessage(stepId, { traces: [...nodeTraces] });
+              }
+            }
             break;
           }
           case "stream": {

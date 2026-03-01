@@ -48,6 +48,33 @@ outputs:
 
 triggers:
   - delegation: "Agent needs to run a command as part of a task"
+  - explicit: "run, execute, ping, curl, check, status, install, build, test"
+  - proactive: "User asks to perform a system operation, network test, or shell task"
+
+  keywords:
+    - "run command"
+    - "run shell"
+    - "run bash"
+    - "execute"
+    - "ping"
+    - "curl"
+    - "check status"
+    - "install"
+    - "what's my ip"
+    - "whats my ip"
+    - "network"
+    - "build"
+    - "test"
+    - "deploy"
+    - "restart"
+    - "kill process"
+    - "disk space"
+    - "memory usage"
+    - "system info"
+  intents:
+    - "run-command"
+    - "system-operation"
+    - "network-test"
 
 allowed_categories:
   build: "cargo, npm, pip, make, cmake, etc."

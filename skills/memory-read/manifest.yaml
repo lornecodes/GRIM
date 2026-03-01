@@ -1,0 +1,48 @@
+name: memory-read
+version: "1.0"
+description: >
+  Read GRIM's persistent working memory. Covers retrieving current objectives,
+  recent topics, user preferences, key learnings, and session notes from
+  the vault-stored memory.md file.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - memory:read
+  - vault:read
+
+consumers:
+  memory-agent:
+    role: execution
+    description: Reads memory.md and summarizes relevant sections
+    reads: [protocol.md]
+
+inputs:
+  query:
+    type: string
+    required: false
+    description: Optional focus area (e.g., "objectives", "recent topics")
+
+outputs:
+  memory_content: string
+  sections: object
+
+triggers:
+  explicit: "what do you remember, your memory, show memory, current objectives"
+  proactive: "User asks what GRIM knows, what they've discussed, or current state"
+  keywords:
+    - "what do you remember"
+    - "your memory"
+    - "show memory"
+    - "current objectives"
+    - "what are we working on"
+    - "what have we discussed"
+    - "your notes"
+    - "what do you know"
+    - "memory status"
+    - "working memory"
+  intents:
+    - "recall-memory"
+    - "check-objectives"
+    - "session-context"

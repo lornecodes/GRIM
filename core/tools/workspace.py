@@ -211,14 +211,18 @@ async def grep_workspace(query: str, path: str = ".", file_pattern: str = "*") -
 
 @tool
 async def run_shell(command: str, cwd: str = ".") -> str:
-    """Run a shell command in the workspace.
+    """Run a shell command — you have full terminal/bash access.
+
+    Use this to execute any shell command: ping, curl, python, pip, ls, cat,
+    grep, git, docker, system utilities, scripts, etc. You can run anything
+    that a terminal can run.
 
     Args:
-        command: Command to execute (PowerShell on Windows, bash on Unix).
+        command: Shell command to execute (bash on Linux/Docker, PowerShell on Windows).
         cwd: Working directory relative to workspace root.
 
     Returns:
-        JSON with stdout, stderr, and exit code.
+        JSON with exit_code, stdout, and stderr.
     """
     work_dir = _resolve_path(cwd)
 

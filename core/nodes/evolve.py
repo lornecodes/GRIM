@@ -77,7 +77,7 @@ def make_evolve_node(config: GrimConfig):
             start_snapshot["uncertainty"], end_snapshot["uncertainty"],
         )
 
-        # Objective extraction (periodic, not every turn)
+        # Objective extraction + memory update (periodic, not every turn)
         _turn_counter["count"] += 1
         messages = list(state.get("messages", []))
 
@@ -86,6 +86,7 @@ def make_evolve_node(config: GrimConfig):
             and _turn_counter["count"] % _OBJECTIVE_EXTRACT_INTERVAL == 0
         ):
             await _extract_and_save_objectives(messages, state, config)
+            await _update_working_memory(messages, state, config)
 
         return {"field_state": field_state}
 
@@ -204,3 +205,90 @@ async def _extract_and_save_objectives(
         logger.warning("Evolve: failed to parse objective extraction JSON")
     except Exception:
         logger.exception("Evolve: objective extraction failed")
+
+
+MEMORY_UPDATE_PROMPT = """You are updating GRIM's persistent working memory file.
+Given the current memory content and recent conversation, produce an updated version.
+
+Rules:
+- Keep the same markdown structure with ## section headers
+- Update "Active Objectives" to reflect current objectives (sync from provided list)
+- Add new entries to "Recent Topics" (keep last 10, each with ISO timestamp)
+- Extract any user preferences mentioned and add to "User Preferences" (no duplicates)
+- Add confirmed insights to "Key Learnings" (no duplicates)
+- Add a brief session note to "Session Notes" (keep last 10)
+- Never remove existing entries unless they're clearly outdated
+- Keep entries concise — memory should be scannable
+
+Current memory.md:
+```
+{current_memory}
+```
+
+Current objectives:
+{objectives_text}
+
+Recent conversation (last messages):
+{conversation}
+
+Return ONLY the updated markdown content for memory.md, nothing else."""
+
+
+async def _update_working_memory(
+    messages: list, state: GrimState, config: GrimConfig
+) -> None:
+    """Update GRIM's persistent working memory via LLM analysis."""
+    try:
+        from langchain_anthropic import ChatAnthropic
+        from langchain_core.messages import HumanMessage
+
+        from core.memory_store import read_memory, write_memory
+
+        current_memory = read_memory(config.vault_path)
+        if not current_memory:
+            current_memory = "# GRIM Working Memory\n\n(empty)"
+
+        llm = ChatAnthropic(
+            model=config.model,
+            temperature=0.0,
+            max_tokens=2048,
+            default_headers={"X-Caller-ID": "grim"},
+        )
+
+        # Build objectives text
+        objectives = state.get("objectives", [])
+        if objectives:
+            obj_lines = []
+            for o in objectives:
+                obj_dict = o.to_dict() if hasattr(o, "to_dict") else o
+                status = obj_dict.get("status", "active") if isinstance(obj_dict, dict) else "active"
+                desc = obj_dict.get("description", str(o)) if isinstance(obj_dict, dict) else str(o)
+                obj_lines.append(f"- [{status}] {desc}")
+            objectives_text = "\n".join(obj_lines)
+        else:
+            objectives_text = "(none)"
+
+        recent = messages[-10:]
+        conversation_text = format_messages_for_summary(recent)
+
+        prompt = MEMORY_UPDATE_PROMPT.format(
+            current_memory=current_memory,
+            objectives_text=objectives_text,
+            conversation=conversation_text,
+        )
+
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        updated_content = response.content.strip()
+
+        # Strip markdown code fences if present
+        if updated_content.startswith("```"):
+            updated_content = updated_content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        if updated_content and "## " in updated_content:
+            write_memory(config.vault_path, updated_content)
+            logger.info("Evolve: updated working memory (%d chars)", len(updated_content))
+        else:
+            logger.warning("Evolve: memory update produced invalid content, skipping")
+
+    except Exception:
+        logger.exception("Evolve: working memory update failed")

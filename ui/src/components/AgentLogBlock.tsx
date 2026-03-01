@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { TraceEvent } from "@/lib/types";
 
 interface AgentLogBlockProps {
@@ -53,15 +53,18 @@ function summarizeTools(tools: { tool: string; input?: string }[]): string {
 
 export function AgentLogBlock({ content, traces, streaming, node }: AgentLogBlockProps) {
   const [expanded, setExpanded] = useState(false);
+  const userToggled = useRef(false);
 
-  // Auto-expand while streaming
+  // Auto-expand while streaming, auto-collapse when done (unless user manually opened)
   useEffect(() => {
-    if (streaming) setExpanded(true);
+    if (streaming) {
+      setExpanded(true);
+      userToggled.current = false; // reset on new stream
+    }
   }, [streaming]);
 
-  // Auto-collapse when streaming ends
   useEffect(() => {
-    if (!streaming && expanded) {
+    if (!streaming && expanded && !userToggled.current) {
       const timer = setTimeout(() => setExpanded(false), 500);
       return () => clearTimeout(timer);
     }
@@ -82,7 +85,10 @@ export function AgentLogBlock({ content, traces, streaming, node }: AgentLogBloc
       >
         {/* Compact header — always visible */}
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => {
+            userToggled.current = true;
+            setExpanded((v) => !v);
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-grim-surface-hover transition-colors"
         >
           <span className="text-[11px] text-grim-text-dim select-none">

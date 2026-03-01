@@ -4,6 +4,7 @@ import { IconDashboard } from "@/components/icons/NavIcons";
 import { DashboardTile } from "@/components/ui/DashboardTile";
 import { useBridgeApi } from "@/hooks/useBridgeApi";
 import { useActiveAgents } from "@/hooks/useActiveAgents";
+import { useGrimMemory } from "@/hooks/useGrimMemory";
 import { formatCount } from "@/lib/format";
 import { useGrimStore } from "@/store";
 
@@ -41,8 +42,9 @@ export function DashboardHome() {
 
       {/* Tile grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <TokenUsageTile />
+        <MemoryWidgetTile />
         <ActiveAgentsTile />
+        <TokenUsageTile />
       </div>
     </div>
   );
@@ -171,72 +173,171 @@ function ActiveAgentsTile() {
         <div className="max-h-64 overflow-y-auto space-y-2">
           {activeAgents.map((agent) => {
             const toolTraces = agent.traces.filter((t) => t.cat === "tool");
-            const hasOutput = toolTraces.some((t) => t.output_preview);
+            const stdout = agent.traces
+              .filter((t) => t.cat === "node" && t.action === "end" && t.step_content)
+              .map((t) => t.step_content!)
+              .join("\n");
             return (
               <div
                 key={agent.node}
-                className="bg-grim-bg rounded border border-grim-border p-2"
+                className="bg-grim-bg rounded-sm border border-grim-border overflow-hidden font-mono"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium text-grim-text">
-                    {agent.label}
+                {/* Mini terminal header */}
+                <div className="flex items-center gap-2 px-2 py-1 bg-grim-surface/50 border-b border-grim-border/50">
+                  <span className="text-[10px] text-grim-text-dim">
+                    {agent.label.toLowerCase()}@grim
                   </span>
-                  {toolTraces.length > 0 && (
-                    <div className="flex gap-1">
-                      {toolTraces.slice(0, 3).map((t, i) => (
-                        <span
-                          key={i}
-                          className="text-[9px] px-1 py-0.5 rounded bg-grim-surface text-trace-tool font-mono"
-                        >
-                          {t.tool || t.text}
-                        </span>
-                      ))}
-                      {toolTraces.length > 3 && (
-                        <span className="text-[9px] text-grim-text-dim">
-                          +{toolTraces.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <span className="text-[10px] text-grim-text-dim ml-auto tabular-nums">
+                  <span className="text-[9px] text-grim-text-dim ml-auto tabular-nums">
                     {agent.totalMs}ms
                   </span>
                 </div>
-                {/* Tool output preview */}
-                {hasOutput && (
-                  <div className="mb-1 font-mono text-[10px] text-grim-text bg-grim-surface/50 rounded px-2 py-1 max-h-16 overflow-hidden">
-                    {toolTraces
-                      .filter((t) => t.output_preview)
-                      .slice(0, 2)
-                      .map((t, i) => (
-                        <div key={i} className="truncate">
-                          <span className="text-grim-accent">&gt; </span>
-                          {t.output_preview}
-                        </div>
-                      ))}
-                  </div>
-                )}
-                {/* Compact trace log — last 4 entries */}
-                <div className="space-y-0.5">
-                  {agent.traces.slice(-4).map((trace, i) => (
-                    <div
-                      key={i}
-                      className="text-[10px] text-grim-text-dim truncate"
-                    >
-                      <span
-                        className={`font-bold uppercase mr-1 ${
-                          catColors[trace.cat] || "text-grim-text-dim"
-                        }`}
-                      >
-                        {trace.cat}
-                      </span>
-                      {trace.text}
+                {/* Terminal body — tool calls + stdout */}
+                <div className="px-2 py-1 space-y-0.5 max-h-32 overflow-y-auto">
+                  {toolTraces.slice(0, 3).map((t, i) => (
+                    <div key={i} className="text-[10px] truncate">
+                      <span className="text-grim-accent select-none">$ </span>
+                      <span className="text-trace-tool">{t.tool || t.text}</span>
+                      {t.output_preview && (
+                        <span className="text-grim-text-dim ml-1">
+                          → {t.output_preview.slice(0, 60)}
+                        </span>
+                      )}
                     </div>
                   ))}
+                  {stdout && (
+                    <div className="text-[10px] text-grim-text leading-relaxed mt-0.5 line-clamp-3">
+                      {stdout.slice(0, 200)}
+                    </div>
+                  )}
+                  {toolTraces.length === 0 && !stdout && agent.traces.length > 0 && (
+                    <div className="text-[10px] text-grim-text-dim truncate">
+                      <span className={`${catColors[agent.traces[agent.traces.length - 1].cat] || "text-grim-text-dim"}`}>
+                        {agent.traces[agent.traces.length - 1].text}
+                      </span>
+                    </div>
+                  )}
+                  {agent.traces.length === 0 && (
+                    <div className="text-[10px] text-grim-text-dim">
+                      <span className="text-grim-accent">$ </span>
+                      <span className="animate-pulse">_</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+    </DashboardTile>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Memory Widget Tile
+// ---------------------------------------------------------------------------
+
+function MemoryWidgetTile() {
+  const { memory, loading, error } = useGrimMemory();
+  const setActivePage = useGrimStore((s) => s.setActivePage);
+
+  const sections = memory?.sections || {};
+  const objectives = sections["Active Objectives"] || "";
+  const recentTopics = sections["Recent Topics"] || "";
+
+  // Parse bullet items from objectives
+  const objectiveItems = objectives
+    .split("\n")
+    .filter((l) => l.trim().startsWith("-"))
+    .map((l) => l.replace(/^-\s*/, "").trim())
+    .slice(0, 4);
+
+  // Parse bullet items from recent topics
+  const topicItems = recentTopics
+    .split("\n")
+    .filter((l) => l.trim().startsWith("-"))
+    .map((l) => l.replace(/^-\s*/, "").trim())
+    .slice(0, 3);
+
+  return (
+    <DashboardTile
+      title="Working Memory"
+      headerRight={
+        <button
+          onClick={() => setActivePage("memory")}
+          className="text-[10px] text-grim-accent hover:underline"
+        >
+          view all
+        </button>
+      }
+    >
+      {loading && (
+        <div className="text-xs text-grim-text-dim py-4 text-center">
+          Loading...
+        </div>
+      )}
+      {error && (
+        <div className="text-xs text-red-400 py-4 text-center">
+          Memory offline
+        </div>
+      )}
+      {!loading && !error && (
+        <div className="space-y-3">
+          {/* Objectives */}
+          {objectiveItems.length > 0 && (
+            <div>
+              <div className="text-[10px] text-grim-text-dim uppercase mb-1">
+                Objectives
+              </div>
+              <div className="space-y-0.5">
+                {objectiveItems.map((item, i) => {
+                  const statusMatch = item.match(/^\[(\w+)\]\s*(.*)$/);
+                  return (
+                    <div key={i} className="flex items-start gap-1.5 text-[11px]">
+                      {statusMatch ? (
+                        <>
+                          <span className={`text-[9px] px-1 py-0.5 rounded shrink-0 ${
+                            statusMatch[1] === "active"
+                              ? "bg-grim-success/15 text-grim-success"
+                              : "bg-grim-border/30 text-grim-text-dim"
+                          }`}>
+                            {statusMatch[1]}
+                          </span>
+                          <span className="text-grim-text truncate">{statusMatch[2]}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-grim-accent shrink-0">{"\u25CF"}</span>
+                          <span className="text-grim-text truncate">{item}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Recent Topics */}
+          {topicItems.length > 0 && (
+            <div>
+              <div className="text-[10px] text-grim-text-dim uppercase mb-1">
+                Recent Topics
+              </div>
+              <div className="space-y-0.5">
+                {topicItems.map((item, i) => (
+                  <div key={i} className="text-[11px] text-grim-text-dim truncate">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {objectiveItems.length === 0 && topicItems.length === 0 && (
+            <div className="text-xs text-grim-text-dim py-2 text-center">
+              Memory will populate as you interact with GRIM
+            </div>
+          )}
         </div>
       )}
     </DashboardTile>

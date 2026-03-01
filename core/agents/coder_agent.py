@@ -40,7 +40,7 @@ def make_coder_agent(config: GrimConfig):
     """
     agent = CoderAgent(config)
 
-    async def coder_agent_fn(state: GrimState) -> AgentResult:
+    async def coder_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Execute a coding task following skill protocols."""
         messages = state.get("messages", [])
         skill_protocols = state.get("skill_protocols", {})
@@ -65,6 +65,15 @@ def make_coder_agent(config: GrimConfig):
             first_key = next(iter(skill_protocols))
             protocol = skill_protocols[first_key]
 
+        if protocol is None:
+            protocol = (
+                "You are a coding agent with file read/write, shell execution, and git access.\n"
+                "Use your tools to write code, run tests, fix bugs, and refactor.\n"
+                "Use run_shell for builds, tests, and linting. Use file tools for reading and editing.\n"
+                "Always execute the task — do not say you can't do something "
+                "if you have a tool that can do it."
+            )
+
         # Build context from knowledge
         context = {}
         knowledge_context = state.get("knowledge_context", [])
@@ -77,6 +86,7 @@ def make_coder_agent(config: GrimConfig):
             task=task,
             skill_protocol=protocol,
             context=context,
+            event_queue=event_queue,
         )
 
     return coder_agent_fn

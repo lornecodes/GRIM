@@ -8,7 +8,6 @@ import type { TraceEvent } from "@/lib/types";
 const INFRA_NODES = new Set([
   "identity",
   "compress",
-  "memory",
   "skill_match",
   "router",
   "integrate",
@@ -20,18 +19,22 @@ const INFRA_NODES = new Set([
 const AGENT_LABELS: Record<string, string> = {
   companion: "Companion",
   dispatch: "Dispatch",
+  memory: "Memory",
   coder: "Coder",
   research: "Research",
   operator: "Operator",
+  audit: "Audit",
   ironclaw: "IronClaw",
 };
 
 const AGENT_TIER: Record<string, "grim" | "ironclaw"> = {
   companion: "grim",
   dispatch: "grim",
-  coder: "ironclaw",
-  research: "ironclaw",
-  operator: "ironclaw",
+  memory: "grim",
+  coder: "grim",
+  research: "grim",
+  operator: "grim",
+  audit: "ironclaw",
   ironclaw: "ironclaw",
 };
 
@@ -59,7 +62,8 @@ export function useActiveAgents(recentMessageCount = 5): ActiveAgent[] {
     for (const msg of recent) {
       if (!msg.traces) continue;
       for (const trace of msg.traces) {
-        const node = trace.node;
+        // Use _activeNode (tagged in useGrimSocket) for traces without explicit node
+        const node = trace.node || (trace as TraceEvent & { _activeNode?: string })._activeNode;
         if (!node || INFRA_NODES.has(node)) continue;
         if (!byNode.has(node)) byNode.set(node, []);
         byNode.get(node)!.push(trace);

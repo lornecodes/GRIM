@@ -41,7 +41,7 @@ def make_operator_agent(config: GrimConfig):
     """
     agent = OperatorAgent(config)
 
-    async def operator_agent_fn(state: GrimState) -> AgentResult:
+    async def operator_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Execute an operations task following skill protocols."""
         messages = state.get("messages", [])
         skill_protocols = state.get("skill_protocols", {})
@@ -70,6 +70,17 @@ def make_operator_agent(config: GrimConfig):
             first_key = next(iter(skill_protocols))
             protocol = skill_protocols[first_key]
 
+        # Always provide a base protocol — never leave the agent without context
+        if protocol is None:
+            protocol = (
+                "You are an operations agent with full terminal/bash access.\n"
+                "Use run_shell to execute any command the user needs: "
+                "ping, curl, python, git, docker, system utilities, etc.\n"
+                "Use git tools for git operations. Use file tools for reading/writing files.\n"
+                "Always execute the task — do not say you can't do something "
+                "if you have a tool that can do it."
+            )
+
         # Context
         context = {}
         knowledge_context = state.get("knowledge_context", [])
@@ -82,6 +93,7 @@ def make_operator_agent(config: GrimConfig):
             task=task,
             skill_protocol=protocol,
             context=context,
+            event_queue=event_queue,
         )
 
     return operator_agent_fn

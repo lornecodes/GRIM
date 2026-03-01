@@ -255,6 +255,91 @@ async def health():
     })
 
 
+@app.get("/api/config")
+async def get_config():
+    """Expose resolved GRIM configuration for the Settings UI."""
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    return JSONResponse({
+        "env": _config.env,
+        "vault_path": str(_config.vault_path),
+        "model": _config.model,
+        "temperature": _config.temperature,
+        "max_tokens": _config.max_tokens,
+        "routing": {
+            "enabled": _config.routing_enabled,
+            "default_tier": _config.routing_default_tier,
+            "classifier_enabled": _config.routing_classifier_enabled,
+            "confidence_threshold": _config.routing_confidence_threshold,
+        },
+        "context": {
+            "max_tokens": _config.context_max_tokens,
+            "keep_recent": _config.context_keep_recent,
+        },
+        "identity": {
+            "system_prompt_path": str(_config.identity_prompt_path),
+            "personality_path": str(_config.identity_personality_path),
+            "personality_cache_path": str(_config.personality_cache_path),
+            "skills_path": str(_config.skills_path),
+        },
+        "skills": {
+            "auto_load": _config.skills_auto_load,
+            "match_per_turn": _config.skills_match_per_turn,
+        },
+        "persistence": {
+            "checkpoint_backend": _config.checkpoint_backend,
+            "checkpoint_path": str(_config.checkpoint_path),
+        },
+        "evolution": {
+            "frequency": _config.evolution_frequency,
+            "directory": str(_config.evolution_dir),
+        },
+        "objectives_max_active": _config.objectives_max_active,
+        "redis_url": bool(_config.redis_url),  # expose presence, not the URL
+    })
+
+
+class ConfigUpdateRequest(BaseModel):
+    env: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    vault_path: str | None = None
+    routing: dict | None = None
+    context: dict | None = None
+    skills: dict | None = None
+    objectives_max_active: int | None = None
+
+
+@app.post("/api/config")
+async def update_config(req: ConfigUpdateRequest):
+    """Update GRIM configuration — writes to grim.yaml and reloads."""
+    global _config
+
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    try:
+        from core.config import save_config_updates
+
+        # Build updates dict from non-None fields
+        updates = {k: v for k, v in req.model_dump().items() if v is not None}
+        if not updates:
+            return JSONResponse({"error": "No updates provided"}, status_code=400)
+
+        grim_root = _grim_root()
+        _config = save_config_updates(updates, grim_root=grim_root)
+        logger.info("Config updated: %s", list(updates.keys()))
+
+        # Return the updated config (same format as GET)
+        return await get_config()
+
+    except Exception as exc:
+        logger.exception("Config update failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/api/ironclaw/status")
 async def ironclaw_status():
     """IronClaw engine status — gateway health, tools, metrics."""
@@ -471,6 +556,52 @@ async def test_mcp():
     return JSONResponse(results)
 
 
+# ---------------------------------------------------------------------------
+# Memory endpoints — GRIM's persistent working memory (kronos-vault/memory.md)
+# ---------------------------------------------------------------------------
+
+class MemoryUpdateRequest(BaseModel):
+    content: str
+
+
+@app.get("/api/memory")
+async def get_memory():
+    """Read GRIM's persistent working memory from kronos-vault."""
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    from core.memory_store import parse_memory_sections, read_memory
+
+    content = read_memory(_config.vault_path)
+    sections = parse_memory_sections(content)
+
+    return JSONResponse({
+        "content": content,
+        "sections": sections,
+    })
+
+
+@app.post("/api/memory")
+async def post_memory(req: MemoryUpdateRequest):
+    """Update GRIM's persistent working memory."""
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    from core.memory_store import parse_memory_sections, write_memory
+
+    write_memory(_config.vault_path, req.content)
+    sections = parse_memory_sections(req.content)
+
+    return JSONResponse({
+        "content": req.content,
+        "sections": sections,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoints
+# ---------------------------------------------------------------------------
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
@@ -576,6 +707,26 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
                 await _trace("graph", "Graph invocation started")
                 _event_count = 0
+
+                # Agent live-monitoring queue — agents push events here,
+                # we drain them concurrently alongside graph events.
+                import asyncio as _asyncio
+                _agent_queue: _asyncio.Queue = _asyncio.Queue()
+
+                async def _drain_agent_events():
+                    """Drain agent events and emit them as traces."""
+                    while True:
+                        event = await _agent_queue.get()
+                        if event is None:  # sentinel = graph done
+                            break
+                        cat = event.pop("cat", "agent")
+                        text = event.pop("text", "")
+                        await _trace(cat, text, **event)
+
+                _drain_task = _asyncio.create_task(_drain_agent_events())
+
+                # Pass queue via config (not state) — Queue is not serializable
+                graph_config["configurable"]["agent_event_queue"] = _agent_queue
 
                 async for event in _graph.astream_events(
                     {
@@ -720,6 +871,10 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                      tool=tool_name, action="end",
                                      sandboxed=is_claw,
                                      output_preview=output_str[:200])
+
+                # Signal the agent event drainer to stop and wait for it
+                _agent_queue.put_nowait(None)
+                await _drain_task
 
                 total_ms = round((_time.monotonic() - _t0) * 1000)
                 logger.info("WS turn complete: %d events, %d chars response, %dms",

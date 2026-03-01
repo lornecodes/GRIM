@@ -214,6 +214,65 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.objectives_max_active = objectives["max_active"]
 
 
+def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:
+    """Apply partial updates to grim.yaml and reload config.
+
+    Only updates keys that are present in the updates dict.
+    Returns the newly loaded config.
+    """
+    if grim_root is None:
+        grim_root = Path(__file__).resolve().parent.parent
+
+    config_path = grim_root / "config" / "grim.yaml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+
+    # Apply updates — map flat API keys to nested YAML structure
+    if "env" in updates:
+        raw["env"] = updates["env"]
+    if "model" in updates:
+        raw.setdefault("agent", {})["default_model"] = updates["model"]
+    if "temperature" in updates:
+        raw.setdefault("agent", {})["temperature"] = updates["temperature"]
+    if "max_tokens" in updates:
+        raw.setdefault("agent", {})["max_tokens"] = updates["max_tokens"]
+    if "vault_path" in updates:
+        raw["vault_path"] = updates["vault_path"]
+
+    # Routing updates
+    if "routing" in updates and isinstance(updates["routing"], dict):
+        raw.setdefault("routing", {})
+        for k, v in updates["routing"].items():
+            raw["routing"][k] = v
+
+    # Context updates
+    if "context" in updates and isinstance(updates["context"], dict):
+        raw.setdefault("context_management", {})
+        for k, v in updates["context"].items():
+            raw["context_management"][k] = v
+
+    # Skills updates
+    if "skills" in updates and isinstance(updates["skills"], dict):
+        raw.setdefault("skills", {})
+        for k, v in updates["skills"].items():
+            raw["skills"][k] = v
+
+    # Objectives
+    if "objectives_max_active" in updates:
+        raw.setdefault("objectives", {})["max_active"] = updates["objectives_max_active"]
+
+    # Write back
+    config_path.write_text(
+        yaml.dump(raw, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    # Reload and return
+    return load_config(config_path=config_path, grim_root=grim_root)
+
+
 def _resolve(p: Path, root: Path) -> Path:
     """Resolve a path against root if it's relative."""
     if p.is_absolute():

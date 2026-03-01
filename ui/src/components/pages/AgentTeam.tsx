@@ -162,65 +162,83 @@ export function AgentTeam() {
 // ---------------------------------------------------------------------------
 
 function ActiveAgentCard({ agent }: { agent: ActiveAgent }) {
-  const toolTraces = agent.traces.filter((t) => t.cat === "tool");
+  // Extract agent reasoning from step_content on node-end traces
+  const agentStdout = agent.traces
+    .filter((t) => t.cat === "node" && t.action === "end" && t.step_content)
+    .map((t) => t.step_content!)
+    .join("\n");
 
   return (
-    <div className="bg-grim-surface border border-grim-border rounded-lg p-3 flex flex-col gap-2">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-grim-text">
-          {agent.label}
+    <div className="bg-grim-bg border border-grim-border rounded-sm overflow-hidden font-mono">
+      {/* Terminal title bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-grim-surface border-b border-grim-border">
+        <div className="flex gap-1">
+          <div className="w-2 h-2 rounded-full bg-red-500/60" />
+          <div className="w-2 h-2 rounded-full bg-yellow-500/60" />
+          <div className="w-2 h-2 rounded-full bg-green-500/60" />
+        </div>
+        <span className="text-[11px] text-grim-text-dim flex-1 text-center">
+          {agent.label.toLowerCase()}@grim
         </span>
         {agent.totalMs > 0 && (
-          <span className="text-[10px] text-grim-text-dim ml-auto tabular-nums">
+          <span className="text-[10px] text-grim-text-dim tabular-nums">
             {agent.totalMs}ms
           </span>
         )}
       </div>
 
-      {/* Tool pills with output previews */}
-      {toolTraces.length > 0 && (
-        <div className="space-y-1">
-          <div className="flex flex-wrap gap-1">
-            {toolTraces.map((t, i) => (
-              <span
-                key={i}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-grim-bg text-trace-tool font-mono"
-              >
-                {t.tool || t.text}
-              </span>
-            ))}
-          </div>
-          {/* Show output previews for tool calls */}
-          {toolTraces.some((t) => t.output_preview) && (
-            <div className="bg-grim-bg rounded border border-grim-border/50 p-2 space-y-1">
-              {toolTraces
-                .filter((t) => t.output_preview)
-                .map((t, i) => (
-                  <div key={i} className="font-mono text-[10.5px] leading-relaxed">
-                    <span className="text-grim-accent select-none">&gt; </span>
-                    <span className="text-trace-tool">{t.tool}</span>
-                    <div className="text-grim-text pl-4 whitespace-pre-wrap break-all">
-                      {t.output_preview!.length > 200
-                        ? t.output_preview!.slice(0, 200) + "…"
-                        : t.output_preview}
-                    </div>
-                  </div>
-                ))}
+      {/* Terminal body */}
+      <div className="max-h-80 overflow-y-auto p-2 space-y-0.5">
+        {/* Tool calls as shell commands */}
+        {agent.traces
+          .filter((t) => t.cat === "tool")
+          .map((t, i) => (
+            <div key={`tool-${i}`} className="text-[11px] leading-relaxed">
+              <div>
+                <span className="text-grim-accent select-none">$ </span>
+                <span className="text-trace-tool">{t.tool || t.text}</span>
+                {t.input != null && (
+                  <span className="text-grim-text-dim ml-1">
+                    {String(typeof t.input === "string" ? t.input : JSON.stringify(t.input)).slice(0, 80)}
+                  </span>
+                )}
+              </div>
+              {t.output_preview && (
+                <div className="text-grim-text pl-4 whitespace-pre-wrap break-all text-[10.5px] mb-1">
+                  {t.output_preview.length > 300
+                    ? t.output_preview.slice(0, 300) + "\n…"
+                    : t.output_preview}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          ))}
 
-      {/* Trace log window */}
-      <div className="max-h-64 overflow-y-auto bg-grim-bg rounded border border-grim-border p-2 space-y-0.5">
-        {agent.traces.map((trace, i) => (
-          <TraceLogLine key={i} trace={trace} />
-        ))}
+        {/* Agent stdout / reasoning */}
+        {agentStdout && (
+          <div className="border-t border-grim-border/30 mt-1 pt-1.5">
+            <div className="text-[10px] text-grim-text-dim uppercase tracking-wider mb-0.5">
+              stdout
+            </div>
+            <div className="text-[11px] text-grim-text leading-relaxed whitespace-pre-wrap break-words">
+              {agentStdout.length > 600
+                ? agentStdout.slice(0, 600) + "\n…"
+                : agentStdout}
+            </div>
+          </div>
+        )}
+
+        {/* Trace log lines (non-tool, non-content) */}
+        {agent.traces
+          .filter((t) => t.cat !== "tool" && !t.step_content)
+          .map((trace, i) => (
+            <TraceLogLine key={`trace-${i}`} trace={trace} />
+          ))}
+
         {agent.traces.length === 0 && (
-          <span className="text-[10px] text-grim-text-dim">
-            No activity recorded
-          </span>
+          <div className="text-[10px] text-grim-text-dim">
+            <span className="text-grim-accent select-none">$ </span>
+            <span className="animate-pulse">_</span>
+          </div>
         )}
       </div>
     </div>
@@ -229,18 +247,15 @@ function ActiveAgentCard({ agent }: { agent: ActiveAgent }) {
 
 function TraceLogLine({ trace }: { trace: TraceEvent }) {
   return (
-    <div className="flex gap-2 text-[11px] leading-relaxed">
-      <span className="text-grim-text-dim text-[10px] tabular-nums min-w-[40px] text-right shrink-0">
-        +{trace.ms}ms
+    <div className="text-[10.5px] leading-relaxed truncate">
+      <span className="text-grim-text-dim tabular-nums mr-1.5">
+        [{trace.ms}ms]
       </span>
       <span
-        className={`text-[9px] font-bold uppercase min-w-[28px] shrink-0 ${
-          catColors[trace.cat] || "text-grim-text-dim"
-        }`}
+        className={`mr-1 ${catColors[trace.cat] || "text-grim-text-dim"}`}
       >
-        {trace.cat}
+        {trace.text}
       </span>
-      <span className="text-grim-text truncate">{trace.text}</span>
     </div>
   );
 }

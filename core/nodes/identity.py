@@ -87,6 +87,25 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             active = [o for o in objectives if o.status == "active"]
             logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
 
+        # Load persistent working memory from vault
+        working_memory = ""
+        try:
+            from core.memory_store import read_memory
+            raw_memory = read_memory(config.vault_path)
+            if raw_memory:
+                # Truncate to avoid context bloat (keep under 2000 chars)
+                if len(raw_memory) > 2000:
+                    working_memory = raw_memory[:2000] + "\n\n...(truncated)"
+                else:
+                    working_memory = raw_memory
+                logger.info("Loaded working memory (%d chars)", len(raw_memory))
+        except Exception:
+            logger.debug("Could not load working memory from vault")
+
+        # Inject working memory into system prompt
+        if working_memory:
+            prompt = prompt + "\n\n" + working_memory
+
         logger.info(
             "Identity loaded — mode: %s, coherence: %.2f",
             field_state.expression_mode(),
