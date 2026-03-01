@@ -112,9 +112,15 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
         except Exception:
             logger.debug("Could not load working memory from vault")
 
-        # Inject working memory into system prompt
+        # Inject working memory into system prompt with framing
         if working_memory:
-            prompt = prompt + "\n\n" + working_memory
+            prompt = prompt + \
+                "\n\n---\n\n## Your Working Memory\n\n" \
+                "This is your persistent working memory from previous sessions. " \
+                "Use it to maintain continuity — reference recent topics, recall " \
+                "user preferences, and track active objectives. When asked about " \
+                "recent work, sessions, or what you've been doing, check here " \
+                "FIRST before searching the vault.\n\n" + working_memory
 
         logger.info(
             "Identity loaded — mode: %s, coherence: %.2f",

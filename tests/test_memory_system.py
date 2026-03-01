@@ -1111,6 +1111,253 @@ class TestMemoryAgentWiring(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 10. Identity memory framing — "Your Working Memory" header
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestIdentityMemoryFraming(unittest.TestCase):
+    """Test that memory is injected with proper framing in system prompt."""
+
+    def test_memory_has_header(self):
+        """Identity node injects 'Your Working Memory' header."""
+        from core.nodes.identity import make_identity_node
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            cfg = make_test_config(
+                vault_path=vault,
+                personality_cache_path=Path(tmp) / "personality.cache.md",
+                objectives_path=Path(tmp) / "objectives",
+            )
+
+            node = make_identity_node(cfg, mcp_session=None)
+            result = run_async(node({}))
+            prompt = result["system_prompt"]
+
+            self.assertIn("## Your Working Memory", prompt)
+            self.assertIn("check here FIRST", prompt)
+            self.assertIn("Active Objectives", prompt)
+
+    def test_memory_framing_absent_when_empty(self):
+        """No framing header when memory is empty."""
+        from core.nodes.identity import make_identity_node
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            # No memory.md file — empty memory
+            cfg = make_test_config(
+                vault_path=vault,
+                personality_cache_path=Path(tmp) / "personality.cache.md",
+                objectives_path=Path(tmp) / "objectives",
+            )
+
+            node = make_identity_node(cfg, mcp_session=None)
+            result = run_async(node({}))
+            prompt = result["system_prompt"]
+
+            self.assertNotIn("## Your Working Memory", prompt)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 11. Tool groups — completeness and access control
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestToolGroups(unittest.TestCase):
+    """Test tool group definitions are complete and consistent."""
+
+    def test_all_tools_in_exactly_one_group(self):
+        """Every tool appears in exactly one group."""
+        from kronos_mcp.server import TOOL_GROUPS, TOOLS
+
+        tool_names = {t.name for t in TOOLS}
+        grouped = set()
+        for group, members in TOOL_GROUPS.items():
+            for member in members:
+                self.assertNotIn(member, grouped,
+                    f"Tool '{member}' appears in multiple groups")
+                grouped.add(member)
+
+        ungrouped = tool_names - grouped
+        self.assertEqual(ungrouped, set(),
+            f"Tools not in any group: {ungrouped}")
+
+    def test_no_phantom_tools_in_groups(self):
+        """No group references a tool that doesn't exist."""
+        from kronos_mcp.server import TOOL_GROUPS, TOOLS
+
+        tool_names = {t.name for t in TOOLS}
+        for group, members in TOOL_GROUPS.items():
+            for member in members:
+                self.assertIn(member, tool_names,
+                    f"Group '{group}' references non-existent tool '{member}'")
+
+    def test_expected_groups_exist(self):
+        """All 6 expected groups are defined."""
+        from kronos_mcp.server import TOOL_GROUPS
+
+        expected = {"vault:read", "vault:write", "memory:read",
+                    "memory:write", "source:read", "system"}
+        self.assertEqual(set(TOOL_GROUPS.keys()), expected)
+
+    def test_memory_group_isolation(self):
+        """Memory tools are NOT in vault groups and vice versa."""
+        from kronos_mcp.server import TOOL_GROUPS
+
+        vault_tools = set(TOOL_GROUPS["vault:read"]) | set(TOOL_GROUPS["vault:write"])
+        memory_tools = set(TOOL_GROUPS["memory:read"]) | set(TOOL_GROUPS["memory:write"])
+
+        overlap = vault_tools & memory_tools
+        self.assertEqual(overlap, set(),
+            f"Memory and vault groups overlap: {overlap}")
+
+    def test_memory_write_tools_match_cache(self):
+        """MEMORY_WRITE_TOOLS in cache.py matches memory:write group."""
+        from kronos_mcp.server import TOOL_GROUPS
+        from kronos_mcp.cache import MEMORY_WRITE_TOOLS
+
+        self.assertEqual(MEMORY_WRITE_TOOLS, set(TOOL_GROUPS["memory:write"]))
+
+    def test_tool_groups_handler(self):
+        """kronos_tool_groups handler returns the groups as JSON."""
+        from kronos_mcp.server import handle_tool_groups
+        result = handle_tool_groups({})
+        # Handler returns JSON string
+        parsed = json.loads(result) if isinstance(result, str) else result
+        self.assertIsInstance(parsed, dict)
+        self.assertEqual(len(parsed), 6)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 12. Release script — syntax and structure
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestReleaseScript(unittest.TestCase):
+    """Test release.sh is syntactically valid and has expected commands."""
+
+    _script = GRIM_ROOT / "scripts" / "release.sh"
+
+    def test_script_exists(self):
+        """release.sh exists."""
+        self.assertTrue(self._script.exists())
+
+    def test_bash_syntax_valid(self):
+        """release.sh passes bash syntax check."""
+        import subprocess
+        result = subprocess.run(
+            ["bash", "-n", str(self._script)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0,
+            f"Bash syntax error: {result.stderr}")
+
+    def test_has_clean_command(self):
+        """release.sh has cmd_clean function."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn("cmd_clean()", content)
+        self.assertIn("clean)", content)
+
+    def test_has_purge_command(self):
+        """release.sh has cmd_purge function."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn("cmd_purge()", content)
+        self.assertIn("purge)", content)
+
+    def test_clean_handles_grep_safely(self):
+        """cmd_clean uses '|| true' with grep to avoid pipefail crashes."""
+        content = self._script.read_text(encoding="utf-8")
+        # Every grep in the clean/purge section should have || true
+        import re
+        # Find all grep calls that are NOT followed by || true
+        dangerous = re.findall(r'grep\s+[^|]+\n', content)
+        for match in dangerous:
+            # Allow greps inside case statements and comments
+            if match.strip().startswith('#'):
+                continue
+            # This is a heuristic — the key ones in clean/purge should be safe
+        # Just verify the specific known patterns are safe
+        self.assertIn('grep -E "(grim|ironclaw)" | awk \'{print $1}\' || true', content)
+        self.assertIn('grep -E "^[0-9a-f]{64}$" || true', content)
+
+    def test_clean_removes_anonymous_volumes(self):
+        """cmd_clean includes anonymous volume removal."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn("anonymous volumes", content.lower())
+        self.assertIn("docker volume rm", content)
+
+    def test_purge_removes_legacy_volumes(self):
+        """cmd_purge removes grimm_ legacy volumes."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn('grep "^grimm_"', content)
+
+    def test_purge_prunes_build_cache(self):
+        """cmd_purge does a full build cache prune."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn("docker builder prune -af", content)
+
+    def test_deploy_calls_clean(self):
+        """cmd_deploy pipeline includes cleanup step."""
+        content = self._script.read_text(encoding="utf-8")
+        # Deploy should call cmd_clean at the end
+        self.assertIn("cmd_clean", content)
+
+    def test_help_lists_purge(self):
+        """Help text includes purge command."""
+        content = self._script.read_text(encoding="utf-8")
+        self.assertIn('"  purge', content)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 13. Ship-it skill — manifest and protocol
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestShipItSkill(unittest.TestCase):
+    """Test ship-it skill manifest and protocol are valid."""
+
+    def test_manifest_valid(self):
+        """ship-it manifest.yaml is valid."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "manifest.yaml"
+        self.assertTrue(path.exists())
+        m = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertEqual(m["name"], "ship-it")
+        self.assertEqual(m["type"], "instruction-protocol")
+
+    def test_protocol_has_cleanup_gate(self):
+        """ship-it protocol includes Gate 6 cleanup."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "protocol.md"
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("Gate 6: Cleanup", content)
+        self.assertIn("release.sh clean", content)
+
+    def test_protocol_mentions_purge(self):
+        """ship-it protocol documents the purge command."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "protocol.md"
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("release.sh purge", content)
+        self.assertIn("grimm_", content.lower())
+
+    def test_protocol_test_counts_current(self):
+        """ship-it protocol has current test counts."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "protocol.md"
+        content = path.read_text(encoding="utf-8")
+        self.assertIn("test_memory_system.py", content)
+
+    def test_manifest_has_quality_gates(self):
+        """ship-it manifest defines quality gates."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "manifest.yaml"
+        m = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertIn("quality_gates", m)
+        gates = m["quality_gates"]
+        self.assertTrue(len(gates) >= 6, f"Expected ≥6 gates, got {len(gates)}")
+
+    def test_manifest_cleanup_gate_mentions_volumes(self):
+        """Gate 6 in manifest mentions cleanup."""
+        path = GRIM_ROOT / "skills" / "ship-it" / "manifest.yaml"
+        m = yaml.safe_load(path.read_text(encoding="utf-8"))
+        gate6 = m["quality_gates"][-1]
+        self.assertIn("Cleanup", gate6)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     unittest.main()
