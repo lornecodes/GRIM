@@ -57,6 +57,7 @@ async def integrate_node(state: GrimState) -> dict:
     result: dict = {
         "messages": [AIMessage(content=msg)],
         "agent_result": None,  # clear for next turn
+        "last_delegation_type": agent_result.agent,  # persist for continuity
     }
 
     # Clear staging state after integration

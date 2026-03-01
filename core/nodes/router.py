@@ -66,6 +66,15 @@ DELEGATION_KEYWORDS = {
         # Ops
         "upload to zenodo", "sync vault", "deploy",
         "check the status", "test execution",
+        # Network / system queries
+        "ip address", "my ip", "what is my ip",
+        "ping ", "traceroute", "nslookup", "dig ",
+        "ifconfig", "ipconfig", "hostname",
+        "netstat", "who am i", "whoami",
+        "uname", "uptime",
+        "which ", "where ",
+        "what os", "what operating system",
+        "system info", "disk space", "memory usage",
     ],
     "ironclaw": [
         "run sandboxed", "execute safely", "isolated shell",
@@ -123,7 +132,25 @@ def make_router_node(config: GrimConfig):
                 break
 
         if not delegation_found:
-            # 2. Keyword fallback
+            # 2. Capability continuity — re-delegate to same agent for follow-ups
+            last_delegation = state.get("last_delegation_type")
+            if last_delegation:
+                _FOLLOW_UP_SIGNALS = [
+                    "now ", "also ", "next ", "again", "another",
+                    "same thing", "do it", "try ", "what about",
+                    "how about", "can you also", "one more",
+                    "run that", "do that", "test that",
+                ]
+                if any(sig in message for sig in _FOLLOW_UP_SIGNALS):
+                    logger.info(
+                        "Router: continuity re-delegation to %s (follow-up detected)",
+                        last_delegation,
+                    )
+                    result = {"mode": "delegate", "delegation_type": last_delegation}
+                    delegation_found = True
+
+        if not delegation_found:
+            # 3. Keyword fallback
             for delegation_type, keywords in DELEGATION_KEYWORDS.items():
                 for keyword in keywords:
                     if keyword in message:
@@ -139,7 +166,28 @@ def make_router_node(config: GrimConfig):
                     break
 
         if not delegation_found:
-            # 3. Default: companion mode
+            # 3. Action-intent fallback — catch action requests that miss keywords
+            _ACTION_VERBS = [
+                "run", "execute", "check", "test", "ping",
+                "show me", "get me", "tell me my",
+            ]
+            _ACTION_TARGETS = [
+                "command", "shell", "ip", "system", "server",
+                "network", "file", "directory", "process",
+                "port", "dns", "connection",
+            ]
+            for verb in _ACTION_VERBS:
+                if verb in message and any(t in message for t in _ACTION_TARGETS):
+                    logger.info(
+                        "Router: delegating to operate (action-intent: verb='%s')",
+                        verb,
+                    )
+                    result = {"mode": "delegate", "delegation_type": "operate"}
+                    delegation_found = True
+                    break
+
+        if not delegation_found:
+            # 4. Default: companion mode
             logger.info("Router: companion mode")
             result = {"mode": "companion", "delegation_type": None}
 

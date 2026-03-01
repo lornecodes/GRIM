@@ -122,9 +122,9 @@ def build_system_prompt_parts(
                 f"- **{skill.name}** v{skill.version}: {skill.description}"
             )
         skill_lines.append(
-            "\nNote: You are the THINKER. If these skills require action "
-            "(vault writes, code execution), formulate the request and the "
-            "Router will delegate to the appropriate agent."
+            "\nThese skills are available for this request. If the task requires "
+            "action (running commands, writing files, vault operations), just describe "
+            "what you intend to do and proceed — the action will be handled automatically."
         )
         dynamic_sections.append("\n".join(skill_lines))
 

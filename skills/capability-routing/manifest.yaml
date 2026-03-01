@@ -1,0 +1,48 @@
+name: capability-routing
+version: "1.0"
+description: >
+  Reference for GRIM's capability routing architecture. Maps delegation types
+  to agent capabilities, documents keyword patterns, and provides a checklist
+  for adding new capabilities without introducing routing gaps.
+type: instruction-protocol
+entry_point: protocol.md
+
+permissions:
+  - vault:read
+
+inputs:
+  goal:
+    type: enum
+    required: false
+    default: understand
+    description: "What the agent wants to learn about routing"
+    values: [understand, add-capability, debug-routing]
+
+outputs:
+  routing_guidance: "Understanding of how routing works and how to extend it"
+
+triggers:
+  - explicit: "User asks 'how does routing work', 'why did it go to companion'"
+  - explicit: "User asks 'add a new capability', 'fix routing'"
+  - explicit: "User asks 'capability map', 'what agents are available'"
+  - delegation: "Agent needs to understand or modify routing patterns"
+
+consumers:
+  grim:
+    role: reference
+    description: "GRIM agents consult this to understand routing architecture"
+    reads: [protocol.md, capability_map]
+  claude-code:
+    role: reference
+    description: "Claude Code agents consult when modifying GRIM routing"
+    reads: [protocol.md, adding_capabilities]
+
+phases:
+  1_understand: "Learn the routing architecture and capability map"
+  2_diagnose: "Identify why a request routed incorrectly"
+  3_fix: "Apply the correct fix (keywords, skill mapping, or system prompt)"
+
+quality_gates:
+  - "New keywords don't create false-positive routing conflicts"
+  - "System prompt capabilities match actual agent tools"
+  - "Skill-to-delegation mapping covers new skill names"

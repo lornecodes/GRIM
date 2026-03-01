@@ -558,7 +558,7 @@ class TestPromptBuilder(unittest.TestCase):
         )
         self.assertIn("kronos-capture", prompt)
         self.assertIn("Active Skills", prompt)
-        self.assertIn("THINKER", prompt)
+        self.assertIn("handled automatically", prompt)
 
     def test_build_with_identity_fdo(self):
         from core.personality.prompt_builder import build_system_prompt

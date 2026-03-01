@@ -174,6 +174,7 @@ class GrimState(TypedDict, total=False):
 
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]
+    last_delegation_type: Optional[str]  # persists after integrate for continuity
 
     # Staging pipeline — Phase 4 zero-trust audit
     staging_job_id: Optional[str]  # UUID for current staging session
