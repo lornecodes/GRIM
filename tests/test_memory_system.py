@@ -516,12 +516,12 @@ class TestIdentityMemory(unittest.TestCase):
             self.assertIn("GRIM", result["system_prompt"])
 
     def test_identity_truncates_large_memory(self):
-        """Identity node truncates memory > 2000 chars."""
+        """Identity node truncates memory > 4000 chars."""
         from core.nodes.identity import make_identity_node
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp)
-            # Create a very large memory file
-            large_memory = "# GRIM Working Memory\n\n## Notes\n" + ("A" * 3000)
+            # Create a very large memory file (exceeds 4000 char limit)
+            large_memory = "# GRIM Working Memory\n\n## Notes\n" + ("A" * 5000)
             (vault / "memory.md").write_text(large_memory, encoding="utf-8")
             cfg = make_test_config(
                 vault_path=vault,
@@ -533,8 +533,8 @@ class TestIdentityMemory(unittest.TestCase):
             prompt = result["system_prompt"]
             # Memory should be truncated
             self.assertIn("truncated", prompt)
-            # Full 3000-char block should NOT be in the prompt
-            self.assertNotIn("A" * 3000, prompt)
+            # Full 5000-char block should NOT be in the prompt
+            self.assertNotIn("A" * 5000, prompt)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1135,7 +1135,7 @@ class TestIdentityMemoryFraming(unittest.TestCase):
             prompt = result["system_prompt"]
 
             self.assertIn("## Your Working Memory", prompt)
-            self.assertIn("check here FIRST", prompt)
+            self.assertIn("NEVER say you don't have memory", prompt)
             self.assertIn("Active Objectives", prompt)
 
     def test_memory_framing_absent_when_empty(self):
@@ -1156,6 +1156,53 @@ class TestIdentityMemoryFraming(unittest.TestCase):
             prompt = result["system_prompt"]
 
             self.assertNotIn("## Your Working Memory", prompt)
+
+    def test_memory_positioned_before_expression_mode(self):
+        """Memory appears before expression mode in prompt for LLM attention."""
+        from core.nodes.identity import make_identity_node
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            cfg = make_test_config(
+                vault_path=vault,
+                personality_cache_path=Path(tmp) / "personality.cache.md",
+                objectives_path=Path(tmp) / "objectives",
+            )
+
+            node = make_identity_node(cfg, mcp_session=None)
+            result = run_async(node({}))
+            prompt = result["system_prompt"]
+
+            mem_pos = prompt.find("## Your Working Memory")
+            mode_pos = prompt.find("## Current Expression Mode")
+            self.assertGreater(mem_pos, 0, "Memory section not found")
+            self.assertGreater(mode_pos, 0, "Expression mode not found")
+            self.assertLess(mem_pos, mode_pos,
+                "Memory must appear BEFORE expression mode for LLM attention")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10b. Docker compose — memory env vars
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestDockerComposeMemoryConfig(unittest.TestCase):
+    """Test docker-compose.yml has correct env vars for memory."""
+
+    def test_grim_vault_path_set(self):
+        """docker-compose.yml sets GRIM_VAULT_PATH for the config module."""
+        compose = (GRIM_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("GRIM_VAULT_PATH=/vault", compose)
+
+    def test_kronos_vault_path_set(self):
+        """docker-compose.yml sets KRONOS_VAULT_PATH for MCP server."""
+        compose = (GRIM_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("KRONOS_VAULT_PATH=/vault", compose)
+
+    def test_vault_mounted(self):
+        """docker-compose.yml mounts kronos-vault to /vault."""
+        compose = (GRIM_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(":/vault:", compose)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1192,11 +1239,12 @@ class TestToolGroups(unittest.TestCase):
                     f"Group '{group}' references non-existent tool '{member}'")
 
     def test_expected_groups_exist(self):
-        """All 6 expected groups are defined."""
+        """All 8 expected groups are defined."""
         from kronos_mcp.server import TOOL_GROUPS
 
         expected = {"vault:read", "vault:write", "memory:read",
-                    "memory:write", "source:read", "system"}
+                    "memory:write", "source:read", "system",
+                    "tasks:read", "tasks:write"}
         self.assertEqual(set(TOOL_GROUPS.keys()), expected)
 
     def test_memory_group_isolation(self):
@@ -1224,7 +1272,7 @@ class TestToolGroups(unittest.TestCase):
         # Handler returns JSON string
         parsed = json.loads(result) if isinstance(result, str) else result
         self.assertIsInstance(parsed, dict)
-        self.assertEqual(len(parsed), 6)
+        self.assertEqual(len(parsed), 8)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
