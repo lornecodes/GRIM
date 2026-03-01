@@ -13,6 +13,11 @@ Tools:
     kronos_deep_dive      — Gather source material paths for a concept
     kronos_navigate       — Read directory metadata (meta.yaml) for repo navigation
 
+  Memory:
+    kronos_memory_read    — Read GRIM's persistent working memory
+    kronos_memory_update  — Update a section of working memory
+    kronos_memory_sections — List memory sections with sizes
+
   Source Navigation:
     kronos_read_source    — Read file content from a repo source path
     kronos_search_source  — Grep across source files referenced by an FDO
@@ -20,6 +25,9 @@ Tools:
   Skills:
     kronos_skills         — List all available GRIM skills
     kronos_skill_load     — Load a skill's full instruction protocol
+
+  System:
+    kronos_tool_groups    — List tool groups for access control
 """
 
 from __future__ import annotations
@@ -66,7 +74,7 @@ search_engine = SearchEngine(vault)
 skills_engine = SkillsEngine(skills_path) if skills_path else None
 
 # ── Redis cache (optional) ────────────────────────────────────────────────────
-from .cache import KronosCache, WRITE_TOOLS
+from .cache import KronosCache, WRITE_TOOLS, MEMORY_WRITE_TOOLS
 cache = KronosCache.from_env()
 
 # Pre-load semantic index in background thread so first search is fast.
@@ -450,13 +458,276 @@ TOOLS: list[Tool] = [
             "required": ["query", "pattern"],
         },
     ),
+
+    # ── Memory tools ──
+    Tool(
+        name="kronos_memory_read",
+        description=(
+            "[memory:read] Read GRIM's persistent working memory (memory.md). "
+            "Returns full content or a specific section. Memory is separate from "
+            "vault FDOs — it stores session notes, objectives, preferences, and learnings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "section": {
+                    "type": "string",
+                    "description": (
+                        "Optional section name to read (e.g., 'Active Objectives', "
+                        "'User Preferences'). Omit to read full memory."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_memory_update",
+        description=(
+            "[memory:write] Update GRIM's persistent working memory. Can update a "
+            "specific section by name, or replace the entire file with full_content. "
+            "Memory tools NEVER modify vault FDOs — they only touch memory.md."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "section": {
+                    "type": "string",
+                    "description": (
+                        "Section name to update (e.g., 'Session Notes', 'Key Learnings'). "
+                        "Mutually exclusive with full_content."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": "New content for the section. Required when 'section' is provided.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["replace", "append"],
+                    "description": "Whether to replace the section or append to it. Default: replace.",
+                    "default": "replace",
+                },
+                "full_content": {
+                    "type": "string",
+                    "description": (
+                        "Replace the entire memory.md file. Mutually exclusive with section/content. "
+                        "Use sparingly — prefer section updates."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_memory_sections",
+        description=(
+            "[memory:read] List all sections in GRIM's working memory with their sizes. "
+            "Use this to discover what sections exist before reading or updating."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+
+    # ── System tools ──
+    Tool(
+        name="kronos_tool_groups",
+        description=(
+            "[system] List all tool groups and their members. Tool groups define "
+            "access control boundaries — agents get tools based on their assigned groups."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
+
+
+# ── Tool groups (access control boundaries) ─────────────────────────────────
+
+TOOL_GROUPS = {
+    "vault:read":   ["kronos_search", "kronos_get", "kronos_list", "kronos_graph",
+                      "kronos_tags", "kronos_deep_dive", "kronos_validate"],
+    "vault:write":  ["kronos_create", "kronos_update"],
+    "memory:read":  ["kronos_memory_read", "kronos_memory_sections"],
+    "memory:write": ["kronos_memory_update"],
+    "source:read":  ["kronos_navigate", "kronos_read_source", "kronos_search_source"],
+    "system":       ["kronos_skills", "kronos_skill_load", "kronos_tool_groups"],
+}
 
 
 # ── Tool handlers ────────────────────────────────────────────────────────────
 
 def _json(obj: Any) -> str:
     return json.dumps(obj, indent=2, default=str, ensure_ascii=False)
+
+
+# ── Memory helpers (ported from core/memory_store.py — no GRIM dependency) ──
+
+MEMORY_FILENAME = "memory.md"
+
+
+def _memory_path() -> Path:
+    """Full path to memory.md in the vault."""
+    return Path(vault_path) / MEMORY_FILENAME
+
+
+def _read_memory_file() -> str:
+    """Read memory.md from vault. Returns empty string if missing."""
+    p = _memory_path()
+    if not p.exists():
+        return ""
+    try:
+        return p.read_text(encoding="utf-8")
+    except Exception:
+        logger.exception("Failed to read memory.md")
+        return ""
+
+
+def _write_memory_file(content: str) -> None:
+    """Write content to memory.md in the vault."""
+    p = _memory_path()
+    try:
+        p.write_text(content, encoding="utf-8")
+        logger.info("Updated memory.md (%d chars)", len(content))
+    except Exception:
+        logger.exception("Failed to write memory.md")
+        raise
+
+
+def _parse_memory_sections(content: str) -> dict[str, str]:
+    """Parse markdown H2 sections into a dict. Strips HTML comments."""
+    if not content.strip():
+        return {}
+
+    sections: dict[str, str] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    for line in content.split("\n"):
+        match = re.match(r"^##\s+(.+)$", line)
+        if match:
+            if current_name is not None:
+                sections[current_name] = _clean_memory_section("\n".join(current_lines))
+            current_name = match.group(1).strip()
+            current_lines = []
+        elif current_name is not None:
+            current_lines.append(line)
+
+    if current_name is not None:
+        sections[current_name] = _clean_memory_section("\n".join(current_lines))
+
+    return sections
+
+
+def _update_memory_section(content: str, section_name: str, new_text: str) -> str:
+    """Replace a specific H2 section's content, preserving the rest.
+
+    If the section doesn't exist, appends it at the end.
+    """
+    pattern = re.compile(
+        rf"(^##\s+{re.escape(section_name)}\s*\n)"
+        rf"(.*?)"
+        rf"(?=^##\s|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+
+    match = pattern.search(content)
+    if match:
+        replacement = f"{match.group(1)}{new_text.strip()}\n\n"
+        return content[: match.start()] + replacement + content[match.end() :]
+
+    return content.rstrip() + f"\n\n## {section_name}\n{new_text.strip()}\n"
+
+
+def _append_to_memory_section(content: str, section_name: str, new_text: str) -> str:
+    """Append text to an existing section, or create it if missing."""
+    sections = _parse_memory_sections(content)
+    if section_name in sections:
+        existing = sections[section_name]
+        combined = existing.rstrip() + "\n" + new_text.strip()
+        return _update_memory_section(content, section_name, combined)
+    return _update_memory_section(content, section_name, new_text)
+
+
+def _clean_memory_section(text: str) -> str:
+    """Strip HTML comments and leading/trailing whitespace."""
+    cleaned = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    return cleaned.strip()
+
+
+# ── Memory handlers ──────────────────────────────────────────────────────────
+
+def handle_memory_read(args: dict) -> str:
+    """Read full memory or a specific section."""
+    content = _read_memory_file()
+    section = args.get("section")
+
+    if not content:
+        return _json({"content": "", "sections": []})
+
+    sections = _parse_memory_sections(content)
+
+    if section:
+        if section in sections:
+            return _json({"content": sections[section], "section": section})
+        return _json({"error": f"Section '{section}' not found",
+                       "available": list(sections.keys())})
+
+    return _json({"content": content, "sections": list(sections.keys())})
+
+
+def handle_memory_update(args: dict) -> str:
+    """Update a section or replace full memory content."""
+    full_content = args.get("full_content")
+    section = args.get("section")
+
+    if full_content and section:
+        return _json({"error": "Cannot specify both 'section' and 'full_content' — pick one"})
+
+    if full_content:
+        # Full file replacement
+        if "## " not in full_content:
+            return _json({"error": "full_content must contain at least one ## section header"})
+        _write_memory_file(full_content)
+        sections = _parse_memory_sections(full_content)
+        return _json({"ok": True, "char_count": len(full_content),
+                       "sections": list(sections.keys())})
+
+    if not section:
+        return _json({"error": "Provide either 'section' + 'content', or 'full_content'"})
+
+    content_text = args.get("content", "")
+    mode = args.get("mode", "replace")
+
+    current = _read_memory_file()
+    if not current:
+        current = "# GRIM Working Memory\n"
+
+    if mode == "append":
+        updated = _append_to_memory_section(current, section, content_text)
+    else:
+        updated = _update_memory_section(current, section, content_text)
+
+    _write_memory_file(updated)
+    return _json({"ok": True, "section": section, "char_count": len(content_text)})
+
+
+def handle_memory_sections(args: dict) -> str:
+    """List memory sections with sizes."""
+    content = _read_memory_file()
+    if not content:
+        return _json({"sections": []})
+
+    sections = _parse_memory_sections(content)
+    result = [{"name": name, "char_count": len(text)} for name, text in sections.items()]
+    return _json({"sections": result})
+
+
+def handle_tool_groups(args: dict) -> str:
+    """Return tool group definitions for access control."""
+    return _json(TOOL_GROUPS)
 
 
 def _fdo_summary(fdo: FDO) -> dict:
@@ -1085,6 +1356,12 @@ HANDLERS = {
     "kronos_navigate": handle_navigate,
     "kronos_read_source": handle_read_source,
     "kronos_search_source": handle_search_source,
+    # Memory tools
+    "kronos_memory_read": handle_memory_read,
+    "kronos_memory_update": handle_memory_update,
+    "kronos_memory_sections": handle_memory_sections,
+    # System tools
+    "kronos_tool_groups": handle_tool_groups,
 }
 
 
@@ -1125,7 +1402,7 @@ async def call_tool(
         return [TextContent(type="text", text=_json({"error": str(e)}))]
 
     # ── Cache write / invalidation ────────────────────────────────────────────
-    if name in WRITE_TOOLS:
+    if name in WRITE_TOOLS or name in MEMORY_WRITE_TOOLS:
         cache.invalidate_for_write(name, arguments)
     else:
         cache.set(name, arguments, result)

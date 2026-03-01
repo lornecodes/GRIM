@@ -30,9 +30,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import yaml
 
-# Ensure GRIM root is on path
+# Ensure GRIM root and MCP server are on path
 GRIM_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(GRIM_ROOT))
+sys.path.insert(0, str(GRIM_ROOT / "mcp" / "kronos" / "src"))
+
+# Set KRONOS_VAULT_PATH for MCP server import (uses a temp dir, overridden per-test)
+if not os.environ.get("KRONOS_VAULT_PATH"):
+    os.environ["KRONOS_VAULT_PATH"] = str(GRIM_ROOT / "tests" / "vault")
 
 from core.state import AgentResult, FDOSummary, FieldState, GrimState, SkillContext
 
@@ -230,65 +235,67 @@ class TestMemoryStore(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. memory_tools.py — LangChain tools
+# 2. memory_tools.py — LangChain tools (now MCP-backed)
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestMemoryTools(unittest.TestCase):
-    """Test LangChain memory tools."""
+    """Test LangChain memory tools (MCP-backed)."""
 
     def test_read_tool_returns_content(self):
-        """read_grim_memory returns the memory file content."""
-        from core.tools.memory_tools import read_grim_memory, set_memory_vault_path
-        with tempfile.TemporaryDirectory() as tmp:
-            vault = Path(tmp)
-            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
-            set_memory_vault_path(vault)
-            result = read_grim_memory.invoke({})
+        """read_grim_memory returns content via MCP."""
+        from core.tools.memory_tools import read_grim_memory
+        mock_session = MockMCPSession(responses={
+            "kronos_memory_read": {"content": SAMPLE_MEMORY, "sections": ["Active Objectives"]},
+        })
+        with patch("core.tools.kronos_read._mcp_session", mock_session):
+            result = run_async(read_grim_memory.ainvoke({}))
             self.assertIn("Active Objectives", result)
 
     def test_read_tool_empty_memory(self):
-        """read_grim_memory handles missing file gracefully."""
-        from core.tools.memory_tools import read_grim_memory, set_memory_vault_path
-        with tempfile.TemporaryDirectory() as tmp:
-            set_memory_vault_path(Path(tmp))
-            result = read_grim_memory.invoke({})
-            self.assertIn("empty", result)
-
-    def test_read_tool_no_vault(self):
-        """read_grim_memory with no vault path returns error."""
-        from core.tools.memory_tools import read_grim_memory, set_memory_vault_path
-        set_memory_vault_path(None)
-        result = read_grim_memory.invoke({})
-        self.assertIn("Error", result)
-
-    def test_update_tool_creates_section(self):
-        """update_grim_memory creates/updates a section."""
-        from core.tools.memory_tools import (
-            set_memory_vault_path,
-            update_grim_memory,
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            vault = Path(tmp)
-            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
-            set_memory_vault_path(vault)
-            result = update_grim_memory.invoke({
-                "section": "Key Learnings",
-                "content": "- New learning: tests are important",
-            })
-            self.assertIn("Updated", result)
-            # Verify the file was actually updated
-            content = (vault / "memory.md").read_text(encoding="utf-8")
-            self.assertIn("tests are important", content)
-
-    def test_update_tool_no_vault(self):
-        """update_grim_memory with no vault path returns error."""
-        from core.tools.memory_tools import set_memory_vault_path, update_grim_memory
-        set_memory_vault_path(None)
-        result = update_grim_memory.invoke({
-            "section": "Test",
-            "content": "test",
+        """read_grim_memory handles empty memory gracefully."""
+        from core.tools.memory_tools import read_grim_memory
+        mock_session = MockMCPSession(responses={
+            "kronos_memory_read": {"content": "", "sections": []},
         })
-        self.assertIn("Error", result)
+        with patch("core.tools.kronos_read._mcp_session", mock_session):
+            result = run_async(read_grim_memory.ainvoke({}))
+            # Empty content returns "(memory is empty)"
+            self.assertIn("empty", result.lower())
+
+    def test_read_tool_no_mcp(self):
+        """read_grim_memory without MCP session returns error."""
+        from core.tools.memory_tools import read_grim_memory
+        with patch("core.tools.kronos_read._mcp_session", None):
+            result = run_async(read_grim_memory.ainvoke({}))
+            # Should get an error about vault not connected
+            self.assertTrue("error" in result.lower() or "not connected" in result.lower())
+
+    def test_update_tool_calls_mcp(self):
+        """update_grim_memory calls MCP memory_update."""
+        from core.tools.memory_tools import update_grim_memory
+        mock_session = MockMCPSession(responses={
+            "kronos_memory_update": {"ok": True, "section": "Key Learnings", "char_count": 30},
+        })
+        with patch("core.tools.kronos_read._mcp_session", mock_session):
+            result = run_async(update_grim_memory.ainvoke({
+                "section": "Key Learnings",
+                "content": "- New learning: tests matter",
+            }))
+            self.assertIn("Updated", result)
+            # Verify MCP was called
+            self.assertTrue(any(
+                call[0] == "kronos_memory_update" for call in mock_session.calls
+            ))
+
+    def test_read_tool_with_section(self):
+        """read_grim_memory can read a specific section."""
+        from core.tools.memory_tools import read_grim_memory
+        mock_session = MockMCPSession(responses={
+            "kronos_memory_read": {"content": "- Peter prefers CLI aesthetic", "section": "User Preferences"},
+        })
+        with patch("core.tools.kronos_read._mcp_session", mock_session):
+            result = run_async(read_grim_memory.ainvoke({"section": "User Preferences"}))
+            self.assertIn("CLI aesthetic", result)
 
     def test_tools_list(self):
         """MEMORY_TOOLS contains both tools."""
@@ -297,6 +304,174 @@ class TestMemoryTools(unittest.TestCase):
         names = {t.name for t in MEMORY_TOOLS}
         self.assertIn("read_grim_memory", names)
         self.assertIn("update_grim_memory", names)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2b. MCP Memory handlers (server-side)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestMCPMemoryHandlers(unittest.TestCase):
+    """Test MCP memory tool handlers directly.
+
+    These test the pure-function handlers from the MCP server without
+    importing the full server module (which requires KRONOS_VAULT_PATH).
+    We test the memory parsing/writing helpers directly instead.
+    """
+
+    def test_memory_parse_sections(self):
+        """Memory section parsing works correctly."""
+        # Import from the MCP server source directly
+        from kronos_mcp.server import _parse_memory_sections
+        sections = _parse_memory_sections(SAMPLE_MEMORY)
+        self.assertIn("Active Objectives", sections)
+        self.assertIn("User Preferences", sections)
+        self.assertEqual(len(sections), 6)
+
+    def test_memory_update_section(self):
+        """Memory section update replaces content."""
+        from kronos_mcp.server import _update_memory_section
+        updated = _update_memory_section(
+            SAMPLE_MEMORY,
+            "Key Learnings",
+            "- MCP memory tools work great",
+        )
+        self.assertIn("MCP memory tools work great", updated)
+        # Other sections preserved
+        self.assertIn("Active Objectives", updated)
+
+    def test_memory_update_new_section(self):
+        """Memory update appends new section when it doesn't exist."""
+        from kronos_mcp.server import _update_memory_section
+        updated = _update_memory_section(SAMPLE_MEMORY, "Debug Notes", "- found a bug")
+        self.assertIn("## Debug Notes", updated)
+        self.assertIn("found a bug", updated)
+
+    def test_memory_append_section(self):
+        """Memory append adds to existing section."""
+        from kronos_mcp.server import _append_to_memory_section
+        updated = _append_to_memory_section(
+            SAMPLE_MEMORY,
+            "Key Learnings",
+            "- Appended learning",
+        )
+        # Original content still present
+        self.assertIn("Trace data needs _activeNode", updated)
+        # New content added
+        self.assertIn("Appended learning", updated)
+
+    def test_memory_clean_section(self):
+        """HTML comments are stripped from sections."""
+        from kronos_mcp.server import _clean_memory_section
+        result = _clean_memory_section("<!-- comment -->\n- item\n")
+        self.assertNotIn("comment", result)
+        self.assertIn("item", result)
+
+    def test_memory_read_write_roundtrip(self):
+        """Read/write roundtrip via handler helpers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            from kronos_mcp.server import _read_memory_file, _write_memory_file
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                content = _read_memory_file()
+                self.assertIn("Active Objectives", content)
+                _write_memory_file("# New\n\n## Test\n- hello\n")
+                content2 = _read_memory_file()
+                self.assertIn("hello", content2)
+
+    def test_handle_memory_read_full(self):
+        """handle_memory_read returns full content."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            from kronos_mcp.server import handle_memory_read
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                result = json.loads(handle_memory_read({}))
+                self.assertIn("content", result)
+                self.assertIn("Active Objectives", result["content"])
+
+    def test_handle_memory_update_section(self):
+        """handle_memory_update replaces a section and persists."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            from kronos_mcp.server import handle_memory_update
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                result = json.loads(handle_memory_update({
+                    "section": "Key Learnings",
+                    "content": "- MCP memory tools work great",
+                }))
+                self.assertTrue(result.get("ok"))
+                content = (vault / "memory.md").read_text(encoding="utf-8")
+                self.assertIn("MCP memory tools work great", content)
+
+    def test_handle_memory_update_full_content(self):
+        """handle_memory_update with full_content replaces entire file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            new_content = "# GRIM Working Memory\n\n## New Section\n- brand new content\n"
+            from kronos_mcp.server import handle_memory_update
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                result = json.loads(handle_memory_update({"full_content": new_content}))
+                self.assertTrue(result.get("ok"))
+                content = (vault / "memory.md").read_text(encoding="utf-8")
+                self.assertIn("brand new content", content)
+
+    def test_handle_memory_update_rejects_both(self):
+        """handle_memory_update rejects section + full_content together."""
+        from kronos_mcp.server import handle_memory_update
+        result = json.loads(handle_memory_update({
+            "section": "Test",
+            "content": "x",
+            "full_content": "# Full\n\n## Test\n- x\n",
+        }))
+        self.assertIn("error", result)
+
+    def test_handle_memory_sections(self):
+        """handle_memory_sections lists all sections."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+            from kronos_mcp.server import handle_memory_sections
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                result = json.loads(handle_memory_sections({}))
+                self.assertIn("sections", result)
+                names = [s["name"] for s in result["sections"]]
+                self.assertIn("Active Objectives", names)
+                self.assertEqual(len(names), 6)
+
+    def test_tool_groups(self):
+        """TOOL_GROUPS contains expected groups."""
+        from kronos_mcp.server import TOOL_GROUPS
+        self.assertIn("vault:read", TOOL_GROUPS)
+        self.assertIn("vault:write", TOOL_GROUPS)
+        self.assertIn("memory:read", TOOL_GROUPS)
+        self.assertIn("memory:write", TOOL_GROUPS)
+        self.assertIn("source:read", TOOL_GROUPS)
+        self.assertIn("system", TOOL_GROUPS)
+        # Memory tools are in correct groups
+        self.assertIn("kronos_memory_read", TOOL_GROUPS["memory:read"])
+        self.assertIn("kronos_memory_update", TOOL_GROUPS["memory:write"])
+
+    def test_memory_write_doesnt_touch_fdos(self):
+        """Memory write operations should never modify FDO files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            ai_dir = vault / "ai-systems"
+            ai_dir.mkdir()
+            fdo_content = "---\nid: test-fdo\n---\n# Test\n"
+            (ai_dir / "test-fdo.md").write_text(fdo_content, encoding="utf-8")
+            (vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
+
+            from kronos_mcp.server import handle_memory_update
+            with patch("kronos_mcp.server.vault_path", str(vault)):
+                handle_memory_update({
+                    "section": "Session Notes",
+                    "content": "- Test session note",
+                })
+                fdo_after = (ai_dir / "test-fdo.md").read_text(encoding="utf-8")
+                self.assertEqual(fdo_after, fdo_content)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -693,6 +868,13 @@ class TestMemoryAPI(unittest.TestCase):
         """Create a FastAPI TestClient with mocked globals."""
         from fastapi.testclient import TestClient
         import server.app as app_module
+        from core.tools.kronos_read import set_mcp_session
+
+        # Ensure no MCP session — API should use direct file fallback
+        set_mcp_session(None)
+
+        # Restore sample memory (may have been modified by previous tests)
+        (self._vault / "memory.md").write_text(SAMPLE_MEMORY, encoding="utf-8")
 
         # Patch server globals
         cfg = make_test_config(vault_path=self._vault)

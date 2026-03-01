@@ -566,36 +566,60 @@ class MemoryUpdateRequest(BaseModel):
 
 @app.get("/api/memory")
 async def get_memory():
-    """Read GRIM's persistent working memory from kronos-vault."""
+    """Read GRIM's persistent working memory via MCP (persists on host)."""
     if not _config:
         return JSONResponse({"error": "Config not loaded"}, status_code=503)
 
-    from core.memory_store import parse_memory_sections, read_memory
+    from core.tools.kronos_read import get_mcp_session
 
+    session = get_mcp_session()
+    if session is not None:
+        try:
+            result = await session.call_tool("kronos_memory_read", {})
+            if hasattr(result, "content") and result.content:
+                import json as _json
+                data = _json.loads(result.content[0].text)
+                content = data.get("content", "")
+                # Parse sections from content for backward compat
+                from core.memory_store import parse_memory_sections
+                sections = parse_memory_sections(content)
+                return JSONResponse({"content": content, "sections": sections})
+        except Exception:
+            pass  # fall through to direct file read
+
+    # Fallback to direct file read
+    from core.memory_store import parse_memory_sections, read_memory
     content = read_memory(_config.vault_path)
     sections = parse_memory_sections(content)
-
-    return JSONResponse({
-        "content": content,
-        "sections": sections,
-    })
+    return JSONResponse({"content": content, "sections": sections})
 
 
 @app.post("/api/memory")
 async def post_memory(req: MemoryUpdateRequest):
-    """Update GRIM's persistent working memory."""
+    """Update GRIM's persistent working memory via MCP (persists on host)."""
     if not _config:
         return JSONResponse({"error": "Config not loaded"}, status_code=503)
 
-    from core.memory_store import parse_memory_sections, write_memory
+    from core.tools.kronos_read import get_mcp_session
 
-    write_memory(_config.vault_path, req.content)
+    session = get_mcp_session()
+    if session is not None:
+        try:
+            await session.call_tool(
+                "kronos_memory_update",
+                {"full_content": req.content},
+            )
+        except Exception:
+            # Fallback to direct file write
+            from core.memory_store import write_memory
+            write_memory(_config.vault_path, req.content)
+    else:
+        from core.memory_store import write_memory
+        write_memory(_config.vault_path, req.content)
+
+    from core.memory_store import parse_memory_sections
     sections = parse_memory_sections(req.content)
-
-    return JSONResponse({
-        "content": req.content,
-        "sections": sections,
-    })
+    return JSONResponse({"content": req.content, "sections": sections})
 
 
 # ---------------------------------------------------------------------------

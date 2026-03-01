@@ -34,13 +34,22 @@ TOOL_TTLS: dict[str, int | None] = {
     "kronos_deep_dive":  300,   # 5 min
     "kronos_read_source":   120,   # 2 min — source files change during dev
     "kronos_search_source": 120,   # 2 min
+    # Memory tools — short TTL for reads, never cache writes
+    "kronos_memory_read":     60,    # 1 min
+    "kronos_memory_sections": 60,    # 1 min
+    "kronos_memory_update":   None,  # never cache — triggers memory invalidation
+    # System tools
+    "kronos_tool_groups":     600,   # 10 min — static data
     # Write tools — never cached, trigger invalidation
     "kronos_create":     None,
     "kronos_update":     None,
 }
 
-# Tools that modify vault state
+# Tools that modify vault state (FDOs)
 WRITE_TOOLS = {"kronos_create", "kronos_update"}
+
+# Tools that modify memory (separate from vault FDOs)
+MEMORY_WRITE_TOOLS = {"kronos_memory_update"}
 
 
 def _make_key(tool_name: str, arguments: dict) -> str:
@@ -126,6 +135,14 @@ class KronosCache:
             return
 
         try:
+            # Memory writes only invalidate memory caches — never touch FDO caches
+            if tool_name in MEMORY_WRITE_TOOLS:
+                self._delete_patterns([
+                    "kronos:kronos_memory_read:*",
+                    "kronos:kronos_memory_sections:*",
+                ])
+                return
+
             fdo_id = arguments.get("id", "")
 
             if tool_name == "kronos_update":

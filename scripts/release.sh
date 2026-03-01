@@ -17,7 +17,8 @@
 #   ./scripts/release.sh down      Stop GRIM + IronClaw
 #   ./scripts/release.sh logs      Tail container logs
 #   ./scripts/release.sh status    Show container health + image info
-#   ./scripts/release.sh clean     Remove old images + dangling layers
+#   ./scripts/release.sh clean     Remove old images + dangling layers + anonymous volumes
+#   ./scripts/release.sh purge     Deep clean: remove ALL unused images, volumes, build cache
 #   ./scripts/release.sh deploy    Gated: unit → build → test → up → integration → clean
 #   ./scripts/release.sh rebuild   Full redeploy: clean → build → test → up (legacy)
 #   ./scripts/release.sh prod      Production deploy (with prod override)
@@ -108,9 +109,10 @@ cmd_build() {
 _clean_old_images() {
     # Remove old image tags for a given image name (keeps last KEEP_IMAGES + latest)
     local img_name="$1"
-    _log "Cleaning old $img_name images (keeping last $KEEP_IMAGES) ..."
     local all_tags
-    all_tags=$(docker images "$img_name" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r)
+    all_tags=$(docker images "$img_name" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r || true)
+    [[ -z "$all_tags" ]] && return 0
+    _log "Cleaning old $img_name images (keeping last $KEEP_IMAGES) ..."
     local count=0
     while IFS= read -r old_tag; do
         [[ -z "$old_tag" ]] && continue
@@ -265,7 +267,7 @@ cmd_clean() {
 
     # 1. Remove stopped grim + ironclaw containers
     local stopped
-    for name in grim ironclaw; do
+    for name in grim ironclaw ai-bridge; do
         stopped=$(docker ps -a --filter "name=$name" --filter "status=exited" -q 2>/dev/null)
         if [[ -n "$stopped" ]]; then
             _log "Removing stopped $name containers ..."
@@ -273,11 +275,22 @@ cmd_clean() {
         fi
     done
 
-    # 2. Remove old image tags for both images
+    # 2. Remove dead/created containers from test runs
+    local dead
+    dead=$(docker ps -a --filter "status=exited" --filter "status=dead" --filter "status=created" \
+        --format "{{.ID}} {{.Image}}" 2>/dev/null | grep -E "(grim|ironclaw)" | awk '{print $1}' || true)
+    if [[ -n "$dead" ]]; then
+        _log "Removing dead test containers ..."
+        echo "$dead" | xargs docker rm -f 2>/dev/null || true
+    fi
+
+    # 3. Remove old image tags for both images
     _clean_old_images "$IMAGE_NAME"
     _clean_old_images "$IRONCLAW_IMAGE_NAME"
+    _clean_old_images "grim-ironclaw"
+    _clean_old_images "grim-ai-bridge"
 
-    # 3. Remove dangling images
+    # 4. Remove dangling images
     local dangling
     dangling=$(docker images -f "dangling=true" -q 2>/dev/null)
     if [[ -n "$dangling" ]]; then
@@ -285,12 +298,68 @@ cmd_clean() {
         echo "$dangling" | xargs docker rmi -f 2>/dev/null || true
     fi
 
-    # 4. Prune build cache
+    # 5. Remove anonymous volumes (orphaned, hash-named)
+    local anon_vols
+    anon_vols=$(docker volume ls -q --filter "dangling=true" 2>/dev/null | grep -E "^[0-9a-f]{64}$" || true)
+    if [[ -n "$anon_vols" ]]; then
+        local count
+        count=$(echo "$anon_vols" | wc -l | tr -d ' ')
+        _log "Removing $count anonymous volumes ..."
+        echo "$anon_vols" | xargs docker volume rm 2>/dev/null || true
+    fi
+
+    # 6. Prune build cache older than 7 days
     docker builder prune -f --filter "until=168h" 2>/dev/null || true
 
     _ok "Cleanup complete"
+    _log ""
+    _log "── Remaining Images ──"
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
     docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
+    _log ""
+    _log "── Disk Usage ──"
+    docker system df 2>/dev/null || true
+}
+
+cmd_purge() {
+    _log "Deep purge — reclaiming all reclaimable Docker resources ..."
+    _warn "This removes ALL unused images, volumes, and build cache."
+    _warn "Active containers and their volumes are preserved."
+    _log ""
+
+    # 1. Standard clean first
+    cmd_clean
+
+    # 2. Remove ALL dangling volumes (not just anonymous)
+    local dangling_vols
+    dangling_vols=$(docker volume ls -q --filter "dangling=true" 2>/dev/null)
+    if [[ -n "$dangling_vols" ]]; then
+        local count
+        count=$(echo "$dangling_vols" | wc -l | tr -d ' ')
+        _log "Removing $count unused volumes ..."
+        echo "$dangling_vols" | xargs docker volume rm 2>/dev/null || true
+    fi
+
+    # 3. Remove legacy volumes from old GRIM versions (grimm_*)
+    local legacy_vols
+    legacy_vols=$(docker volume ls -q 2>/dev/null | grep "^grimm_" || true)
+    if [[ -n "$legacy_vols" ]]; then
+        _log "Removing legacy grimm_ volumes ..."
+        echo "$legacy_vols" | xargs docker volume rm 2>/dev/null || true
+    fi
+
+    # 4. Full build cache prune (all ages)
+    _log "Pruning all build cache ..."
+    docker builder prune -af 2>/dev/null || true
+
+    # 5. Remove unused images (not just dangling — any image not used by a container)
+    _log "Removing unused images ..."
+    docker image prune -af --filter "until=48h" 2>/dev/null || true
+
+    _ok "Purge complete"
+    _log ""
+    _log "── Disk Usage After Purge ──"
+    docker system df 2>/dev/null || true
 }
 
 cmd_unit() {
@@ -528,6 +597,7 @@ case "${1:-up}" in
     logs)        cmd_logs ;;
     status)      cmd_status ;;
     clean)       cmd_clean ;;
+    purge)       cmd_purge ;;
     rebuild)     cmd_rebuild ;;
     deploy)      cmd_deploy ;;
     integration) cmd_integration ;;
@@ -550,7 +620,8 @@ case "${1:-up}" in
         echo "  down          Stop GRIM + IronClaw"
         echo "  logs          Tail container logs"
         echo "  status        Show containers, images, volumes, disk usage"
-        echo "  clean         Remove old images + dangling layers (keeps last $KEEP_IMAGES)"
+        echo "  clean         Remove old images, dead containers, anonymous volumes (keeps last $KEEP_IMAGES)"
+        echo "  purge         Deep clean: ALL unused images, volumes, legacy data, build cache"
         echo "  rebuild       Full redeploy: clean → build → test → up → integration (legacy)"
         echo "  prod          Production deploy (unit tests + build + resource limits)"
         echo ""

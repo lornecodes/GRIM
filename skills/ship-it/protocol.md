@@ -48,7 +48,10 @@ Gate 5: Post-Deploy Verification
   └─ WebSocket: ws://localhost:8080/ws connects
      │
 Gate 6: Cleanup
-  └─ Remove old images (keep last 3 tags)
+  ├─ Remove old images (keep last 3 tags)
+  ├─ Remove dead containers + anonymous volumes
+  ├─ Prune build cache (>7 days)
+  └─ Report disk usage summary
 ```
 
 ## Execution
@@ -75,9 +78,10 @@ cd ui && npx vitest run && cd ..
 - `test_model_routing.py`: 54 tests
 - `test_ironclaw.py`: 51 tests
 - `test_agent_integration.py`: 59 tests
+- `test_memory_system.py`: 72 tests
 - UI: 29 tests
 
-**Total: ~312 tests must pass.**
+**Total: ~384 tests must pass.**
 
 If any test fails: STOP. Fix the failure before proceeding.
 
@@ -184,7 +188,26 @@ Only after all gates pass:
 ./scripts/release.sh clean
 ```
 
-Removes old images (keeps last 3 tags for rollback).
+Standard cleanup removes:
+- Stopped/dead grim, ironclaw, ai-bridge containers
+- Old image tags (keeps last 3 for rollback) for grim, ironclaw, grim-ironclaw, grim-ai-bridge
+- Dangling (untagged) images
+- Anonymous volumes (orphaned hash-named volumes)
+- Build cache older than 7 days
+
+For deep cleanup (e.g., after many releases or when disk is low):
+
+```bash
+./scripts/release.sh purge
+```
+
+Purge additionally removes:
+- ALL dangling volumes (not just anonymous)
+- Legacy `grimm_*` volumes from GRIM v0.2
+- ALL build cache (not just >7 days)
+- ALL unused images older than 48h (any image not used by a running container)
+
+**Safety**: Both `clean` and `purge` preserve running containers and their active volumes.
 
 ## Quick Deploy (scope=quick)
 
@@ -224,6 +247,9 @@ The `release.sh` script wraps most of this:
 
 # Cleanup (Gate 6)
 ./scripts/release.sh clean
+
+# Deep cleanup (reclaim all unused Docker resources)
+./scripts/release.sh purge
 
 # Full local setup (one-time)
 ./scripts/release.sh setup

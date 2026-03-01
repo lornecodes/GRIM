@@ -11,6 +11,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -30,8 +31,8 @@ logger = logging.getLogger(__name__)
 _OBJECTIVE_EXTRACT_INTERVAL = 5
 
 
-def make_evolve_node(config: GrimConfig):
-    """Create an evolve node closure with config."""
+def make_evolve_node(config: GrimConfig, mcp_session: Any = None):
+    """Create an evolve node closure with config and optional MCP session."""
 
     # Track turn count for objective extraction interval
     _turn_counter = {"count": 0}
@@ -86,7 +87,7 @@ def make_evolve_node(config: GrimConfig):
             and _turn_counter["count"] % _OBJECTIVE_EXTRACT_INTERVAL == 0
         ):
             await _extract_and_save_objectives(messages, state, config)
-            await _update_working_memory(messages, state, config)
+            await _update_working_memory(messages, state, config, mcp_session)
 
         return {"field_state": field_state}
 
@@ -235,16 +236,33 @@ Return ONLY the updated markdown content for memory.md, nothing else."""
 
 
 async def _update_working_memory(
-    messages: list, state: GrimState, config: GrimConfig
+    messages: list, state: GrimState, config: GrimConfig,
+    mcp_session: Any = None,
 ) -> None:
-    """Update GRIM's persistent working memory via LLM analysis."""
+    """Update GRIM's persistent working memory via LLM analysis.
+
+    Uses MCP tools when available (writes persist across container rebuilds).
+    Falls back to direct file I/O when MCP is unavailable.
+    """
     try:
         from langchain_anthropic import ChatAnthropic
         from langchain_core.messages import HumanMessage
 
-        from core.memory_store import read_memory, write_memory
+        # Read current memory via MCP or fallback
+        current_memory = ""
+        if mcp_session is not None:
+            try:
+                result = await mcp_session.call_tool("kronos_memory_read", {})
+                if hasattr(result, "content") and result.content:
+                    data = json.loads(result.content[0].text)
+                    current_memory = data.get("content", "")
+            except Exception:
+                logger.debug("MCP memory read failed, falling back to file I/O")
 
-        current_memory = read_memory(config.vault_path)
+        if not current_memory:
+            from core.memory_store import read_memory
+            current_memory = read_memory(config.vault_path)
+
         if not current_memory:
             current_memory = "# GRIM Working Memory\n\n(empty)"
 
@@ -285,8 +303,23 @@ async def _update_working_memory(
             updated_content = updated_content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
         if updated_content and "## " in updated_content:
-            write_memory(config.vault_path, updated_content)
-            logger.info("Evolve: updated working memory (%d chars)", len(updated_content))
+            # Write via MCP (persists on host) or fallback to file I/O
+            written = False
+            if mcp_session is not None:
+                try:
+                    await mcp_session.call_tool(
+                        "kronos_memory_update",
+                        {"full_content": updated_content},
+                    )
+                    written = True
+                    logger.info("Evolve: updated working memory via MCP (%d chars)", len(updated_content))
+                except Exception:
+                    logger.debug("MCP memory write failed, falling back to file I/O")
+
+            if not written:
+                from core.memory_store import write_memory
+                write_memory(config.vault_path, updated_content)
+                logger.info("Evolve: updated working memory via file I/O (%d chars)", len(updated_content))
         else:
             logger.warning("Evolve: memory update produced invalid content, skipping")
 

@@ -629,11 +629,12 @@ class TestIdentityNode(unittest.TestCase):
             node = make_identity_node(cfg, mcp_session=mcp)
             result = run_async(node({}))
             self.assertIn("greatest AI companion", result["system_prompt"])
-            # Verify MCP was called for identity, personality, and caller (peter)
-            self.assertEqual(len(mcp.calls), 3)
+            # Verify MCP was called for identity, personality, caller (peter), and memory
+            self.assertEqual(len(mcp.calls), 4)
             self.assertEqual(mcp.calls[0][0], "kronos_get")  # grim-identity
             self.assertEqual(mcp.calls[1][0], "kronos_get")  # grim-personality
             self.assertEqual(mcp.calls[2][0], "kronos_get")  # peter (caller)
+            self.assertEqual(mcp.calls[3][0], "kronos_memory_read")  # working memory
             # Verify caller fields returned
             self.assertEqual(result["caller_id"], "peter")
             self.assertIsNotNone(result["caller_context"])
@@ -703,10 +704,11 @@ class TestIdentityNode(unittest.TestCase):
             })
             node = make_identity_node(cfg, mcp_session=mcp)
             result = run_async(node({}))
-            # 2 MCP calls: identity + caller (peter). Personality skipped (cache fresh).
-            self.assertEqual(len(mcp.calls), 2)
+            # 3 MCP calls: identity + caller (peter) + memory. Personality skipped (cache fresh).
+            self.assertEqual(len(mcp.calls), 3)
             self.assertEqual(mcp.calls[0][0], "kronos_get")  # grim-identity
             self.assertEqual(mcp.calls[1][0], "kronos_get")  # peter (caller)
+            self.assertEqual(mcp.calls[2][0], "kronos_memory_read")  # working memory
             # Cache content should appear in system prompt
             self.assertIn("Test cache content", result["system_prompt"])
 

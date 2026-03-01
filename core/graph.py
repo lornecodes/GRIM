@@ -86,7 +86,7 @@ def build_graph(
     skill_match_fn = make_skill_match_node(skill_registry)
     router_fn = make_router_node(config)
     companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
-    evolve_fn = make_evolve_node(config)
+    evolve_fn = make_evolve_node(config, mcp_session=mcp_session)
 
     # Create all doer agents
     memory_agent_fn = make_memory_agent(config)

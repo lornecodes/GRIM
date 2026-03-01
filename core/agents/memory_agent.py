@@ -16,7 +16,7 @@ from core.agents.base import BaseAgent
 from core.config import GrimConfig
 from core.state import AgentResult, GrimState
 from core.tools.kronos_write import MEMORY_AGENT_TOOLS
-from core.tools.memory_tools import MEMORY_TOOLS, set_memory_vault_path
+from core.tools.memory_tools import MEMORY_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,7 @@ class MemoryAgent(BaseAgent):
     agent_name = "memory"
 
     def __init__(self, config: GrimConfig) -> None:
-        # Configure vault path for memory tools
-        set_memory_vault_path(config.vault_path)
-        # Combine Kronos tools + GRIM memory tools
+        # Combine Kronos tools + GRIM memory tools (memory tools use MCP, no vault path needed)
         tools = list(MEMORY_AGENT_TOOLS) + list(MEMORY_TOOLS)
         super().__init__(config=config, tools=tools)
 

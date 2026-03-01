@@ -87,11 +87,21 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             active = [o for o in objectives if o.status == "active"]
             logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
 
-        # Load persistent working memory from vault
+        # Load persistent working memory via MCP (falls back to direct file read)
         working_memory = ""
         try:
-            from core.memory_store import read_memory
-            raw_memory = read_memory(config.vault_path)
+            if mcp_session is not None:
+                result = await mcp_session.call_tool("kronos_memory_read", {})
+                if hasattr(result, "content") and result.content:
+                    data = json.loads(result.content[0].text)
+                    raw_memory = data.get("content", "")
+                else:
+                    raw_memory = ""
+            else:
+                # Fallback to direct file read when no MCP session
+                from core.memory_store import read_memory
+                raw_memory = read_memory(config.vault_path)
+
             if raw_memory:
                 # Truncate to avoid context bloat (keep under 2000 chars)
                 if len(raw_memory) > 2000:
