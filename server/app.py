@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -93,6 +94,7 @@ _config: GrimConfig | None = None
 _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
 _checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifetime
 _ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
+_skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 
 
 def _grim_root() -> Path:
@@ -167,6 +169,11 @@ async def lifespan(app: FastAPI):
                 await bridge.close()
         except Exception as exc:
             logger.info("IronClaw bridge init failed: %s — running without sandbox", exc)
+
+        # Load skill registry for /api/skills endpoint
+        from core.skills.loader import load_skills
+        global _skill_registry
+        _skill_registry = load_skills(_config.skills_path)
 
         # Build graph (once, shared across all connections)
         _graph = build_graph(
@@ -247,11 +254,19 @@ async def index():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    ironclaw = "disconnected"
+    if _ironclaw_bridge:
+        try:
+            h = await _ironclaw_bridge.health()
+            ironclaw = "connected" if h.healthy else "disconnected"
+        except Exception:
+            ironclaw = "disconnected"
     return JSONResponse({
         "status": "ok",
         "env": _config.env if _config else "unknown",
         "vault": str(_config.vault_path) if _config else None,
         "graph": _graph is not None,
+        "ironclaw": ironclaw,
     })
 
 
@@ -426,34 +441,320 @@ GRIM_AGENTS = [
 
 @app.get("/api/agents")
 async def list_agents():
-    """GRIM agent roster — static metadata for the brain tier."""
-    return JSONResponse({"agents": GRIM_AGENTS})
+    """GRIM agent roster — static metadata with toggleable/enabled status."""
+    disabled = set(_config.agents_disabled) if _config else set()
+    ironclaw_tier = {"audit", "ironclaw"}
+    agents = []
+    for a in GRIM_AGENTS:
+        agents.append({
+            **a,
+            "toggleable": a["id"] in ironclaw_tier,
+            "enabled": a["id"] not in disabled,
+        })
+    return JSONResponse({"agents": agents})
+
+
+# Static IronClaw agent roles — fallback when engine is offline
+IRONCLAW_AGENT_ROLES = [
+    {"id": "researcher", "name": "Researcher", "description": "Gathers information, searches docs, explores codebases", "capabilities": ["research", "natural_language"], "color": "#3b82f6"},
+    {"id": "coder", "name": "Coder", "description": "Code generation, refactoring, debugging, implementation", "capabilities": ["code_generation", "debugging"], "color": "#34d399"},
+    {"id": "reviewer", "name": "Reviewer", "description": "Code review, security checks, quality analysis", "capabilities": ["code_review", "security"], "color": "#f59e0b"},
+    {"id": "planner", "name": "Planner", "description": "Task breakdown, planning, delegation to specialists", "capabilities": ["planning", "natural_language"], "color": "#8b5cf6"},
+    {"id": "tester", "name": "Tester", "description": "Test writing, validation, coverage analysis", "capabilities": ["testing", "debugging"], "color": "#06b6d4"},
+    {"id": "security_auditor", "name": "Security Auditor", "description": "Vulnerability analysis, threat modelling, mitigation", "capabilities": ["security", "code_review"], "color": "#ef4444"},
+]
+
+IRONCLAW_COORDINATION_PATTERNS = ["sequential", "parallel", "debate", "hierarchical", "pipeline"]
 
 
 @app.get("/api/ironclaw/agents")
 async def ironclaw_agents():
-    """IronClaw agent roster — limbs tier via bridge."""
+    """IronClaw agent roster — limbs tier via bridge, with static fallback."""
+    fallback = {
+        "enabled": False,
+        "roles": IRONCLAW_AGENT_ROLES,
+        "coordination_patterns": IRONCLAW_COORDINATION_PATTERNS,
+        "active_sessions": 0,
+        "max_concurrent_sessions": 0,
+    }
+
     if not _ironclaw_bridge:
-        return JSONResponse({
-            "enabled": False,
-            "roles": [],
-            "active_sessions": 0,
-            "max_concurrent_sessions": 0,
-            "message": "IronClaw bridge not initialized",
-        })
+        return JSONResponse({**fallback, "message": "IronClaw bridge not initialized"})
 
     try:
         data = await _ironclaw_bridge.list_agents()
+        # Enrich with static metadata if the engine returns minimal data
+        roles = data.get("roles", [])
+        if roles and not roles[0].get("color"):
+            role_map = {r["id"]: r for r in IRONCLAW_AGENT_ROLES}
+            for role in roles:
+                static = role_map.get(role.get("id", ""), {})
+                role.setdefault("color", static.get("color", "#6b7280"))
+                role.setdefault("description", static.get("description", ""))
+                role.setdefault("capabilities", static.get("capabilities", []))
+            data["roles"] = roles
+        data.setdefault("coordination_patterns", IRONCLAW_COORDINATION_PATTERNS)
+        data["enabled"] = True
         return JSONResponse(data)
     except Exception as exc:
         logger.warning("Failed to list IronClaw agents: %s", exc)
-        return JSONResponse({
-            "enabled": False,
-            "roles": [],
-            "active_sessions": 0,
-            "max_concurrent_sessions": 0,
-            "error": str(exc),
+        return JSONResponse({**fallback, "error": str(exc)})
+
+
+# ---------------------------------------------------------------------------
+# Skills endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/skills")
+async def list_skills():
+    """List all skills with enabled/disabled status."""
+    if not _skill_registry:
+        return JSONResponse({"skills": [], "error": "Skills not loaded"}, status_code=503)
+    if not _config:
+        return JSONResponse({"skills": []}, status_code=503)
+
+    disabled = set(_config.skills_disabled)
+    skills = []
+    for s in _skill_registry.all():
+        skills.append({
+            "name": s.name,
+            "version": s.version,
+            "description": s.description,
+            "type": s.skill_type,
+            "permissions": s.permissions,
+            "phases": [g for g in s.quality_gates] if s.quality_gates else [],
+            "enabled": s.name not in disabled,
         })
+
+    return JSONResponse({"skills": skills, "total": len(skills), "disabled_count": len(disabled)})
+
+
+@app.post("/api/skills/{name}/toggle")
+async def toggle_skill(name: str):
+    """Toggle a skill's enabled/disabled state."""
+    global _config
+
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    if _skill_registry and name not in _skill_registry:
+        return JSONResponse({"error": f"Unknown skill: {name}"}, status_code=404)
+
+    disabled = list(_config.skills_disabled)
+    if name in disabled:
+        disabled.remove(name)
+        enabled = True
+    else:
+        disabled.append(name)
+        enabled = False
+
+    from core.config import save_config_updates
+    _config = save_config_updates({"skills": {"disabled": disabled}}, grim_root=_grim_root())
+    logger.info("Skill %s %s", name, "enabled" if enabled else "disabled")
+
+    return JSONResponse({"name": name, "enabled": enabled})
+
+
+# ---------------------------------------------------------------------------
+# Models endpoints
+# ---------------------------------------------------------------------------
+
+ANTHROPIC_MODELS = [
+    {
+        "id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "tier": "opus",
+        "context_window": 200_000,
+        "max_output": 32_000,
+    },
+    {
+        "id": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "tier": "sonnet",
+        "context_window": 200_000,
+        "max_output": 16_000,
+    },
+    {
+        "id": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "tier": "haiku",
+        "context_window": 200_000,
+        "max_output": 8_192,
+    },
+]
+
+
+@app.get("/api/models")
+async def list_models():
+    """List available models with enabled/disabled status and routing config."""
+    if not _config:
+        return JSONResponse({"models": []}, status_code=503)
+
+    disabled = set(_config.models_disabled)
+    models = []
+    for m in ANTHROPIC_MODELS:
+        models.append({
+            **m,
+            "enabled": m["tier"] not in disabled,
+            "is_default": m["tier"] == _config.routing_default_tier,
+        })
+
+    return JSONResponse({
+        "provider": "anthropic",
+        "models": models,
+        "routing": {
+            "enabled": _config.routing_enabled,
+            "default_tier": _config.routing_default_tier,
+            "classifier_enabled": _config.routing_classifier_enabled,
+            "confidence_threshold": _config.routing_confidence_threshold,
+        },
+    })
+
+
+@app.post("/api/models/{tier}/toggle")
+async def toggle_model(tier: str):
+    """Toggle a model tier's enabled/disabled state."""
+    global _config
+
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    valid_tiers = {m["tier"] for m in ANTHROPIC_MODELS}
+    if tier not in valid_tiers:
+        return JSONResponse({"error": f"Unknown tier: {tier}"}, status_code=404)
+
+    disabled = list(_config.models_disabled)
+    if tier in disabled:
+        disabled.remove(tier)
+        enabled = True
+    else:
+        disabled.append(tier)
+        enabled = False
+
+    from core.config import save_config_updates
+    _config = save_config_updates({"models": {"disabled": disabled}}, grim_root=_grim_root())
+    logger.info("Model tier %s %s", tier, "enabled" if enabled else "disabled")
+
+    return JSONResponse({"tier": tier, "enabled": enabled})
+
+
+# ---------------------------------------------------------------------------
+# Agent toggle endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/agents/{agent_id}/toggle")
+async def toggle_agent(agent_id: str):
+    """Toggle an agent's enabled/disabled state (IronClaw-tier only)."""
+    global _config
+
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    # Only IronClaw-tier agents are toggleable
+    toggleable = {"audit", "ironclaw"}
+    if agent_id not in toggleable:
+        return JSONResponse(
+            {"error": f"Agent '{agent_id}' is not toggleable (only IronClaw-tier agents can be toggled)"},
+            status_code=400,
+        )
+
+    disabled = list(_config.agents_disabled)
+    if agent_id in disabled:
+        disabled.remove(agent_id)
+        enabled = True
+    else:
+        disabled.append(agent_id)
+        enabled = False
+
+    from core.config import save_config_updates
+    _config = save_config_updates({"agents": {"disabled": disabled}}, grim_root=_grim_root())
+    logger.info("Agent %s %s", agent_id, "enabled" if enabled else "disabled")
+
+    return JSONResponse({"id": agent_id, "enabled": enabled})
+
+
+# ---------------------------------------------------------------------------
+# Identity / personality endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/identity")
+async def get_identity():
+    """Get personality field state and system prompt for editing."""
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    result: dict[str, Any] = {
+        "field_state": {"coherence": 0.8, "valence": 0.3, "uncertainty": 0.2},
+        "system_prompt": "",
+    }
+
+    # Read personality.yaml
+    try:
+        personality_path = _config.identity_personality_path
+        if personality_path.exists():
+            raw = yaml.safe_load(personality_path.read_text(encoding="utf-8")) or {}
+            fs = raw.get("field_state", {})
+            result["field_state"] = {
+                "coherence": fs.get("coherence", 0.8),
+                "valence": fs.get("valence", 0.3),
+                "uncertainty": fs.get("uncertainty", 0.2),
+            }
+    except Exception as exc:
+        logger.warning("Failed to read personality.yaml: %s", exc)
+
+    # Read system_prompt.md
+    try:
+        prompt_path = _config.identity_prompt_path
+        if prompt_path.exists():
+            result["system_prompt"] = prompt_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to read system_prompt.md: %s", exc)
+
+    return JSONResponse(result)
+
+
+class IdentityUpdateRequest(BaseModel):
+    field_state: dict | None = None  # {coherence, valence, uncertainty}
+    system_prompt: str | None = None
+
+
+@app.post("/api/identity")
+async def update_identity(req: IdentityUpdateRequest):
+    """Update personality field state and/or system prompt."""
+    if not _config:
+        return JSONResponse({"error": "Config not loaded"}, status_code=503)
+
+    try:
+        # Update personality.yaml
+        if req.field_state:
+            personality_path = _config.identity_personality_path
+            if personality_path.exists():
+                raw = yaml.safe_load(personality_path.read_text(encoding="utf-8")) or {}
+            else:
+                raw = {}
+
+            fs = raw.setdefault("field_state", {})
+            for key in ("coherence", "valence", "uncertainty"):
+                if key in req.field_state:
+                    fs[key] = float(req.field_state[key])
+
+            personality_path.write_text(
+                yaml.dump(raw, default_flow_style=False, sort_keys=False),
+                encoding="utf-8",
+            )
+            logger.info("Personality updated: %s", req.field_state)
+
+        # Update system_prompt.md
+        if req.system_prompt is not None:
+            prompt_path = _config.identity_prompt_path
+            prompt_path.write_text(req.system_prompt, encoding="utf-8")
+            logger.info("System prompt updated (%d chars)", len(req.system_prompt))
+
+        return await get_identity()
+
+    except Exception as exc:
+        logger.exception("Identity update failed")
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 class WorkflowRequest(BaseModel):
@@ -620,6 +921,211 @@ async def post_memory(req: MemoryUpdateRequest):
     from core.memory_store import parse_memory_sections
     sections = parse_memory_sections(req.content)
     return JSONResponse({"content": req.content, "sections": sections})
+
+
+# ---------------------------------------------------------------------------
+# Task Management endpoints — board, stories, calendar
+# ---------------------------------------------------------------------------
+
+async def _mcp_task_call(tool_name: str, args: dict) -> dict:
+    """Call a kronos task/board/calendar MCP tool, return parsed JSON."""
+    from core.tools.kronos_read import get_mcp_session
+    session = get_mcp_session()
+    if session is None:
+        return {"error": "No MCP session"}
+    try:
+        raw = await asyncio.wait_for(
+            session.call_tool(tool_name, args), timeout=10
+        )
+        text = raw.content[0].text if raw.content else "{}"
+        return json.loads(text)
+    except asyncio.TimeoutError:
+        return {"error": f"MCP call {tool_name} timed out"}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/api/projects")
+async def api_projects():
+    """List projects (epics) for the task board dropdown."""
+    data = await _mcp_task_call("kronos_task_list", {})
+    # Extract unique projects from stories
+    projects: dict[str, dict] = {}
+    for story in data.get("stories", []):
+        pid = story.get("project", "")
+        if pid and pid not in projects:
+            projects[pid] = {
+                "id": pid,
+                "title": pid.replace("proj-", "").replace("-", " ").title(),
+            }
+    # Also fetch project FDOs for proper titles
+    search_data = await _mcp_task_call("kronos_search", {"query": "epic project", "semantic": False})
+    for result in search_data.get("results", []):
+        rid = result.get("id", "")
+        if rid.startswith("proj-") and rid in projects:
+            projects[rid]["title"] = result.get("title", projects[rid]["title"])
+        elif rid.startswith("proj-"):
+            projects[rid] = {"id": rid, "title": result.get("title", rid)}
+    return JSONResponse({"projects": list(projects.values())})
+
+
+@app.get("/api/tasks/board")
+async def api_board_view(project_id: str | None = None):
+    """Kanban board — columns with full story+task data."""
+    args: dict = {}
+    if project_id:
+        args["project_id"] = project_id
+    data = await _mcp_task_call("kronos_board_view", args)
+    return JSONResponse(data)
+
+
+@app.get("/api/tasks/backlog")
+async def api_backlog_view():
+    """Stories not on the board."""
+    data = await _mcp_task_call("kronos_backlog_view", {})
+    return JSONResponse(data)
+
+
+@app.get("/api/tasks/list")
+async def api_task_list(status: str | None = None, priority: str | None = None,
+                        feat_id: str | None = None, project_id: str | None = None):
+    """List stories/tasks with optional filters."""
+    args: dict = {}
+    if status:
+        args["status"] = status
+    if priority:
+        args["priority"] = priority
+    if feat_id:
+        args["feat_id"] = feat_id
+    if project_id:
+        args["project_id"] = project_id
+    data = await _mcp_task_call("kronos_task_list", args)
+    return JSONResponse(data)
+
+
+@app.get("/api/tasks/{item_id}")
+async def api_task_get(item_id: str):
+    """Get a single story or task by ID."""
+    data = await _mcp_task_call("kronos_task_get", {"item_id": item_id})
+    return JSONResponse(data)
+
+
+class TaskCreateRequest(BaseModel):
+    type: str  # "story" or "task"
+    title: str
+    feat_id: str | None = None
+    story_id: str | None = None
+    priority: str | None = None
+    estimate_days: float | None = None
+    description: str | None = None
+    acceptance_criteria: list[str] | None = None
+    tags: list[str] | None = None
+    assignee: str | None = None
+    notes: str | None = None
+
+
+@app.post("/api/tasks")
+async def api_task_create(req: TaskCreateRequest):
+    """Create a story or task."""
+    args = req.model_dump(exclude_none=True)
+    data = await _mcp_task_call("kronos_task_create", args)
+    return JSONResponse(data)
+
+
+class TaskUpdateRequest(BaseModel):
+    item_id: str
+    title: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    estimate_days: float | None = None
+    description: str | None = None
+    notes: str | None = None
+
+
+@app.put("/api/tasks/{item_id}")
+async def api_task_update(item_id: str, req: TaskUpdateRequest):
+    """Update a story or task."""
+    fields = req.model_dump(exclude_none=True)
+    fields.pop("item_id", None)
+    data = await _mcp_task_call("kronos_task_update", {
+        "item_id": item_id,
+        "fields": fields,
+    })
+    return JSONResponse(data)
+
+
+class TaskMoveRequest(BaseModel):
+    column: str  # new, active, in_progress, resolved, closed
+
+
+@app.post("/api/tasks/{story_id}/move")
+async def api_task_move(story_id: str, req: TaskMoveRequest):
+    """Move a story to a board column."""
+    data = await _mcp_task_call("kronos_task_move", {
+        "story_id": story_id, "column": req.column
+    })
+    return JSONResponse(data)
+
+
+@app.post("/api/tasks/archive")
+async def api_task_archive(feat_id: str | None = None):
+    """Archive closed stories."""
+    args: dict = {}
+    if feat_id:
+        args["feat_id"] = feat_id
+    data = await _mcp_task_call("kronos_task_archive", args)
+    return JSONResponse(data)
+
+
+@app.get("/api/calendar")
+async def api_calendar_view(start_date: str, end_date: str):
+    """Calendar entries for a date range."""
+    data = await _mcp_task_call("kronos_calendar_view", {
+        "start_date": start_date, "end_date": end_date
+    })
+    return JSONResponse(data)
+
+
+class CalendarAddRequest(BaseModel):
+    title: str
+    date: str
+    time: str | None = None
+    duration_hours: float | None = None
+    recurring: bool | None = None
+    notes: str | None = None
+
+
+@app.post("/api/calendar")
+async def api_calendar_add(req: CalendarAddRequest):
+    """Add a personal calendar event."""
+    args = req.model_dump(exclude_none=True)
+    data = await _mcp_task_call("kronos_calendar_add", args)
+    return JSONResponse(data)
+
+
+class CalendarUpdateRequest(BaseModel):
+    action: str = "update"  # update or delete
+    title: str | None = None
+    date: str | None = None
+    time: str | None = None
+    duration_hours: float | None = None
+    notes: str | None = None
+
+
+@app.put("/api/calendar/{event_id}")
+async def api_calendar_update(event_id: str, req: CalendarUpdateRequest):
+    """Update or delete a personal calendar event."""
+    args = req.model_dump(exclude_none=True)
+    args["event_id"] = event_id
+    data = await _mcp_task_call("kronos_calendar_update", args)
+    return JSONResponse(data)
+
+
+@app.post("/api/calendar/sync")
+async def api_calendar_sync():
+    """Sync schedule from board state."""
+    data = await _mcp_task_call("kronos_calendar_sync", {})
+    return JSONResponse(data)
 
 
 # ---------------------------------------------------------------------------

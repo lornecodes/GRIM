@@ -173,10 +173,13 @@ class BoardEngine:
                 enriched.append({
                     "id": sid,
                     "title": story.get("title", ""),
+                    "status": story.get("status", "new"),
                     "priority": story.get("priority", "medium"),
                     "estimate_days": story.get("estimate_days", 0),
+                    "description": story.get("description", ""),
                     "feature": story.get("feature", ""),
                     "project": story.get("project", ""),
+                    "tasks": tasks,
                     "task_count": len(tasks),
                     "tasks_done": sum(1 for t in tasks if t.get("status") in ("resolved", "closed")),
                     "tags": story.get("tags", []),
