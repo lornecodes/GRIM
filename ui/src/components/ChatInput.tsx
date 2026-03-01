@@ -41,8 +41,11 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   }, []);
 
   return (
-    <div className="px-5 py-4 border-t border-grim-border bg-grim-surface shrink-0">
-      <div className="flex gap-2.5 items-end max-w-[900px] mx-auto">
+    <div className="px-5 py-3 border-t border-grim-border bg-grim-bg shrink-0">
+      <div className="flex items-end gap-2 max-w-[900px] mx-auto">
+        <span className="text-grim-accent font-mono text-sm shrink-0 pb-3 select-none font-bold">
+          &gt;
+        </span>
         <textarea
           ref={textareaRef}
           value={text}
@@ -54,19 +57,9 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
           disabled={disabled}
           placeholder={placeholder}
           rows={1}
-          className="flex-1 bg-grim-bg border border-grim-border rounded-lg px-4 py-3 text-grim-text text-[13.5px] font-mono resize-none outline-none min-h-[44px] max-h-[160px] leading-relaxed transition-colors focus:border-grim-accent placeholder:text-grim-text-dim disabled:opacity-50"
+          className="flex-1 bg-transparent outline-none border-none text-grim-text text-[13.5px] font-mono resize-none min-h-[44px] max-h-[160px] leading-relaxed caret-[#7c6fef] placeholder:text-grim-text-dim disabled:opacity-50"
           autoFocus
         />
-        <button
-          onClick={handleSend}
-          disabled={disabled || !text.trim()}
-          className="bg-grim-accent border-none rounded-lg px-5 py-2.5 text-white text-[13px] font-semibold cursor-pointer transition-all hover:bg-grim-accent-dim disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-        >
-          Send
-        </button>
-      </div>
-      <div className="text-center text-[10px] text-grim-text-dim mt-2">
-        Enter to send &middot; Shift+Enter for newline
       </div>
     </div>
   );

@@ -178,22 +178,42 @@ function ActiveAgentCard({ agent }: { agent: ActiveAgent }) {
         )}
       </div>
 
-      {/* Tool pills */}
+      {/* Tool pills with output previews */}
       {toolTraces.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {toolTraces.map((t, i) => (
-            <span
-              key={i}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-grim-bg text-trace-tool font-mono"
-            >
-              {t.tool || t.text}
-            </span>
-          ))}
+        <div className="space-y-1">
+          <div className="flex flex-wrap gap-1">
+            {toolTraces.map((t, i) => (
+              <span
+                key={i}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-grim-bg text-trace-tool font-mono"
+              >
+                {t.tool || t.text}
+              </span>
+            ))}
+          </div>
+          {/* Show output previews for tool calls */}
+          {toolTraces.some((t) => t.output_preview) && (
+            <div className="bg-grim-bg rounded border border-grim-border/50 p-2 space-y-1">
+              {toolTraces
+                .filter((t) => t.output_preview)
+                .map((t, i) => (
+                  <div key={i} className="font-mono text-[10.5px] leading-relaxed">
+                    <span className="text-grim-accent select-none">&gt; </span>
+                    <span className="text-trace-tool">{t.tool}</span>
+                    <div className="text-grim-text pl-4 whitespace-pre-wrap break-all">
+                      {t.output_preview!.length > 200
+                        ? t.output_preview!.slice(0, 200) + "…"
+                        : t.output_preview}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 
       {/* Trace log window */}
-      <div className="max-h-32 overflow-y-auto bg-grim-bg rounded border border-grim-border p-2 space-y-0.5">
+      <div className="max-h-64 overflow-y-auto bg-grim-bg rounded border border-grim-border p-2 space-y-0.5">
         {agent.traces.map((trace, i) => (
           <TraceLogLine key={i} trace={trace} />
         ))}

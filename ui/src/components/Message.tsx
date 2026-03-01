@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { MetaBadge } from "./MetaBadge";
 import { TraceLog } from "./TraceLog";
 import { GrimSprite } from "./GrimSprite";
+import { AgentLogBlock } from "./AgentLogBlock";
 
 interface MessageProps {
   message: ChatMessage;
@@ -46,7 +47,19 @@ export function Message({ message }: MessageProps) {
   const isStep = message.isStep;
   const accentColor = isStep && message.node ? NODE_COLORS[message.node] || "#3e5c72" : undefined;
 
-  // Step bubble: compact, left-accented, no avatar
+  // Agent log block for dispatch/integrate — terminal-style output
+  if (isStep && (message.node === "dispatch" || message.node === "integrate")) {
+    return (
+      <AgentLogBlock
+        content={message.content}
+        traces={message.traces}
+        streaming={isStreaming}
+        node={message.node}
+      />
+    );
+  }
+
+  // Step bubble: compact, left-accented, no avatar (other nodes)
   if (isStep) {
     return (
       <div className="animate-fade-in self-start pl-[42px] max-w-[85%]">

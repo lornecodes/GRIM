@@ -168,40 +168,75 @@ function ActiveAgentsTile() {
           No agent activity yet
         </div>
       ) : (
-        <div className="max-h-52 overflow-y-auto space-y-2">
-          {activeAgents.map((agent) => (
-            <div
-              key={agent.node}
-              className="bg-grim-bg rounded border border-grim-border p-2"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-medium text-grim-text">
-                  {agent.label}
-                </span>
-                <span className="text-[10px] text-grim-text-dim ml-auto tabular-nums">
-                  {agent.totalMs}ms
-                </span>
-              </div>
-              {/* Compact trace log — last 4 entries */}
-              <div className="space-y-0.5">
-                {agent.traces.slice(-4).map((trace, i) => (
-                  <div
-                    key={i}
-                    className="text-[10px] text-grim-text-dim truncate"
-                  >
-                    <span
-                      className={`font-bold uppercase mr-1 ${
-                        catColors[trace.cat] || "text-grim-text-dim"
-                      }`}
-                    >
-                      {trace.cat}
-                    </span>
-                    {trace.text}
+        <div className="max-h-64 overflow-y-auto space-y-2">
+          {activeAgents.map((agent) => {
+            const toolTraces = agent.traces.filter((t) => t.cat === "tool");
+            const hasOutput = toolTraces.some((t) => t.output_preview);
+            return (
+              <div
+                key={agent.node}
+                className="bg-grim-bg rounded border border-grim-border p-2"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium text-grim-text">
+                    {agent.label}
+                  </span>
+                  {toolTraces.length > 0 && (
+                    <div className="flex gap-1">
+                      {toolTraces.slice(0, 3).map((t, i) => (
+                        <span
+                          key={i}
+                          className="text-[9px] px-1 py-0.5 rounded bg-grim-surface text-trace-tool font-mono"
+                        >
+                          {t.tool || t.text}
+                        </span>
+                      ))}
+                      {toolTraces.length > 3 && (
+                        <span className="text-[9px] text-grim-text-dim">
+                          +{toolTraces.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <span className="text-[10px] text-grim-text-dim ml-auto tabular-nums">
+                    {agent.totalMs}ms
+                  </span>
+                </div>
+                {/* Tool output preview */}
+                {hasOutput && (
+                  <div className="mb-1 font-mono text-[10px] text-grim-text bg-grim-surface/50 rounded px-2 py-1 max-h-16 overflow-hidden">
+                    {toolTraces
+                      .filter((t) => t.output_preview)
+                      .slice(0, 2)
+                      .map((t, i) => (
+                        <div key={i} className="truncate">
+                          <span className="text-grim-accent">&gt; </span>
+                          {t.output_preview}
+                        </div>
+                      ))}
                   </div>
-                ))}
+                )}
+                {/* Compact trace log — last 4 entries */}
+                <div className="space-y-0.5">
+                  {agent.traces.slice(-4).map((trace, i) => (
+                    <div
+                      key={i}
+                      className="text-[10px] text-grim-text-dim truncate"
+                    >
+                      <span
+                        className={`font-bold uppercase mr-1 ${
+                          catColors[trace.cat] || "text-grim-text-dim"
+                        }`}
+                      >
+                        {trace.cat}
+                      </span>
+                      {trace.text}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </DashboardTile>
