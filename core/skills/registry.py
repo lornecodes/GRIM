@@ -83,6 +83,8 @@ def _consumer_to_delegation(consumer_name: str) -> str:
         "research-agent": "research",
         "operator-agent": "operate",
         "ops-agent": "operate",
+        "ironclaw-agent": "ironclaw",
+        "audit-agent": "audit",
     }
     return mapping.get(consumer_name, consumer_name.replace("-agent", ""))
 
@@ -93,6 +95,8 @@ _AGENT_ALIASES: dict[str, set[str]] = {
     "memory": {"memory-agent"},
     "research": {"research-agent"},
     "operate": {"operator-agent", "ops-agent", "ops"},
+    "ironclaw": {"ironclaw-agent", "engine-agent"},
+    "audit": {"audit-agent"},
 }
 
 

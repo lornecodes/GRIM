@@ -44,7 +44,16 @@ class TestMatchKeywords:
         ("investigate the anomaly", "research"),
         ("summarize this paper", "research"),
         ("research this topic", "research"),
-        # IronClaw delegation
+        # IronClaw delegation — direct references
+        ("use ironclaw for this", "ironclaw"),
+        ("ask iron claw to scan", "ironclaw"),
+        ("dispatch agent workflow", "ironclaw"),
+        ("run a security scan on this", "ironclaw"),
+        ("do a security analysis", "ironclaw"),
+        ("scan for vulnerabilities", "ironclaw"),
+        ("security audit of the code", "ironclaw"),
+        ("analyze the container security", "ironclaw"),
+        # IronClaw delegation — sandboxed execution
         ("run sandboxed command", "ironclaw"),
         ("execute safely in sandbox", "ironclaw"),
         ("run in sandbox mode", "ironclaw"),

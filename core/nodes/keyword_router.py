@@ -39,11 +39,25 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "summarize this", "break this down",
     ],
     "ironclaw": [
+        # Direct IronClaw references
+        "ironclaw", "iron claw", "iron-claw",
+        "use the engine", "engine agent",
+        # Sandboxed execution
         "run sandboxed", "execute safely", "isolated shell",
         "sandboxed execution", "run in sandbox",
         "secure execute", "run securely",
         "run this safely", "execute in sandbox",
         "run isolated", "safe execution",
+        # Agent dispatch
+        "dispatch agent", "agent workflow", "multi-agent",
+        "dispatch workflow",
+        # Security scanning
+        "security scan", "scan for vulnerabilities", "security audit",
+        "security analysis", "vulnerability scan",
+        "scan this code", "audit this code",
+        # Container/Docker tasks via IronClaw
+        "container analysis", "docker analysis",
+        "analyze the container", "inspect the container",
     ],
     "operate": [
         # Shell / commands

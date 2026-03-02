@@ -13,8 +13,12 @@ permissions:
   - vault:read
 
 consumers:
-  audit-agent:
+  ironclaw-agent:
     role: execution
+    description: Executes sandboxed operations through IronClaw engine
+    reads: [protocol.md, review_criteria]
+  audit-agent:
+    role: review
     description: Reviews staged output and returns a structured verdict
     reads: [protocol.md, review_criteria, verdict_format]
 
