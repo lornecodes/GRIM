@@ -19,6 +19,23 @@ Activate when:
 
 ## Action: PLAN
 
+### Phase 0: Board Check (Always First)
+
+Before planning new work, review what's already in flight:
+
+1. Show current board:
+   ```
+   kronos_board_view()
+   ```
+2. Check for:
+   - **Stale items**: Stories in ACTIVE or IN_PROGRESS that may be done — move to RESOLVED
+   - **Completed work**: Stories in RESOLVED that should be CLOSED and archived
+   - **Blockers**: Items stuck in the same column for too long
+3. Clean up:
+   - Move done stories: `kronos_task_move(story_id="...", column="closed")`
+   - Archive: `kronos_task_archive()`
+4. Now you know the true state of active work before adding more
+
 ### Phase 1: Review Backlog
 
 1. Show backlog sorted by priority:
@@ -69,8 +86,9 @@ Activate when:
    - Count and total estimate
    - Task completion %
    - Any items stuck (in same column for > 3 days)
-3. Show calendar vs actuals
-4. Identify blockers or reprioritization needs
+3. **Reconcile with recent work** — Check if any completed changes (commits, deploys) correspond to stories that should be moved forward
+4. Show calendar vs actuals
+5. Identify blockers or reprioritization needs
 
 ---
 

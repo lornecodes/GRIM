@@ -105,6 +105,22 @@ Board columns: **NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED**
 
 ---
 
+## Action: POST-CHANGE UPDATE
+
+Run this after completing any meaningful code change (feature, fix, refactor). This is the most important habit — **do it at the end of every change**.
+
+1. Check the board: `kronos_board_view()`
+2. Find the story that corresponds to the work just completed
+3. If found:
+   - Update tasks within the story: `kronos_task_update(item_id="task-xxx", fields={"status": "resolved"})`
+   - If all acceptance criteria met → move story: `kronos_task_move(story_id="...", column="resolved")`
+4. If no story exists for the work:
+   - Create one under the appropriate `feat-*` FDO
+   - Move directly to CLOSED (retroactive tracking is better than no tracking)
+5. Sync calendar if board changed: `kronos_calendar_sync()`
+
+---
+
 ## Quality Gates
 
 Before marking done:
@@ -112,6 +128,7 @@ Before marking done:
 - [ ] Stories moving past NEW have acceptance criteria
 - [ ] Board state is consistent (no orphan IDs)
 - [ ] Calendar synced if board changed
+- [ ] Recent completed work has corresponding stories (no untracked changes)
 
 ## Currency Check
 

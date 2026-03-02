@@ -1,7 +1,7 @@
 # Vault Sync — Claude Skill Protocol
 
 > **Skill**: `vault-sync`  
-> **Version**: 1.1
+> **Version**: 1.2
 > **Purpose**: Keep Kronos vault FDOs current as code evolves in source repositories.  
 > **When to use**: After meaningful code changes — new features, refactors, architecture shifts, experiment results. Not for trivial fixes.
 
@@ -188,7 +188,41 @@ These FDO types are most prone to embedding stale metrics:
 
 ---
 
-## Phase 5: Graph Integrity
+## Phase 5: Task Board Sync
+
+**Goal**: Keep the task board current with completed and in-progress work. This is a **regular activity** — run it at the end of every change.
+
+### Steps
+
+1. **Check the board** — See what's currently tracked:
+   ```
+   kronos_board_view()
+   ```
+2. **Match work to stories** — Does the change you just synced correspond to a story on the board?
+   - If a story's acceptance criteria are met → move to RESOLVED: `kronos_task_move(story_id="...", column="resolved")`
+   - If you started work on a story → move to IN_PROGRESS: `kronos_task_move(story_id="...", column="in_progress")`
+   - If tasks within a story were completed → update them: `kronos_task_update(item_id="task-xxx", fields={"status": "resolved"})`
+3. **Create stories for new work** — If the change introduced untracked work (new feature, new phase started):
+   - Find or create the parent `feat-*` FDO
+   - Create a story: `kronos_task_create(type="story", feat_id="feat-xxx", title="...", priority="...", estimate_days=N)`
+   - If already done, move straight to CLOSED: `kronos_task_move(story_id="...", column="closed")`
+4. **Archive completed** — If stories moved to CLOSED:
+   ```
+   kronos_task_archive()
+   ```
+5. **Sync calendar** — If board changed:
+   ```
+   kronos_calendar_sync()
+   ```
+
+### When to Skip
+
+- Pure FDO-only updates (confidence tweaks, wikilink fixes) with no code change behind them
+- Trivial vault corrections that don't represent tracked work
+
+---
+
+## Phase 6: Graph Integrity
 
 **Goal**: Ensure updates didn't break the relationship graph.
 
@@ -214,7 +248,7 @@ Get-ChildItem "kronos-vault\**\*.md" -Recurse | ForEach-Object {
 
 ---
 
-## Phase 6: Confirmation
+## Phase 7: Confirmation
 
 **Goal**: Report what changed and verify with user.
 
