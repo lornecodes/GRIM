@@ -31,7 +31,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from core.config import GrimConfig, load_config
 from core.graph import build_graph
-from core.tools.workspace import set_workspace_root
+from core.tools.context import tool_context
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -113,8 +113,8 @@ async def lifespan(app: FastAPI):
 
     _config = load_config(grim_root=grim_root)
 
-    workspace_root = grim_root.parent  # Dawn Field Institute root
-    set_workspace_root(workspace_root)
+    workspace_root = grim_root.parent  # core_workspace root
+    tool_context.configure(workspace_root=workspace_root)
 
     # Start MCP
     session, transport_cm, session_cm = await _start_mcp(_config)

@@ -44,6 +44,13 @@ class GrimConfig:
     # Skills
     skills_auto_load: bool = True
     skills_match_per_turn: bool = True
+    skills_disabled: list[str] = field(default_factory=list)
+
+    # Models — disabled tiers (e.g. ["opus"] to block expensive tier)
+    models_disabled: list[str] = field(default_factory=list)
+
+    # Agents — disabled agent IDs (e.g. ["ironclaw"] to disable sandbox)
+    agents_disabled: list[str] = field(default_factory=list)
 
     # Evolution
     evolution_dir: Path = field(default_factory=lambda: Path("local/evolution"))
@@ -163,6 +170,15 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.skills_path = Path(skills.get("path", skills.get("directory", str(cfg.skills_path))))
     cfg.skills_auto_load = skills.get("auto_load", cfg.skills_auto_load)
     cfg.skills_match_per_turn = skills.get("match_per_turn", cfg.skills_match_per_turn)
+    cfg.skills_disabled = skills.get("disabled", cfg.skills_disabled)
+
+    # Models
+    models = raw.get("models", {})
+    cfg.models_disabled = models.get("disabled", cfg.models_disabled)
+
+    # Agents
+    agents = raw.get("agents", {})
+    cfg.agents_disabled = agents.get("disabled", cfg.agents_disabled)
 
     # Agent / LLM
     agent = raw.get("agent", {})
@@ -262,6 +278,18 @@ def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimCon
     # Objectives
     if "objectives_max_active" in updates:
         raw.setdefault("objectives", {})["max_active"] = updates["objectives_max_active"]
+
+    # Models (disabled list)
+    if "models" in updates and isinstance(updates["models"], dict):
+        raw.setdefault("models", {})
+        for k, v in updates["models"].items():
+            raw["models"][k] = v
+
+    # Agents (disabled list)
+    if "agents" in updates and isinstance(updates["agents"], dict):
+        raw.setdefault("agents", {})
+        for k, v in updates["agents"].items():
+            raw["agents"][k] = v
 
     # Write back
     config_path.write_text(

@@ -8,7 +8,6 @@ It has READ-ONLY access to the staging area — it can list and read files,
 but cannot modify, accept, or reject them. That decision is made by the
 integrate node based on the audit verdict.
 """
-
 from __future__ import annotations
 
 import json
@@ -71,7 +70,6 @@ class AuditAgent(BaseAgent):
     agent_name = "audit"
 
     def __init__(self, config: GrimConfig) -> None:
-        # Audit gets: read-only staging access + read-only Kronos for context
         tools = list(STAGING_READ_TOOLS) + list(COMPANION_TOOLS)
         super().__init__(config=config, tools=tools)
 
@@ -82,14 +80,12 @@ def _parse_verdict(text: str) -> AuditVerdict:
     Looks for a JSON block at the end of the response (inside ```json fences
     or as raw JSON).
     """
-    # Try to find JSON block in fences
     import re
 
     json_match = re.search(r"```json\s*\n(.+?)\n\s*```", text, re.DOTALL)
     if json_match:
         raw = json_match.group(1)
     else:
-        # Try raw JSON at end of text
         brace_idx = text.rfind("{")
         if brace_idx >= 0:
             raw = text[brace_idx:]
@@ -120,6 +116,9 @@ def _parse_verdict(text: str) -> AuditVerdict:
 def make_audit_agent(config: GrimConfig):
     """Create an Audit Agent callable for the graph.
 
+    Custom factory — audit has staging-specific logic and verdict parsing
+    that goes beyond the standard make_callable pattern.
+
     Returns an async function that takes GrimState and returns AgentResult
     with the AuditVerdict in details["verdict"].
     """
@@ -136,13 +135,7 @@ def make_audit_agent(config: GrimConfig):
             )
 
         # Build the task from original request + staging context
-        messages = state.get("messages", [])
-        original_task = ""
-        if messages:
-            last_msg = messages[-1]
-            original_task = (
-                last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-            )
+        original_task = BaseAgent._extract_task(state)
 
         task = (
             f"Review the staged output for job '{job_id}'.\n\n"
@@ -188,3 +181,8 @@ def make_audit_agent(config: GrimConfig):
         return result
 
     return audit_agent_fn
+
+
+# Discovery attributes for AgentRegistry
+__agent_name__ = "audit"
+__make_agent__ = make_audit_agent

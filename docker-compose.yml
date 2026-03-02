@@ -138,6 +138,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-placeholder-for-proxy}
       - ANTHROPIC_BASE_URL=http://ai-bridge:8318
       - GRIM_ENV=${GRIM_ENV:-debug}
+      - GRIM_VAULT_PATH=/vault
       - KRONOS_VAULT_PATH=/vault
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0

@@ -38,3 +38,17 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["core*", "server*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Fast isolated unit tests (no external dependencies)",
+    "integration: Tests requiring Docker/MCP/live services",
+    "smoke: Quick import and wiring verification",
+    "e2e: End-to-end tests with mock or real vault",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:langchain_core.*",
+    "ignore::DeprecationWarning:pydantic.*",
+]

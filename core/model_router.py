@@ -261,6 +261,7 @@ async def route_model(
     has_compressed_context: bool = False,
     matched_write_skill: bool = False,
     fdo_count: int = 0,
+    disabled_tiers: list[str] | None = None,
 ) -> RoutingDecision:
     """Route a message to the optimal model tier.
 
@@ -280,22 +281,43 @@ async def route_model(
         has_compressed_context: Whether context has been compressed.
         matched_write_skill: Whether a write-permission skill was matched.
         fdo_count: Number of FDOs in knowledge context.
+        disabled_tiers: Tier names to block (e.g. ["opus"]). Falls back to default.
 
     Returns:
         RoutingDecision with selected tier, model, reason, and confidence.
     """
+    _disabled = set(disabled_tiers or [])
+
+    def _apply_disabled(d: RoutingDecision) -> RoutingDecision:
+        """If the chosen tier is disabled, fall back to the default tier."""
+        if d.tier in _disabled:
+            fallback = default_tier if default_tier not in _disabled else "sonnet"
+            logger.info(
+                "Model router: tier '%s' disabled, falling back to '%s'",
+                d.tier, fallback,
+            )
+            return RoutingDecision(
+                tier=fallback,
+                model=TIER_MODELS.get(fallback, TIER_MODELS["sonnet"]),
+                reason=f"{d.reason} (tier '{d.tier}' disabled)",
+                confidence=d.confidence,
+                stage=d.stage,
+            )
+        return d
+
     if not enabled:
-        return RoutingDecision(
+        return _apply_disabled(RoutingDecision(
             tier=default_tier,
             model=TIER_MODELS.get(default_tier, TIER_MODELS["sonnet"]),
             reason="routing disabled",
             confidence=1.0,
             stage=4,
-        )
+        ))
 
     # Stage 1: Explicit overrides
     decision = _check_explicit_override(message)
     if decision:
+        decision = _apply_disabled(decision)
         logger.info("Model router: %s (stage 1 — explicit override)", decision.tier)
         return decision
 
@@ -308,6 +330,7 @@ async def route_model(
         fdo_count=fdo_count,
     )
     if decision and decision.confidence >= confidence_threshold:
+        decision = _apply_disabled(decision)
         logger.info("Model router: %s (stage 2 — %s)", decision.tier, decision.reason)
         return decision
 
@@ -315,14 +338,16 @@ async def route_model(
     if classifier_enabled:
         decision = await _classify_with_llm(message)
         if decision:
+            decision = _apply_disabled(decision)
             logger.info("Model router: %s (stage 3 — LLM classifier)", decision.tier)
             return decision
 
     # Stage 4: Fallback
-    logger.info("Model router: %s (stage 4 — default fallback)", default_tier)
+    fallback_tier = default_tier if default_tier not in _disabled else "sonnet"
+    logger.info("Model router: %s (stage 4 — default fallback)", fallback_tier)
     return RoutingDecision(
-        tier=default_tier,
-        model=TIER_MODELS.get(default_tier, TIER_MODELS["sonnet"]),
+        tier=fallback_tier,
+        model=TIER_MODELS.get(fallback_tier, TIER_MODELS["sonnet"]),
         reason="default fallback",
         confidence=0.5,
         stage=4,

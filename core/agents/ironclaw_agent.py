@@ -8,7 +8,6 @@ SSRF protection, sandbox isolation, audit logging, and cost tracking.
 in the agent's tool-calling loop, but all tool EXECUTION flows through
 IronClaw's sandboxed environment.
 """
-
 from __future__ import annotations
 
 import logging
@@ -26,9 +25,21 @@ class IronClawAgent(BaseAgent):
     """Agent that executes through IronClaw's sandboxed environment."""
 
     agent_name = "ironclaw"
+    protocol_priority = [
+        "sandboxed-execution",
+        "code-execution",
+        "shell-execution",
+        "file-operations",
+    ]
+    default_protocol = (
+        "You are the IronClaw sandbox agent for secure code execution.\n"
+        "All tool calls execute through IronClaw's sandboxed environment.\n"
+        "Use your tools to run code safely with security policies enforced.\n"
+        "Always execute the task — do not say you can't do something "
+        "if you have a tool that can do it."
+    )
 
     def __init__(self, config: GrimConfig) -> None:
-        # IronClaw gets: sandboxed tools + read-only Kronos for context
         tools = IRONCLAW_TOOLS + COMPANION_TOOLS
         super().__init__(config=config, tools=tools)
 
@@ -36,56 +47,20 @@ class IronClawAgent(BaseAgent):
 def make_ironclaw_agent(config: GrimConfig):
     """Create an IronClaw Agent callable for the dispatch node.
 
-    Returns an async function that takes GrimState and returns AgentResult.
+    Custom factory — IronClaw has staging pipeline logic and audit feedback
+    handling that goes beyond the standard make_callable pattern.
     """
     agent = IronClawAgent(config)
 
     async def ironclaw_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
         """Execute a task using IronClaw's sandboxed tools."""
-        messages = state.get("messages", [])
-        skill_protocols = state.get("skill_protocols", {})
-
-        # Extract the user's request
-        task = ""
-        if messages:
-            last_msg = messages[-1]
-            task = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-
-        # Find the most relevant skill protocol
-        protocol = None
-        protocol_priority = [
-            "sandboxed-execution",
-            "code-execution",
-            "shell-execution",
-            "file-operations",
-        ]
-
-        for skill_name in protocol_priority:
-            if skill_name in skill_protocols:
-                protocol = skill_protocols[skill_name]
-                logger.info("IronClaw agent: using protocol '%s'", skill_name)
-                break
-
-        if protocol is None and skill_protocols:
-            first_key = next(iter(skill_protocols))
-            protocol = skill_protocols[first_key]
-
-        if protocol is None:
-            protocol = (
-                "You are the IronClaw sandbox agent for secure code execution.\n"
-                "All tool calls execute through IronClaw's sandboxed environment.\n"
-                "Use your tools to run code safely with security policies enforced.\n"
-                "Always execute the task — do not say you can't do something "
-                "if you have a tool that can do it."
-            )
+        task = BaseAgent._extract_task(state)
+        protocol = BaseAgent._find_protocol(
+            state, agent.protocol_priority, agent.default_protocol
+        )
 
         # Build context from knowledge + IronClaw availability
-        context = {}
-        knowledge_context = state.get("knowledge_context", [])
-        if knowledge_context:
-            context["relevant_knowledge"] = ", ".join(
-                f"{fdo.id} ({fdo.domain})" for fdo in knowledge_context[:5]
-            )
+        context = agent.build_context(state)
 
         ironclaw_available = state.get("ironclaw_available", False)
         context["ironclaw_status"] = "connected" if ironclaw_available else "disconnected"
@@ -114,3 +89,8 @@ def make_ironclaw_agent(config: GrimConfig):
         )
 
     return ironclaw_agent_fn
+
+
+# Discovery attributes for AgentRegistry
+__agent_name__ = "ironclaw"
+__make_agent__ = make_ironclaw_agent

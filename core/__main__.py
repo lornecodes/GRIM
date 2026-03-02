@@ -93,8 +93,8 @@ async def run_session(
 
     # Set workspace root for tools
     workspace_root = grim_root.parent  # core_workspace root
-    from core.tools.workspace import set_workspace_root
-    set_workspace_root(workspace_root)
+    from core.tools.context import tool_context
+    tool_context.configure(workspace_root=workspace_root)
 
     logger = logging.getLogger("grim")
     logger.info("GRIM starting — env: %s, vault: %s", config.env, config.vault_path)

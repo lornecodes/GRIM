@@ -37,11 +37,13 @@ def build_system_prompt_parts(
     personality_cache_path: Path | None = None,
     caller_id: str | None = None,
     caller_context: str | None = None,
+    working_memory: str | None = None,
+    recent_notes: list[dict] | None = None,
 ) -> PromptParts:
     """Build the system prompt returning static and dynamic parts separately.
 
     Static (cacheable): identity, field state, personality, caller context.
-    Dynamic (per-turn): knowledge context, matched skills.
+    Dynamic (per-turn): knowledge context, recent notes, matched skills.
     """
     static_sections: list[str] = []
     dynamic_sections: list[str] = []
@@ -57,7 +59,20 @@ def build_system_prompt_parts(
             "a personal AI research companion."
         )
 
-    # 2. Field state modulation
+    # 2. Working memory (positioned early for LLM attention)
+    if working_memory:
+        static_sections.append(
+            "\n---\n\n## Your Working Memory\n\n"
+            "**IMPORTANT**: You DO have persistent memory across sessions. "
+            "The content below is YOUR memory from previous conversations. "
+            "You MUST reference this when asked about recent work, sessions, "
+            "what you've been doing, or anything about your history. "
+            "NEVER say you don't have memory or session history — you do, "
+            "it's right here. Use it naturally and confidently.\n\n"
+            + working_memory
+        )
+
+    # 3. Field state modulation
     mode = field_state.expression_mode()
     static_sections.append(
         f"\n## Current Expression Mode\n\n"
@@ -67,13 +82,13 @@ def build_system_prompt_parts(
         f"Uncertainty: {field_state.uncertainty:.2f}"
     )
 
-    # 3. Identity FDO enrichment
+    # 4. Identity FDO enrichment
     if identity_fdo:
         body = identity_fdo.get("body", "")
         if body:
             static_sections.append(f"\n## Extended Identity (from Kronos)\n\n{body}")
 
-    # 3b. Personality profile (from compiled cache)
+    # 5. Personality profile (from compiled cache)
     if personality_cache_path and personality_cache_path.exists():
         cache_content = personality_cache_path.read_text(encoding="utf-8").strip()
         lines = cache_content.split("\n")
@@ -81,7 +96,7 @@ def build_system_prompt_parts(
         if body.strip():
             static_sections.append(body.strip())
 
-    # 3c. Caller context (from people FDO)
+    # 6. Caller context (from people FDO)
     if caller_context:
         static_sections.append(caller_context)
     elif caller_id and caller_id != "peter":
@@ -92,7 +107,7 @@ def build_system_prompt_parts(
 
     # --- Dynamic layers (change per turn) ---
 
-    # 4a. Active objectives (persistent across sessions)
+    # 7a. Active objectives (persistent across sessions)
     if objectives:
         active = [o for o in objectives if o.status == "active"]
         if active:
@@ -103,7 +118,7 @@ def build_system_prompt_parts(
                     obj_lines.append(f"  Last note: {obj.notes[-1]}")
             dynamic_sections.append("\n".join(obj_lines))
 
-    # 4b. Knowledge context
+    # 7b. Knowledge context
     if knowledge_context:
         ctx_lines = ["\n## Relevant Knowledge\n"]
         for fdo in knowledge_context[:10]:
@@ -114,7 +129,18 @@ def build_system_prompt_parts(
             )
         dynamic_sections.append("\n".join(ctx_lines))
 
-    # 5. Matched skills
+    # 7c. Recent notes (from rolling logs)
+    if recent_notes:
+        note_lines = ["\n## Recent Notes (last 30 days)\n"]
+        for note in recent_notes[:5]:
+            tags_str = ", ".join(note.get("tags", []))
+            note_lines.append(
+                f"- **{note.get('title', 'Untitled')}** ({note.get('date', '')[:10]})"
+                f" [{tags_str}]\n  {note.get('body', '')[:150]}"
+            )
+        dynamic_sections.append("\n".join(note_lines))
+
+    # 8. Matched skills
     if matched_skills:
         skill_lines = ["\n## Active Skills (matched this turn)\n"]
         for skill in matched_skills:
@@ -145,6 +171,7 @@ def build_system_prompt(
     personality_cache_path: Path | None = None,
     caller_id: str | None = None,
     caller_context: str | None = None,
+    working_memory: str | None = None,
 ) -> str:
     """Build the full system prompt (backward-compatible wrapper)."""
     parts = build_system_prompt_parts(
@@ -157,6 +184,7 @@ def build_system_prompt(
         personality_cache_path=personality_cache_path,
         caller_id=caller_id,
         caller_context=caller_context,
+        working_memory=working_memory,
     )
     return parts.full()
 

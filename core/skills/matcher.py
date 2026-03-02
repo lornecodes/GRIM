@@ -10,10 +10,15 @@ from core.skills.registry import Skill, SkillRegistry
 logger = logging.getLogger(__name__)
 
 
-def match_skills(message: str, registry: SkillRegistry) -> list[Skill]:
+def match_skills(
+    message: str,
+    registry: SkillRegistry,
+    disabled: list[str] | None = None,
+) -> list[Skill]:
     """Match a user message against all registered skill triggers.
 
     Returns list of matched skills, sorted by relevance (most triggers hit first).
+    Skills in the ``disabled`` list are excluded from matching.
 
     Matching strategy:
     1. Keyword match — case-insensitive substring check
@@ -22,10 +27,13 @@ def match_skills(message: str, registry: SkillRegistry) -> list[Skill]:
     if not message or not registry:
         return []
 
+    disabled_set = set(disabled) if disabled else set()
     message_lower = message.lower()
     scored: list[tuple[int, Skill]] = []
 
     for skill in registry.all():
+        if skill.name in disabled_set:
+            continue
         score = _score_skill(message_lower, skill)
         if score > 0:
             scored.append((score, skill))

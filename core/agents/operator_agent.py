@@ -1,22 +1,10 @@
-"""Operator Agent — git, shell, and infrastructure operations.
-
-The Operator handles:
-- Git operations (status, commit, push)
-- Shell command execution
-- Vault sync operations
-- Zenodo uploads and DOI management
-- Infrastructure tasks
-
-It follows skill protocols from git-operations, shell-execution, vault-sync.
-"""
-
+"""Operator Agent — git, shell, and infrastructure operations."""
 from __future__ import annotations
 
 import logging
 
 from core.agents.base import BaseAgent
 from core.config import GrimConfig
-from core.state import AgentResult, GrimState
 from core.tools.kronos_read import COMPANION_TOOLS
 from core.tools.workspace import GIT_TOOLS, SHELL_TOOLS, FILE_TOOLS
 
@@ -27,73 +15,30 @@ class OperatorAgent(BaseAgent):
     """Agent for operations, git, shell, and infrastructure."""
 
     agent_name = "operator"
+    protocol_priority = [
+        "git-operations",
+        "shell-execution",
+        "vault-sync",
+    ]
+    default_protocol = (
+        "You are an operations agent with full terminal/bash access.\n"
+        "Use run_shell to execute any command the user needs: "
+        "ping, curl, python, git, docker, system utilities, etc.\n"
+        "Use git tools for git operations. Use file tools for reading/writing files.\n"
+        "Always execute the task — do not say you can't do something "
+        "if you have a tool that can do it."
+    )
 
     def __init__(self, config: GrimConfig) -> None:
-        # Operator gets: git + shell + file reading + Kronos read (for context)
         tools = GIT_TOOLS + SHELL_TOOLS + FILE_TOOLS + list(COMPANION_TOOLS)
         super().__init__(config=config, tools=tools)
 
 
 def make_operator_agent(config: GrimConfig):
-    """Create an Operator Agent callable for the dispatch node.
+    """Create an Operator Agent callable for the dispatch node."""
+    return OperatorAgent.make_callable(config)
 
-    Returns an async function that takes GrimState and returns AgentResult.
-    """
-    agent = OperatorAgent(config)
 
-    async def operator_agent_fn(state: GrimState, *, event_queue=None) -> AgentResult:
-        """Execute an operations task following skill protocols."""
-        messages = state.get("messages", [])
-        skill_protocols = state.get("skill_protocols", {})
-
-        # Extract the user's request
-        task = ""
-        if messages:
-            last_msg = messages[-1]
-            task = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-
-        # Find the most relevant skill protocol
-        protocol = None
-        protocol_priority = [
-            "git-operations",
-            "shell-execution",
-            "vault-sync",
-        ]
-
-        for skill_name in protocol_priority:
-            if skill_name in skill_protocols:
-                protocol = skill_protocols[skill_name]
-                logger.info("Operator agent: using protocol '%s'", skill_name)
-                break
-
-        if protocol is None and skill_protocols:
-            first_key = next(iter(skill_protocols))
-            protocol = skill_protocols[first_key]
-
-        # Always provide a base protocol — never leave the agent without context
-        if protocol is None:
-            protocol = (
-                "You are an operations agent with full terminal/bash access.\n"
-                "Use run_shell to execute any command the user needs: "
-                "ping, curl, python, git, docker, system utilities, etc.\n"
-                "Use git tools for git operations. Use file tools for reading/writing files.\n"
-                "Always execute the task — do not say you can't do something "
-                "if you have a tool that can do it."
-            )
-
-        # Context
-        context = {}
-        knowledge_context = state.get("knowledge_context", [])
-        if knowledge_context:
-            context["relevant_knowledge"] = ", ".join(
-                f"{fdo.id}" for fdo in knowledge_context[:5]
-            )
-
-        return await agent.execute(
-            task=task,
-            skill_protocol=protocol,
-            context=context,
-            event_queue=event_queue,
-        )
-
-    return operator_agent_fn
+# Discovery attributes for AgentRegistry
+__agent_name__ = "operate"
+__make_agent__ = make_operator_agent

@@ -29,6 +29,8 @@ class BaseAgent:
     """
 
     agent_name: str = "base"
+    protocol_priority: list[str] = []
+    default_protocol: str = ""
 
     def __init__(
         self,
@@ -229,3 +231,73 @@ class BaseAgent:
             content=f"Unknown tool: {tool_name}",
             tool_call_id=tool_call["id"],
         )
+
+    @staticmethod
+    def _extract_task(state: dict) -> str:
+        """Extract the user's request from state messages."""
+        messages = state.get("messages", [])
+        if not messages:
+            return ""
+        last_msg = messages[-1]
+        return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+    @staticmethod
+    def _find_protocol(state: dict, priority: list[str], default: str) -> str:
+        """Find the most relevant skill protocol from state.
+
+        Args:
+            state: GrimState dict.
+            priority: Ordered list of skill names to check.
+            default: Fallback protocol text if no skill matches.
+        """
+        skill_protocols = state.get("skill_protocols", {})
+
+        for skill_name in priority:
+            if skill_name in skill_protocols:
+                return skill_protocols[skill_name]
+
+        # Use first available protocol as fallback
+        if skill_protocols:
+            first_key = next(iter(skill_protocols))
+            return skill_protocols[first_key]
+
+        return default
+
+    def build_context(self, state: dict) -> dict:
+        """Build context dict from state. Override in subclasses for richer context.
+
+        Default: includes brief FDO references from knowledge_context.
+        """
+        context = {}
+        knowledge_context = state.get("knowledge_context", [])
+        if knowledge_context:
+            context["relevant_fdos"] = ", ".join(
+                f"{fdo.id} ({fdo.domain})" for fdo in knowledge_context[:5]
+            )
+        return context
+
+    @classmethod
+    def make_callable(cls, config):
+        """Create an agent callable for the dispatch node.
+
+        This is the generic factory that replaces per-agent make_*_agent()
+        functions. Creates the agent instance and returns an async function
+        matching the dispatch signature.
+
+        Returns:
+            Async function: (GrimState, *, event_queue=None) -> AgentResult
+        """
+        agent = cls(config)
+
+        async def agent_fn(state, *, event_queue=None):
+            task = cls._extract_task(state)
+            protocol = cls._find_protocol(state, agent.protocol_priority, agent.default_protocol)
+            context = agent.build_context(state)
+            return await agent.execute(
+                task=task,
+                skill_protocol=protocol,
+                context=context,
+                event_queue=event_queue,
+            )
+
+        return agent_fn
