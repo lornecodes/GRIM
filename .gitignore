@@ -46,3 +46,4 @@ ui/node_modules/
 ui/.next/
 ui/out/
 ui/.env*.local
+ui/tsconfig.tsbuildinfo
