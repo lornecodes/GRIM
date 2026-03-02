@@ -170,7 +170,7 @@ class GrimState(TypedDict, total=False):
     # Routing decision (within research graph)
     mode: Literal["companion", "delegate"]
     delegation_type: Optional[
-        Literal["memory", "code", "research", "operate", "ironclaw", "audit"]
+        Literal["memory", "code", "research", "operate", "ironclaw", "audit", "codebase"]
     ]
     selected_model: Optional[str]  # model ID chosen by model router
 

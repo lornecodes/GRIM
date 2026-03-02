@@ -71,6 +71,10 @@ class GrimConfig:
     routing_classifier_enabled: bool = False  # enable after calibration
     routing_confidence_threshold: float = 0.6
 
+    # Codebase — workspace-level repo awareness
+    workspace_root: Path = field(default_factory=lambda: Path(".."))
+    repos_manifest: str = "repos.yaml"  # relative to workspace_root
+
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
 
@@ -135,6 +139,7 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.checkpoint_path = _resolve(cfg.checkpoint_path, grim_root)
     cfg.evolution_dir = _resolve(cfg.evolution_dir, grim_root)
     cfg.objectives_path = _resolve(cfg.objectives_path, grim_root)
+    cfg.workspace_root = _resolve(cfg.workspace_root, grim_root)
 
     # Redis URL
     redis_override = os.getenv("GRIM_REDIS_URL", os.getenv("KRONOS_REDIS_URL", ""))
@@ -222,6 +227,13 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.context_max_tokens = ctx["max_tokens"]
     if "keep_recent" in ctx:
         cfg.context_keep_recent = ctx["keep_recent"]
+
+    # Codebase
+    codebase = raw.get("codebase", {})
+    if "workspace_root" in codebase:
+        cfg.workspace_root = Path(codebase["workspace_root"])
+    if "repos_manifest" in codebase:
+        cfg.repos_manifest = codebase["repos_manifest"]
 
     # Objectives
     objectives = raw.get("objectives", {})

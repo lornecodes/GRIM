@@ -58,6 +58,8 @@ def _skill_ctx_to_delegation(skill_ctx) -> str | None:
         return "ironclaw"
     if name in ("ironclaw-review",):
         return "audit"
+    if name in ("repo-navigate", "fdo-source-validate", "source-navigate"):
+        return "codebase"
 
     perms = skill_ctx.permissions
     if any("write" in p for p in perms):

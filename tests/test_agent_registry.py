@@ -57,9 +57,9 @@ class TestAgentDiscovery:
     """Test auto-discovery from core/agents/ directory."""
 
     def test_discovers_all_agents(self, grim_config):
-        """Should discover all 6 agents (v0.0.6: planning is graph-level, not dispatched)."""
+        """Should discover all 7 agents (v0.0.6 Phase 3: +codebase)."""
         reg = AgentRegistry.discover(grim_config)
-        expected = {"memory", "code", "research", "operate", "audit", "ironclaw"}
+        expected = {"memory", "code", "research", "operate", "audit", "ironclaw", "codebase"}
         assert set(reg.names()) == expected
 
     def test_default_config_disables_code(self):
@@ -89,7 +89,7 @@ class TestAgentDiscovery:
 
     def test_all_disabled(self, grim_config):
         """If all agents are disabled, registry should be empty."""
-        all_names = ["memory", "code", "research", "operate", "audit", "ironclaw", "planning"]
+        all_names = ["memory", "code", "research", "operate", "audit", "ironclaw", "planning", "codebase"]
         reg = AgentRegistry.discover(grim_config, disabled=all_names)
         assert len(reg) == 0
 

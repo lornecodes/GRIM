@@ -98,8 +98,8 @@ class TestMatchKeywords:
             assert len(keywords) > 0, f"No keywords for {dtype}"
 
     def test_all_delegation_types(self):
-        """Should have exactly 5 delegation types (v0.0.6: planning moved to graph-level)."""
-        expected = {"memory", "research", "ironclaw", "operate", "audit"}
+        """Should have exactly 6 delegation types (v0.0.6: planning graph-level, codebase added Phase 3)."""
+        expected = {"memory", "research", "ironclaw", "operate", "audit", "codebase"}
         assert set(DELEGATION_KEYWORDS.keys()) == expected
 
     def test_no_code_delegation_type(self):
@@ -303,7 +303,7 @@ class TestContinuityForPlanning:
 
 
 class TestDelegationCompleteness:
-    """Verify all 5 delegation types are well-covered by keywords."""
+    """Verify all 6 delegation types are well-covered by keywords."""
 
     def test_all_types_have_multiple_keywords(self):
         """Each delegation type should have at least 3 keywords."""
@@ -331,3 +331,78 @@ class TestDelegationCompleteness:
         assert "remember" in kws
         assert "vault" in kws
         assert "story" in kws  # task management writes
+
+    def test_codebase_in_delegation_keywords(self):
+        """Phase 3: codebase delegation type exists."""
+        assert "codebase" in DELEGATION_KEYWORDS
+
+    def test_codebase_has_sufficient_keywords(self):
+        """Codebase should have robust keyword coverage."""
+        kws = DELEGATION_KEYWORDS["codebase"]
+        assert len(kws) >= 10, f"Codebase only has {len(kws)} keywords"
+
+
+class TestCodebaseKeywordRouting:
+    """Test codebase delegation keyword matching (Phase 3)."""
+
+    @pytest.mark.parametrize("msg,expected", [
+        ("look at the code for auth", "codebase"),
+        ("check the code in fracton", "codebase"),
+        ("show me the code for PAC", "codebase"),
+        ("what's the repo structure of GRIM", "codebase"),
+        ("how does this module work in reality-engine", "codebase"),
+        ("explain the architecture of fracton", "codebase"),
+        # "where is the code for" collides with ironclaw's "where " keyword
+        # The router prioritizes ironclaw (dict order), which is correct for system queries
+        ("find the source code for the router", "codebase"),
+        ("find the source for base agent", "codebase"),
+        ("navigate the repo structure", "codebase"),
+        ("browse the code in dawn-field-theory", "codebase"),
+        ("what's the code architecture of fracton", "codebase"),
+        ("what changed in GRIM recently", "codebase"),
+        ("recent changes to reality-engine", "codebase"),
+        ("trace through the dispatch flow", "codebase"),
+        ("walk me through the code for routing", "codebase"),
+        ("what does the code do in graph.py", "codebase"),
+        ("how does this work in code", "codebase"),
+        ("check the meta.yaml for experiments", "codebase"),
+        ("show the directory structure", "codebase"),
+        ("index the repo for fracton", "codebase"),
+        ("deep index dawn-field-theory", "codebase"),
+    ])
+    def test_codebase_keyword_matches(self, msg, expected):
+        assert match_keywords(msg.lower()) == expected
+
+    def test_codebase_no_overlap_with_ironclaw(self):
+        """Codebase keywords should not overlap with IronClaw."""
+        cb_kws = set(DELEGATION_KEYWORDS["codebase"])
+        ic_kws = set(DELEGATION_KEYWORDS["ironclaw"])
+        overlap = cb_kws & ic_kws
+        assert not overlap, f"Overlap between codebase and ironclaw: {overlap}"
+
+    def test_codebase_no_overlap_with_operate(self):
+        """Codebase keywords should not overlap with operate."""
+        cb_kws = set(DELEGATION_KEYWORDS["codebase"])
+        op_kws = set(DELEGATION_KEYWORDS["operate"])
+        overlap = cb_kws & op_kws
+        assert not overlap, f"Overlap between codebase and operate: {overlap}"
+
+    def test_boundary_read_file_goes_operate(self):
+        """'read the file' should go to operate, not codebase."""
+        assert match_keywords("read the file contents") == "operate"
+
+    def test_boundary_write_code_goes_ironclaw(self):
+        """'write code' should go to ironclaw, not codebase."""
+        assert match_keywords("write code for the parser") == "ironclaw"
+
+    def test_boundary_implement_goes_ironclaw(self):
+        """'implement' should go to ironclaw, not codebase."""
+        assert match_keywords("implement the new feature") == "ironclaw"
+
+    def test_source_code_goes_codebase(self):
+        """'source code' should go to codebase."""
+        assert match_keywords("show me the source code") == "codebase"
+
+    def test_codebase_string_routes_correctly(self):
+        """The word 'codebase' itself should route to codebase."""
+        assert match_keywords("tell me about the codebase") == "codebase"

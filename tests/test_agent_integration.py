@@ -384,7 +384,7 @@ class TestDispatchWiring:
     def _make_agents(self):
         """Create mock agent callables."""
         agents = {}
-        for name in ["memory", "code", "research", "operate", "ironclaw", "planning"]:
+        for name in ["memory", "code", "research", "operate", "ironclaw", "planning", "codebase"]:
             mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
             mock_fn.__name__ = f"{name}_agent_fn"
             agents[name] = mock_fn
@@ -445,6 +445,16 @@ class TestDispatchWiring:
 
         result = await dispatch_fn({"delegation_type": "ironclaw"})
         agents["ironclaw"].assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_codebase(self):
+        from core.nodes.dispatch import make_dispatch_node
+        agents = self._make_agents()
+        dispatch_fn = make_dispatch_node(agents)
+
+        result = await dispatch_fn({"delegation_type": "codebase"})
+        agents["codebase"].assert_called_once()
+        assert result["agent_result"].agent == "codebase"
 
     @pytest.mark.asyncio
     async def test_dispatch_unknown_type(self):

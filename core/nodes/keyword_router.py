@@ -102,6 +102,18 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "staging review", "review the output",
         "audit the files", "review execution output",
     ],
+    "codebase": [
+        "look at the code", "check the code", "show me the code",
+        "repo structure", "codebase", "code structure",
+        "how does this module work", "explain the architecture",
+        "where is the code for", "find the source", "source code",
+        "navigate the repo", "browse the code", "code architecture",
+        "what changed in", "recent changes to",
+        "trace through", "walk me through the code",
+        "what does the code do", "how does this work in code",
+        "meta.yaml", "directory structure",
+        "index the repo", "deep index",
+    ],
 }
 
 # Action-intent detection — catch action requests that miss keyword lists
