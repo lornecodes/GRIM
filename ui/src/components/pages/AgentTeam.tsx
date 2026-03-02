@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { IconAgents } from "@/components/icons/NavIcons";
 import { useGrimStore } from "@/store";
 import { useActiveAgents, type ActiveAgent } from "@/hooks/useActiveAgents";
 import type { TraceEvent } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Types (engine status only — agent data comes from traces now)
+// Types
 // ---------------------------------------------------------------------------
 
 interface EngineStatus {
@@ -20,6 +20,33 @@ interface EngineStatus {
     active_sessions: number;
     uptime_seconds: number;
   };
+}
+
+interface AgentRosterEntry {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  tools: string[];
+  color: string;
+  toggleable: boolean;
+  enabled: boolean;
+}
+
+interface IronClawRole {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  color: string;
+}
+
+interface IronClawAgentsData {
+  enabled: boolean;
+  roles: IronClawRole[];
+  coordination_patterns?: string[];
+  active_sessions: number;
+  max_concurrent_sessions: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +67,9 @@ const catColors: Record<string, string> = {
 
 export function AgentTeam() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
+  const [roster, setRoster] = useState<AgentRosterEntry[]>([]);
+  const [togglingAgent, setTogglingAgent] = useState<string | null>(null);
+  const [clawRoles, setClawRoles] = useState<IronClawAgentsData | null>(null);
   const ironclawStatus = useGrimStore((s) => s.ironclawStatus);
   const setIronclawStatus = useGrimStore((s) => s.setIronclawStatus);
   const isStreaming = useGrimStore((s) => s.isStreaming);
@@ -49,6 +79,30 @@ export function AgentTeam() {
   const clawAgents = activeAgents.filter((a) => a.tier === "ironclaw");
 
   const apiBase = process.env.NEXT_PUBLIC_GRIM_API || "";
+
+  const fetchRoster = useCallback(async () => {
+    try {
+      const resp = await fetch(`${apiBase}/api/agents`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setRoster(data.agents || []);
+      }
+    } catch { /* ignore */ }
+  }, [apiBase]);
+
+  const toggleAgent = useCallback(async (id: string) => {
+    setTogglingAgent(id);
+    try {
+      const resp = await fetch(`${apiBase}/api/agents/${id}/toggle`, { method: "POST" });
+      if (resp.ok) {
+        const data = await resp.json();
+        setRoster((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, enabled: data.enabled } : a))
+        );
+      }
+    } catch { /* ignore */ }
+    setTogglingAgent(null);
+  }, [apiBase]);
 
   useEffect(() => {
     async function fetchStatus() {
@@ -64,10 +118,19 @@ export function AgentTeam() {
       }
     }
 
+    async function fetchClawAgents() {
+      try {
+        const resp = await fetch(`${apiBase}/api/ironclaw/agents`);
+        if (resp.ok) setClawRoles(await resp.json());
+      } catch { /* ignore */ }
+    }
+
     fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
+    fetchRoster();
+    fetchClawAgents();
+    const interval = setInterval(() => { fetchStatus(); fetchClawAgents(); }, 30000);
     return () => clearInterval(interval);
-  }, [apiBase, setIronclawStatus]);
+  }, [apiBase, setIronclawStatus, fetchRoster]);
 
   const connected = ironclawStatus === "connected";
 
@@ -134,6 +197,73 @@ export function AgentTeam() {
         <div className="text-center py-12 text-sm text-grim-text-dim">
           No agents active yet. Start a conversation to see agent activity.
         </div>
+      )}
+
+      {/* Agent Roster */}
+      {roster.length > 0 && (
+        <section>
+          <h3 className="text-sm font-semibold text-grim-text mb-3">
+            Roster
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {roster.map((agent) => (
+              <RosterCard
+                key={agent.id}
+                agent={agent}
+                toggling={togglingAgent === agent.id}
+                onToggle={() => toggleAgent(agent.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* IronClaw Engine Agents */}
+      {clawRoles && clawRoles.roles.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-grim-text">
+              IronClaw Engine Agents
+            </h3>
+            <div className="flex items-center gap-1.5 ml-auto">
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  clawRoles.enabled ? "bg-green-400" : "bg-red-400"
+                }`}
+              />
+              <span className="text-xs text-grim-text-dim">
+                {clawRoles.enabled ? "Engine Online" : "Engine Offline"}
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {clawRoles.roles.map((role) => (
+              <IronClawRoleCard
+                key={role.id}
+                role={role}
+                online={clawRoles.enabled}
+              />
+            ))}
+          </div>
+          {clawRoles.coordination_patterns &&
+            clawRoles.coordination_patterns.length > 0 && (
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-[9px] text-grim-text-dim uppercase tracking-wider">
+                  Coordination
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {clawRoles.coordination_patterns.map((p) => (
+                    <span
+                      key={p}
+                      className="text-[9px] px-1.5 py-0.5 rounded bg-grim-border/30 text-grim-text-dim"
+                    >
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+        </section>
       )}
 
       {/* Engine Status Footer */}
@@ -256,6 +386,150 @@ function TraceLogLine({ trace }: { trace: TraceEvent }) {
       >
         {trace.text}
       </span>
+    </div>
+  );
+}
+
+function RosterCard({
+  agent,
+  toggling,
+  onToggle,
+}: {
+  agent: AgentRosterEntry;
+  toggling: boolean;
+  onToggle: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      className={`bg-grim-surface border rounded-xl p-3 transition-all ${
+        agent.enabled
+          ? "border-grim-border hover:border-grim-accent/40"
+          : "border-grim-border/50 opacity-60"
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        {/* Color dot */}
+        <div
+          className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0"
+          style={{ backgroundColor: agent.color }}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-grim-text">
+              {agent.name}
+            </span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-grim-border/30 text-grim-text-dim">
+              {agent.role}
+            </span>
+          </div>
+          <p className="text-[10px] text-grim-text-dim mt-0.5 line-clamp-2">
+            {agent.description}
+          </p>
+        </div>
+        {agent.toggleable ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            disabled={toggling}
+            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+              agent.enabled ? "bg-grim-accent" : "bg-grim-border"
+            } ${toggling ? "opacity-50" : "cursor-pointer"}`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                agent.enabled ? "translate-x-4" : ""
+              }`}
+            />
+          </button>
+        ) : (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-grim-success/15 text-grim-success flex-shrink-0">
+            always on
+          </span>
+        )}
+      </div>
+
+      {/* Tools (collapsible) */}
+      {agent.tools.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-[9px] text-grim-text-dim hover:text-grim-text transition-colors"
+          >
+            {expanded ? "▾" : "▸"} {agent.tools.length} tools
+          </button>
+          {expanded && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {agent.tools.map((t) => (
+                <span
+                  key={t}
+                  className="text-[9px] px-1.5 py-0.5 rounded bg-grim-border/30 text-grim-text-dim font-mono"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IronClawRoleCard({
+  role,
+  online,
+}: {
+  role: IronClawRole;
+  online: boolean;
+}) {
+  return (
+    <div
+      className={`bg-grim-surface border rounded-xl p-3 transition-all ${
+        online
+          ? "border-grim-border hover:border-orange-400/40"
+          : "border-grim-border/50 opacity-50"
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <div
+          className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0"
+          style={{ backgroundColor: online ? role.color : "#6b7280" }}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-grim-text">
+              {role.name}
+            </span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-400/15 text-orange-400 font-mono">
+              claw
+            </span>
+          </div>
+          <p className="text-[10px] text-grim-text-dim mt-0.5 line-clamp-2">
+            {role.description}
+          </p>
+        </div>
+        {!online && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-400/15 text-red-400 flex-shrink-0">
+            offline
+          </span>
+        )}
+      </div>
+      {role.capabilities.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {role.capabilities.map((c) => (
+            <span
+              key={c}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-grim-border/30 text-grim-text-dim font-mono"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
