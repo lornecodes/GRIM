@@ -268,6 +268,21 @@ class IronClawBridge:
                 "error": str(exc),
             }
 
+    # ── Security scanning ──
+
+    async def scan_skill(self, code: str, file_name: str = "code.py") -> dict:
+        """Scan code for security vulnerabilities via IronClaw."""
+        try:
+            resp = await self._client.post(
+                "/v1/skills/scan",
+                json={"source": code, "file_name": file_name},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            logger.warning("IronClaw skill scan failed: %s", exc)
+            return {"error": str(exc), "findings": [], "risk_score": -1}
+
     # ── Metrics ──
 
     async def get_metrics(self) -> EngineMetrics:

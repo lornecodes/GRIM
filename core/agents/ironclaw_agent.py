@@ -33,8 +33,15 @@ class IronClawAgent(BaseAgent):
     ]
     default_protocol = (
         "You are the IronClaw sandbox agent for secure code execution.\n"
-        "All tool calls execute through IronClaw's sandboxed environment.\n"
-        "Use your tools to run code safely with security policies enforced.\n"
+        "All tool calls execute through IronClaw's sandboxed environment.\n\n"
+        "You have two modes of operation:\n"
+        "1. **Direct tools**: claw_read_file, claw_write_file, claw_shell, "
+        "claw_list_dir, claw_http_request — execute sandboxed operations directly.\n"
+        "2. **Agent dispatch**: claw_list_agents to see available engine agents "
+        "(Coder, Researcher, Planner, Tester, Security Auditor, Reviewer), then "
+        "claw_dispatch_workflow to orchestrate multi-agent tasks with coordination "
+        "patterns (sequential, parallel, debate, hierarchical, pipeline).\n"
+        "3. **Security scanning**: claw_scan_skill to scan code for vulnerabilities.\n\n"
         "Always execute the task — do not say you can't do something "
         "if you have a tool that can do it."
     )
@@ -66,6 +73,15 @@ def make_ironclaw_agent(config: GrimConfig):
         context["ironclaw_status"] = "connected" if ironclaw_available else "disconnected"
         context["sandbox"] = "All tool calls execute through IronClaw's sandboxed environment with security policies."
 
+        # Emit IronClaw dispatch start
+        agent._emit(event_queue, {
+            "cat": "claw",
+            "node": "ironclaw",
+            "action": "start",
+            "text": f"IronClaw dispatch — engine {'connected' if ironclaw_available else 'DISCONNECTED'}",
+            "sandboxed": True,
+        })
+
         # Staging pipeline (Phase 4): direct output to shared staging volume
         job_id = state.get("staging_job_id")
         if job_id:
@@ -81,12 +97,23 @@ def make_ironclaw_agent(config: GrimConfig):
         if audit_feedback:
             task = f"{task}\n\n{audit_feedback}"
 
-        return await agent.execute(
+        result = await agent.execute(
             task=task,
             skill_protocol=protocol,
             context=context,
             event_queue=event_queue,
         )
+
+        # Emit IronClaw dispatch end
+        agent._emit(event_queue, {
+            "cat": "claw",
+            "node": "ironclaw",
+            "action": "end",
+            "text": f"IronClaw {'completed' if result.success else 'failed'}",
+            "sandboxed": True,
+        })
+
+        return result
 
     return ironclaw_agent_fn
 

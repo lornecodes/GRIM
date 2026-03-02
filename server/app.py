@@ -782,6 +782,31 @@ async def ironclaw_workflow(req: WorkflowRequest):
         )
 
 
+class ScanRequest(BaseModel):
+    code: str
+    file_name: str = "code.py"
+
+
+@app.post("/api/ironclaw/scan")
+async def ironclaw_scan(req: ScanRequest):
+    """Scan code for security vulnerabilities via IronClaw engine."""
+    if not _ironclaw_bridge:
+        return JSONResponse(
+            {"error": "IronClaw bridge not initialized"},
+            status_code=503,
+        )
+
+    try:
+        result = await _ironclaw_bridge.scan_skill(req.code, req.file_name)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.error("IronClaw scan failed: %s", exc)
+        return JSONResponse(
+            {"error": str(exc)},
+            status_code=500,
+        )
+
+
 @app.get("/api/sessions")
 async def list_sessions():
     """List unique session thread IDs from the checkpointer."""

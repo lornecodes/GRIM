@@ -175,6 +175,122 @@ async def claw_http_request(
 
 
 # ---------------------------------------------------------------------------
+# Agent dispatch + security scanning tools
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def claw_list_agents() -> str:
+    """List IronClaw engine agent roles and their capabilities.
+
+    Returns the roster of available agents (Coder, Researcher, Planner,
+    Tester, Security Auditor, Reviewer) and coordination patterns.
+    """
+    bridge = _get_bridge()
+    data = await bridge.list_agents()
+    if not data.get("roles"):
+        return "[No IronClaw agents available]"
+
+    lines = ["## IronClaw Engine Agents\n"]
+    for role in data.get("roles", []):
+        caps = ", ".join(role.get("capabilities", []))
+        delegate = " (can delegate)" if role.get("can_delegate") else ""
+        lines.append(
+            f"- **{role.get('name', role.get('id'))}** [{caps}]{delegate}: "
+            f"{role.get('description', '')}"
+        )
+
+    lines.append(f"\nSessions: {data.get('active_sessions', 0)}/{data.get('max_concurrent_sessions', 0)}")
+    lines.append("\nCoordination patterns: sequential, parallel, debate, hierarchical, pipeline")
+    return "\n".join(lines)
+
+
+@tool
+async def claw_dispatch_workflow(
+    task: str,
+    agents: str,
+    pattern: str = "sequential",
+) -> str:
+    """Dispatch a task to IronClaw engine agents using a coordination pattern.
+
+    Orchestrates multiple IronClaw agents to collaborate on a task.
+
+    Args:
+        task: The task description for the agent team.
+        agents: Comma-separated agent role IDs (e.g. "coder,tester,reviewer").
+        pattern: Coordination pattern: sequential, parallel, debate, hierarchical, pipeline.
+    """
+    bridge = _get_bridge()
+    agent_list = [a.strip() for a in agents.split(",")]
+
+    pattern_config: dict = {"type": pattern}
+    if pattern == "sequential":
+        pattern_config["agent_order"] = agent_list
+    elif pattern == "hierarchical" and len(agent_list) > 1:
+        pattern_config["lead"] = agent_list[0]
+        pattern_config["specialists"] = agent_list[1:]
+    else:
+        pattern_config["agents"] = agent_list
+
+    result = await bridge.run_workflow(task, pattern_config)
+
+    if result.get("status") == "failed":
+        return f"[WORKFLOW FAILED] {result.get('error', 'Unknown error')}"
+
+    lines = [
+        "## Workflow Complete",
+        f"- **Session**: {result.get('session_id', 'n/a')}",
+        f"- **Status**: {result.get('status')}",
+        f"- **Duration**: {result.get('duration_ms', 0)}ms",
+        f"- **Agents**: {', '.join(result.get('agents_executed', []))}",
+    ]
+
+    for agent_id, agent_result in result.get("results", {}).items():
+        lines.append(f"\n### {agent_id}")
+        lines.append(str(agent_result)[:1000])
+
+    return "\n".join(lines)
+
+
+@tool
+async def claw_scan_skill(code: str, file_name: str = "code.py") -> str:
+    """Scan code for security vulnerabilities using IronClaw's security scanner.
+
+    Checks for OWASP Top 10, CWE patterns, dangerous functions, credential
+    exposure, and other security issues.
+
+    Args:
+        code: The source code to scan.
+        file_name: Filename for context (default: code.py).
+    """
+    bridge = _get_bridge()
+    result = await bridge.scan_skill(code, file_name)
+
+    if result.get("error"):
+        return f"[SCAN FAILED] {result['error']}"
+
+    lines = [
+        "## Security Scan Results",
+        f"- **File**: {result.get('file_name', file_name)}",
+        f"- **Findings**: {result.get('findings_count', 0)}",
+        f"- **Risk Score**: {result.get('risk_score', 0)}/100",
+        f"- **Recommendation**: {result.get('recommendation', 'N/A')}",
+    ]
+
+    for finding in result.get("findings", []):
+        lines.append(
+            f"\n**{finding.get('severity', 'UNKNOWN')}** — {finding.get('description', '')}\n"
+            f"  Line {finding.get('line_number', '?')}: `{finding.get('matched_text', '')}`\n"
+            f"  CWE: {finding.get('cwe', 'N/A')}"
+        )
+
+    if not result.get("findings"):
+        lines.append("\nNo security issues found.")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Tool lists for agent registration
 # ---------------------------------------------------------------------------
 
@@ -185,6 +301,9 @@ IRONCLAW_TOOLS = [
     claw_shell,
     claw_list_dir,
     claw_http_request,
+    claw_list_agents,
+    claw_dispatch_workflow,
+    claw_scan_skill,
 ]
 
 # Read-only subset (for safer operations)
@@ -193,7 +312,15 @@ IRONCLAW_READ_TOOLS = [
     claw_list_dir,
 ]
 
+# Agent dispatch + security scanning tools
+IRONCLAW_DISPATCH_TOOLS = [
+    claw_list_agents,
+    claw_dispatch_workflow,
+    claw_scan_skill,
+]
+
 # Register with tool registry
 from core.tools.registry import tool_registry
 tool_registry.register_group("ironclaw", IRONCLAW_TOOLS)
 tool_registry.register_group("ironclaw_read", IRONCLAW_READ_TOOLS)
+tool_registry.register_group("ironclaw_dispatch", IRONCLAW_DISPATCH_TOOLS)

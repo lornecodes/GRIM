@@ -16,6 +16,7 @@ from typing import Any
 
 from core.config import GrimConfig
 from core.objectives import load_objectives
+from core.tools.context import tool_context
 from core.personality.cache import compile_personality_cache, is_cache_stale
 from core.personality.prompt_builder import build_system_prompt, load_field_state
 from core.personality.user_cache import (
@@ -125,6 +126,7 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             "caller_id": caller_id,
             "caller_context": caller_context,
             "objectives": objectives,
+            "ironclaw_available": tool_context.ironclaw_available,
         }
 
     return identity_node
