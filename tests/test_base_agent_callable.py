@@ -175,6 +175,110 @@ class TestProtocolPriorityOnSubclass:
         assert BaseAgent.default_protocol == ""
 
 
+class TestMetadata:
+    """Test BaseAgent.metadata() and display attributes."""
+
+    def test_base_agent_defaults(self):
+        """BaseAgent has sensible metadata defaults."""
+        assert BaseAgent.agent_display_name == ""
+        assert BaseAgent.agent_role == ""
+        assert BaseAgent.agent_color == "#6b7280"
+        assert BaseAgent.agent_tier == "grim"
+        assert BaseAgent.agent_toggleable is False
+
+    def test_metadata_returns_dict(self):
+        """metadata() returns a dict with all expected keys."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.agent_display_name = "Test Agent"
+        agent.agent_role = "testing"
+        agent.agent_description = "A test agent"
+        agent.agent_color = "#ff0000"
+        agent.agent_tier = "grim"
+        agent.agent_toggleable = False
+        agent.tools = []
+
+        meta = agent.metadata()
+        assert meta["id"] == "test"
+        assert meta["name"] == "Test Agent"
+        assert meta["role"] == "testing"
+        assert meta["description"] == "A test agent"
+        assert meta["tools"] == []
+        assert meta["color"] == "#ff0000"
+        assert meta["tier"] == "grim"
+        assert meta["toggleable"] is False
+
+    def test_metadata_uses_display_name_fallback(self):
+        """If agent_display_name is empty, title-case agent_name."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "memory"
+        agent.agent_display_name = ""
+        agent.agent_role = ""
+        agent.agent_description = ""
+        agent.default_protocol = "You are a memory agent.\nMore stuff."
+        agent.agent_color = "#6b7280"
+        agent.agent_tier = "grim"
+        agent.agent_toggleable = False
+        agent.tools = []
+
+        meta = agent.metadata()
+        assert meta["name"] == "Memory"
+        assert meta["description"] == "You are a memory agent."
+
+    def test_metadata_includes_tool_names(self):
+        """metadata() includes actual tool names from the tool list."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.agent_display_name = ""
+        agent.agent_role = ""
+        agent.agent_description = "desc"
+        agent.default_protocol = ""
+        agent.agent_color = "#000"
+        agent.agent_tier = "grim"
+        agent.agent_toggleable = False
+
+        mock_tool = MagicMock()
+        mock_tool.name = "kronos_search"
+        agent.tools = [mock_tool]
+
+        meta = agent.metadata()
+        assert meta["tools"] == ["kronos_search"]
+
+    @pytest.mark.parametrize("agent_mod,cls_name,expected_name", [
+        ("core.agents.memory_agent", "MemoryAgent", "Memory"),
+        ("core.agents.research_agent", "ResearchAgent", "Researcher"),
+        ("core.agents.codebase_agent", "CodebaseAgent", "Codebase"),
+        ("core.agents.operator_agent", "OperatorAgent", "Operator"),
+        ("core.agents.coder_agent", "CoderAgent", "Coder"),
+        ("core.agents.ironclaw_agent", "IronClawAgent", "IronClaw"),
+        ("core.agents.audit_agent", "AuditAgent", "Audit"),
+    ])
+    def test_all_agents_have_display_name(self, agent_mod, cls_name, expected_name):
+        """Every agent subclass declares a display name."""
+        import importlib
+        mod = importlib.import_module(agent_mod)
+        cls = getattr(mod, cls_name)
+        assert cls.agent_display_name == expected_name
+
+    def test_ironclaw_tier_agents_are_toggleable(self):
+        """IronClaw and Audit agents are toggleable."""
+        from core.agents.ironclaw_agent import IronClawAgent
+        from core.agents.audit_agent import AuditAgent
+        assert IronClawAgent.agent_toggleable is True
+        assert IronClawAgent.agent_tier == "ironclaw"
+        assert AuditAgent.agent_toggleable is True
+        assert AuditAgent.agent_tier == "ironclaw"
+
+    def test_grim_tier_agents_not_toggleable(self):
+        """GRIM-tier agents are not toggleable."""
+        from core.agents.memory_agent import MemoryAgent
+        from core.agents.research_agent import ResearchAgent
+        from core.agents.codebase_agent import CodebaseAgent
+        for cls in [MemoryAgent, ResearchAgent, CodebaseAgent]:
+            assert cls.agent_toggleable is False
+            assert cls.agent_tier == "grim"
+
+
 class TestMakeCallable:
     """Test BaseAgent.make_callable returns a usable async function."""
 

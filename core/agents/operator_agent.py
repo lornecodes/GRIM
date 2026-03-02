@@ -15,6 +15,11 @@ class OperatorAgent(BaseAgent):
     """Agent for infrastructure awareness and read-only git operations."""
 
     agent_name = "operator"
+    agent_display_name = "Operator"
+    agent_role = "git_reads"
+    agent_description = "Read-only system awareness — git status, file reads, infrastructure checks"
+    agent_color = "#f59e0b"
+
     protocol_priority = ["git-operations"]
     default_protocol = (
         "You are an infrastructure awareness agent with read-only git access.\n"
@@ -37,3 +42,4 @@ def make_operator_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "operate"
 __make_agent__ = make_operator_agent
+__agent_class__ = OperatorAgent

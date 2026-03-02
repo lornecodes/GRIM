@@ -37,6 +37,18 @@ MAX_TOOL_STEPS = 8  # Planning needs more steps: search vault, check board, crea
 # Planning tools: full task CRUD + vault read
 PLANNING_TOOLS = [*TASK_ALL_TOOLS, *COMPANION_TOOLS]
 
+# UI roster metadata for the planning companion node
+NODE_METADATA = {
+    "id": "planning_companion",
+    "name": "Planning",
+    "role": "planner",
+    "description": "Task breakdown, sprint planning, board management, scoping",
+    "tools": [t.name for t in PLANNING_TOOLS],
+    "color": "#a78bfa",
+    "tier": "grim",
+    "toggleable": False,
+}
+
 PLANNING_MODE_PREAMBLE = """\
 ## Mode: Planning Companion
 

@@ -24,6 +24,11 @@ class MemoryAgent(BaseAgent):
     """Agent for all Kronos vault operations + GRIM working memory."""
 
     agent_name = "memory"
+    agent_display_name = "Memory"
+    agent_role = "vault_ops"
+    agent_description = "Kronos vault operations — search, create, update FDOs, task management"
+    agent_color = "#8b5cf6"
+
     protocol_priority = [
         "kronos-capture", "kronos-promote",
         "kronos-relate", "kronos-reflect",
@@ -50,3 +55,4 @@ def make_memory_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "memory"
 __make_agent__ = make_memory_agent
+__agent_class__ = MemoryAgent

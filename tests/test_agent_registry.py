@@ -129,3 +129,98 @@ class TestAgentDiscovery:
         dummy.write_text("x = 1\n")
         reg = AgentRegistry.discover(grim_config, agents_dir=tmp_path)
         assert len(reg) == 0
+
+
+class TestAgentMetadata:
+    """Test dynamic agent metadata from registry."""
+
+    def test_discover_stores_agent_classes(self, grim_config):
+        """discover() stores __agent_class__ for agents that export it."""
+        reg = AgentRegistry.discover(grim_config)
+        assert len(reg._classes) > 0
+        assert "memory" in reg._classes
+        assert "ironclaw" in reg._classes
+
+    def test_build_metadata_returns_list(self, grim_config):
+        """build_metadata() returns a list of metadata dicts."""
+        reg = AgentRegistry.discover(grim_config)
+        metadata = reg.build_metadata(grim_config)
+        assert isinstance(metadata, list)
+        assert len(metadata) > 0
+
+    def test_metadata_has_required_keys(self, grim_config):
+        """Each metadata dict has all required keys for the UI."""
+        reg = AgentRegistry.discover(grim_config)
+        metadata = reg.build_metadata(grim_config)
+        required_keys = {"id", "name", "role", "description", "tools", "color", "tier", "toggleable"}
+        for meta in metadata:
+            assert required_keys.issubset(meta.keys()), f"Missing keys in {meta.get('id')}: {required_keys - meta.keys()}"
+
+    def test_metadata_tools_are_real_names(self, grim_config):
+        """Tools in metadata are actual tool names, not placeholders."""
+        reg = AgentRegistry.discover(grim_config)
+        metadata = reg.build_metadata(grim_config)
+        for meta in metadata:
+            assert isinstance(meta["tools"], list)
+            for tool_name in meta["tools"]:
+                assert isinstance(tool_name, str) and len(tool_name) > 0
+
+    def test_all_metadata_matches_build(self, grim_config):
+        """all_metadata() returns cached metadata after build_metadata()."""
+        reg = AgentRegistry.discover(grim_config)
+        built = reg.build_metadata(grim_config)
+        cached = reg.all_metadata()
+        assert len(built) == len(cached)
+
+    def test_disabled_agents_still_get_class_stored(self):
+        """Disabled agents should still have their class stored for metadata."""
+        config = GrimConfig(agents_disabled=["code"])
+        reg = AgentRegistry.discover(config, disabled=config.agents_disabled)
+        assert "code" in reg._classes
+        assert "code" not in reg
+
+    def test_register_with_class(self):
+        """register() stores agent_class when provided."""
+        from core.agents.base import BaseAgent
+        reg = AgentRegistry()
+        reg.register("test", lambda c: None, agent_class=BaseAgent)
+        assert "test" in reg._classes
+        assert reg._classes["test"] is BaseAgent
+
+
+class TestNodeMetadata:
+    """Test graph node metadata for companion nodes."""
+
+    def test_graph_node_metadata_exists(self):
+        """GRAPH_NODE_METADATA should contain entries for all companion nodes."""
+        from core.nodes.metadata import GRAPH_NODE_METADATA
+        ids = {m["id"] for m in GRAPH_NODE_METADATA}
+        assert "companion" in ids
+        assert "personal_companion" in ids
+        assert "planning_companion" in ids
+
+    def test_graph_node_metadata_schema(self):
+        """Each node metadata entry has required keys."""
+        from core.nodes.metadata import GRAPH_NODE_METADATA
+        required_keys = {"id", "name", "role", "description", "tools", "color", "tier", "toggleable"}
+        for meta in GRAPH_NODE_METADATA:
+            assert required_keys.issubset(meta.keys()), f"Missing keys in {meta.get('id')}"
+
+    def test_companion_has_tools(self):
+        """Companion node metadata includes actual tool names."""
+        from core.nodes.companion import NODE_METADATA
+        assert len(NODE_METADATA["tools"]) > 0
+        assert all(isinstance(t, str) for t in NODE_METADATA["tools"])
+
+    def test_planning_has_task_tools(self):
+        """Planning node metadata includes task management tools."""
+        from core.nodes.planning_companion import NODE_METADATA
+        tool_names = NODE_METADATA["tools"]
+        assert any("task" in t for t in tool_names), f"No task tools in: {tool_names}"
+
+    def test_all_nodes_grim_tier(self):
+        """All companion nodes are grim tier, not toggleable."""
+        from core.nodes.metadata import GRAPH_NODE_METADATA
+        for meta in GRAPH_NODE_METADATA:
+            assert meta["tier"] == "grim"
+            assert meta["toggleable"] is False

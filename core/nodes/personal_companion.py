@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_STEPS = 2  # Fewer tool steps — personal mode is conversational
 
+# UI roster metadata for the personal companion node
+NODE_METADATA = {
+    "id": "personal_companion",
+    "name": "Personal",
+    "role": "conversational",
+    "description": "Personality-forward companion — casual conversation, no delegation",
+    "tools": [t.name for t in _ALL_COMPANION_TOOLS],
+    "color": "#a78bfa",
+    "tier": "grim",
+    "toggleable": False,
+}
+
 PERSONAL_MODE_PREAMBLE = """\
 ## Mode: Personal Companion
 

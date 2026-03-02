@@ -15,6 +15,11 @@ class ResearchAgent(BaseAgent):
     """Agent for research analysis and document ingestion (read-only)."""
 
     agent_name = "research"
+    agent_display_name = "Researcher"
+    agent_role = "analysis"
+    agent_description = "Deep ingestion, document analysis, information synthesis"
+    agent_color = "#3b82f6"
+
     protocol_priority = ["deep-ingest", "kronos-recall"]
     default_protocol = (
         "You are a research agent with Kronos vault read access and file reading tools.\n"
@@ -52,3 +57,4 @@ def make_research_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "research"
 __make_agent__ = make_research_agent
+__agent_class__ = ResearchAgent

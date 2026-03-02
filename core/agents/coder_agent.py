@@ -15,6 +15,11 @@ class CoderAgent(BaseAgent):
     """Agent for code and file operations."""
 
     agent_name = "coder"
+    agent_display_name = "Coder"
+    agent_role = "code_files"
+    agent_description = "Code generation, file operations, refactoring, debugging"
+    agent_color = "#34d399"
+
     protocol_priority = ["code-execution", "file-operations"]
     default_protocol = (
         "You are a coding agent with file read/write, shell execution, and git access.\n"
@@ -37,3 +42,4 @@ def make_coder_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "code"
 __make_agent__ = make_coder_agent
+__agent_class__ = CoderAgent

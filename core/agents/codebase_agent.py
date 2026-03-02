@@ -26,6 +26,11 @@ class CodebaseAgent(BaseAgent):
     """Agent for codebase navigation, deep indexing, and spatial awareness."""
 
     agent_name = "codebase"
+    agent_display_name = "Codebase"
+    agent_role = "spatial_awareness"
+    agent_description = "Read-only repo navigation — code structure, meta.yaml, source tracing, git history"
+    agent_color = "#06b6d4"
+
     protocol_priority = ["repo-navigate", "deep-ingest", "fdo-source-validate"]
     default_protocol = (
         "You are a codebase agent with deep spatial awareness of the workspace.\n"
@@ -118,3 +123,4 @@ def make_codebase_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "codebase"
 __make_agent__ = make_codebase_agent
+__agent_class__ = CodebaseAgent

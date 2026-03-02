@@ -68,6 +68,12 @@ class AuditAgent(BaseAgent):
     """Agent that reviews staged IronClaw output for security and correctness."""
 
     agent_name = "audit"
+    agent_display_name = "Audit"
+    agent_role = "review"
+    agent_description = "Staging review, output verification, execution audit"
+    agent_color = "#f97316"
+    agent_tier = "ironclaw"
+    agent_toggleable = True
 
     def __init__(self, config: GrimConfig) -> None:
         tools = list(STAGING_READ_TOOLS) + list(COMPANION_TOOLS)
@@ -186,3 +192,4 @@ def make_audit_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "audit"
 __make_agent__ = make_audit_agent
+__agent_class__ = AuditAgent

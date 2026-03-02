@@ -95,6 +95,7 @@ _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
 _checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifetime
 _ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
+_agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
 
 
 def _grim_root() -> Path:
@@ -184,6 +185,19 @@ async def lifespan(app: FastAPI):
             ironclaw_bridge=ironclaw_bridge,
         )
         logger.info("Graph built — server ready")
+
+        # Build dynamic agent roster metadata
+        global _agent_metadata
+        try:
+            from core.nodes.metadata import GRAPH_NODE_METADATA
+            from core.agents.registry import AgentRegistry
+            # Discover ALL agents (including disabled) for roster display
+            roster_registry = AgentRegistry.discover(_config, disabled=[])
+            agent_meta = roster_registry.build_metadata(_config)
+            _agent_metadata = list(GRAPH_NODE_METADATA) + agent_meta
+            logger.info("Agent roster: %d entries (dynamic)", len(_agent_metadata))
+        except Exception as exc:
+            logger.warning("Failed to build agent roster metadata: %s", exc)
 
         yield
 
@@ -386,70 +400,15 @@ async def ironclaw_status():
 # Agent Team endpoints
 # ---------------------------------------------------------------------------
 
-# Static GRIM agent metadata — matches the LangGraph node structure
-GRIM_AGENTS = [
-    {
-        "id": "companion",
-        "name": "Companion",
-        "role": "thinker",
-        "description": "Primary conversational agent — reasoning, identity, natural language",
-        "tools": ["reasoning_cache", "identity_reflect", "model_select"],
-        "color": "#7c6fef",
-    },
-    {
-        "id": "memory",
-        "name": "Memory",
-        "role": "vault_ops",
-        "description": "Kronos vault operations — search, retrieve, create, update FDOs",
-        "tools": ["kronos_search", "kronos_get", "kronos_create", "kronos_update", "kronos_graph"],
-        "color": "#8b5cf6",
-    },
-    {
-        "id": "coder",
-        "name": "Coder",
-        "role": "code_files",
-        "description": "Code generation, file operations, refactoring, debugging",
-        "tools": ["file_read", "file_write", "file_search", "directory_list", "shell", "git_status", "git_diff", "git_commit", "code_search", "code_analyze"],
-        "color": "#34d399",
-    },
-    {
-        "id": "research",
-        "name": "Researcher",
-        "role": "analysis",
-        "description": "Web research, document analysis, information synthesis",
-        "tools": ["web_search", "web_fetch", "document_analyze", "summarize", "citation_extract", "data_transform", "compare_sources", "timeline_build", "deep_dive", "kronos_deep_dive", "navigate"],
-        "color": "#3b82f6",
-    },
-    {
-        "id": "operator",
-        "name": "Operator",
-        "role": "git_shell",
-        "description": "System operations — git, shell, Docker, CI/CD, deployments",
-        "tools": ["shell", "git_status", "git_diff", "git_commit", "git_push", "git_branch", "docker_build", "docker_compose", "ci_trigger", "env_check", "process_list", "port_check", "disk_usage", "system_info"],
-        "color": "#f59e0b",
-    },
-    {
-        "id": "ironclaw",
-        "name": "IronClaw",
-        "role": "sandbox",
-        "description": "Sandboxed execution via IronClaw engine — secure tool runs",
-        "tools": ["ic_file_read", "ic_file_write", "ic_shell", "ic_http_request", "ic_directory_list", "ic_search", "ic_health", "ic_metrics"],
-        "color": "#ef4444",
-    },
-]
-
-
 @app.get("/api/agents")
 async def list_agents():
-    """GRIM agent roster — static metadata with toggleable/enabled status."""
+    """GRIM agent roster — dynamic metadata from agent classes and graph nodes."""
     disabled = set(_config.agents_disabled) if _config else set()
-    ironclaw_tier = {"audit", "ironclaw"}
     agents = []
-    for a in GRIM_AGENTS:
+    for meta in (_agent_metadata or []):
         agents.append({
-            **a,
-            "toggleable": a["id"] in ironclaw_tier,
-            "enabled": a["id"] not in disabled,
+            **meta,
+            "enabled": meta["id"] not in disabled,
         })
     return JSONResponse({"agents": agents})
 
@@ -650,8 +609,8 @@ async def toggle_agent(agent_id: str):
     if not _config:
         return JSONResponse({"error": "Config not loaded"}, status_code=503)
 
-    # Only IronClaw-tier agents are toggleable
-    toggleable = {"audit", "ironclaw"}
+    # Only agents with toggleable=True can be toggled (from metadata)
+    toggleable = {m["id"] for m in (_agent_metadata or []) if m.get("toggleable")}
     if agent_id not in toggleable:
         return JSONResponse(
             {"error": f"Agent '{agent_id}' is not toggleable (only IronClaw-tier agents can be toggled)"},

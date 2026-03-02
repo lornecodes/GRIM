@@ -35,6 +35,18 @@ MAX_TOOL_STEPS = 3
 # Companion gets vault read tools + task read tools (board, backlog, calendar)
 _ALL_COMPANION_TOOLS = [*COMPANION_TOOLS, *TASK_READ_TOOLS]
 
+# UI roster metadata for the companion node
+NODE_METADATA = {
+    "id": "companion",
+    "name": "Companion",
+    "role": "thinker",
+    "description": "Primary conversational agent — reasoning, identity, natural language",
+    "tools": [t.name for t in _ALL_COMPANION_TOOLS],
+    "color": "#7c6fef",
+    "tier": "grim",
+    "toggleable": False,
+}
+
 
 def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | None = None):
     """Create a companion node closure with config."""

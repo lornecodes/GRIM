@@ -32,6 +32,27 @@ class BaseAgent:
     protocol_priority: list[str] = []
     default_protocol: str = ""
 
+    # UI display metadata — set on subclasses
+    agent_display_name: str = ""
+    agent_role: str = ""
+    agent_description: str = ""
+    agent_color: str = "#6b7280"
+    agent_tier: str = "grim"       # "grim" or "ironclaw"
+    agent_toggleable: bool = False  # can be enabled/disabled from UI
+
+    def metadata(self) -> dict:
+        """Return UI-ready metadata dict for the agent roster API."""
+        return {
+            "id": self.agent_name,
+            "name": self.agent_display_name or self.agent_name.title(),
+            "role": self.agent_role,
+            "description": self.agent_description or self.default_protocol.split("\n")[0],
+            "tools": [t.name for t in self.tools],
+            "color": self.agent_color,
+            "tier": self.agent_tier,
+            "toggleable": self.agent_toggleable,
+        }
+
     def __init__(
         self,
         config: GrimConfig,

@@ -10,30 +10,39 @@ const INFRA_NODES = new Set([
   "compress",
   "skill_match",
   "router",
+  "graph_router",
   "integrate",
   "evolve",
+  "audit_gate",
+  "re_dispatch",
   "__start__",
   "__end__",
 ]);
 
 const AGENT_LABELS: Record<string, string> = {
   companion: "Companion",
+  personal_companion: "Personal",
+  planning_companion: "Planning",
   dispatch: "Dispatch",
   memory: "Memory",
   coder: "Coder",
   research: "Research",
   operator: "Operator",
+  codebase: "Codebase",
   audit: "Audit",
   ironclaw: "IronClaw",
 };
 
 const AGENT_TIER: Record<string, "grim" | "ironclaw"> = {
   companion: "grim",
+  personal_companion: "grim",
+  planning_companion: "grim",
   dispatch: "grim",
   memory: "grim",
   coder: "grim",
   research: "grim",
   operator: "grim",
+  codebase: "grim",
   audit: "ironclaw",
   ironclaw: "ironclaw",
 };

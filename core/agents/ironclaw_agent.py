@@ -25,6 +25,13 @@ class IronClawAgent(BaseAgent):
     """Agent that executes through IronClaw's sandboxed environment."""
 
     agent_name = "ironclaw"
+    agent_display_name = "IronClaw"
+    agent_role = "execution"
+    agent_description = "Execution layer — code writes, shell, testing, deployments, sandboxed ops"
+    agent_color = "#ef4444"
+    agent_tier = "ironclaw"
+    agent_toggleable = True
+
     protocol_priority = [
         "sandboxed-execution",
         "code-execution",
@@ -121,3 +128,4 @@ def make_ironclaw_agent(config: GrimConfig):
 # Discovery attributes for AgentRegistry
 __agent_name__ = "ironclaw"
 __make_agent__ = make_ironclaw_agent
+__agent_class__ = IronClawAgent
