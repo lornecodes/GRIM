@@ -1,8 +1,10 @@
 name: vault-sync
-version: "1.0"
+version: "1.1"
 description: >
   Keep Kronos vault FDOs current as code evolves in source repositories.
   The incremental complement to deep-ingest (initial ingestion).
+  v1.1: Ripple propagation — cascades updates through connected FDOs
+  (ADRs, designs, project FDOs) until all stale metrics converge.
 type: instruction-protocol
 entry_point: protocol.md
 
@@ -28,6 +30,9 @@ phases:
   - name: Apply Updates
     description: "Minimal, precise edits to bring FDOs current"
     output: "Updated/created/archived FDOs"
+  - name: Ripple Propagation
+    description: "Cascade updates through connected FDOs (ADRs, designs, projects) until convergence"
+    output: "Ripple report — hops, FDOs touched, convergence status"
   - name: Graph Integrity
     description: "Verify links, bidirectionality, no orphans"
     output: "Graph validation results"
@@ -66,5 +71,5 @@ consumers:
     reads: [triggers, phases]
   ops-agent:
     role: execution
-    description: Follows 5-phase protocol to detect changes and update FDOs
+    description: Follows 6-phase protocol to detect changes, update FDOs, and ripple through graph
     reads: [protocol.md, phases, change_types, quality_gates]

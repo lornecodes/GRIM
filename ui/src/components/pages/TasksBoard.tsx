@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { IconTasks } from "@/components/icons/NavIcons";
 import { useTasks, type TaskItem, type ProjectInfo } from "@/hooks/useTasks";
 
@@ -8,11 +8,15 @@ import { useTasks, type TaskItem, type ProjectInfo } from "@/hooks/useTasks";
 // Constants
 // ---------------------------------------------------------------------------
 
-const TASK_COLUMNS = [
+const BOARD_COLUMNS = [
   { key: "new", label: "New", color: "#8888a0" },
   { key: "active", label: "Active", color: "#60a5fa" },
   { key: "in_progress", label: "In Progress", color: "#fbbf24" },
   { key: "resolved", label: "Resolved", color: "#4ade80" },
+] as const;
+
+const ALL_STATUSES = [
+  ...BOARD_COLUMNS,
   { key: "closed", label: "Closed", color: "#7c6fef" },
 ] as const;
 
@@ -31,6 +35,135 @@ const PRIORITY_DOT: Record<string, string> = {
 };
 
 type TabId = "board" | "backlog";
+
+// ---------------------------------------------------------------------------
+// Shared: useEscapeKey hook
+// ---------------------------------------------------------------------------
+
+function useEscapeKey(onEscape: () => void) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onEscape]);
+}
+
+// ---------------------------------------------------------------------------
+// Shared: useClickOutside hook
+// ---------------------------------------------------------------------------
+
+function useClickOutside(ref: React.RefObject<HTMLElement | null>, onClose: () => void) {
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ref, onClose]);
+}
+
+// ---------------------------------------------------------------------------
+// Toast — non-blocking feedback for operations
+// ---------------------------------------------------------------------------
+
+function Toast({ message, type, onDismiss }: { message: string; type: "success" | "error"; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div className={`fixed bottom-4 right-4 z-[60] text-[10px] px-4 py-2 rounded-lg shadow-lg border animate-fade-in ${
+      type === "error"
+        ? "bg-red-500/20 border-red-500/40 text-red-300"
+        : "bg-green-500/20 border-green-500/40 text-green-300"
+    }`}>
+      {message}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Confirm dialog
+// ---------------------------------------------------------------------------
+
+function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  danger,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEscapeKey(onCancel);
+
+  return (
+    <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60" onClick={onCancel}>
+      <div className="bg-grim-surface border border-grim-border rounded-xl p-5 max-w-xs w-full mx-4" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-grim-text mb-2">{title}</h3>
+        <p className="text-[10px] text-grim-text-dim mb-4">{message}</p>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="text-[10px] px-3 py-1.5 rounded bg-grim-border/30 text-grim-text-dim hover:text-grim-text transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`text-[10px] px-3 py-1.5 rounded text-white transition-colors ${
+              danger ? "bg-red-500/80 hover:bg-red-500" : "bg-grim-accent hover:bg-grim-accent-dim"
+            }`}
+          >
+            {confirmLabel ?? "Confirm"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StatusMenu — shared quick-move dropdown for tasks and stories
+// ---------------------------------------------------------------------------
+
+function StatusMenu({
+  currentStatus,
+  onSelect,
+  onClose,
+  includeClose,
+}: {
+  currentStatus: string;
+  onSelect: (status: string) => void;
+  onClose: () => void;
+  includeClose?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, onClose);
+
+  const columns = includeClose ? ALL_STATUSES : BOARD_COLUMNS;
+
+  return (
+    <div ref={ref} className="absolute right-0 top-full mt-1 z-30 bg-grim-surface border border-grim-border rounded-lg shadow-lg py-1 min-w-[100px]">
+      {columns.filter((c) => c.key !== currentStatus).map((col) => (
+        <button
+          key={col.key}
+          onClick={(e) => { e.stopPropagation(); onSelect(col.key); onClose(); }}
+          className="w-full text-left text-[8px] px-3 py-1.5 text-grim-text-dim hover:text-grim-text hover:bg-grim-surface-hover transition-colors flex items-center gap-1.5"
+        >
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: col.color }} />
+          {col.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Task chip — sits in a status column on the sprint board
@@ -56,7 +189,6 @@ function TaskChip({
       >
         {task.title}
       </button>
-      {/* Quick-move dot */}
       <button
         onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
         className="absolute -right-1 -top-1 w-3 h-3 rounded-full bg-grim-border hover:bg-grim-accent text-[6px] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -65,18 +197,12 @@ function TaskChip({
         &gt;
       </button>
       {showMenu && (
-        <div className="absolute right-0 top-4 z-30 bg-grim-surface border border-grim-border rounded-lg shadow-lg py-1 min-w-[90px]">
-          {TASK_COLUMNS.filter((c) => c.key !== task.status).map((col) => (
-            <button
-              key={col.key}
-              onClick={(e) => { e.stopPropagation(); onStatusChange(col.key); setShowMenu(false); }}
-              className="w-full text-left text-[8px] px-3 py-1 text-grim-text-dim hover:text-grim-text hover:bg-grim-surface-hover transition-colors flex items-center gap-1.5"
-            >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: col.color }} />
-              {col.label}
-            </button>
-          ))}
-        </div>
+        <StatusMenu
+          currentStatus={task.status}
+          onSelect={onStatusChange}
+          onClose={() => setShowMenu(false)}
+          includeClose
+        />
       )}
     </div>
   );
@@ -103,15 +229,15 @@ function StoryRow({
   onAddTask: () => void;
   moving: boolean;
 }) {
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const tasks = story.tasks ?? [];
   const tasksDone = tasks.filter((t) => t.status === "resolved" || t.status === "closed").length;
   const progress = tasks.length > 0 ? Math.round((tasksDone / tasks.length) * 100) : 0;
   const priorityDot = PRIORITY_DOT[story.priority ?? "medium"] ?? PRIORITY_DOT.medium;
 
-  // Group tasks by status
   const tasksByStatus = useMemo(() => {
     const map: Record<string, TaskItem[]> = {};
-    for (const col of TASK_COLUMNS) map[col.key] = [];
+    for (const col of BOARD_COLUMNS) map[col.key] = [];
     for (const t of tasks) {
       const status = t.status ?? "new";
       if (map[status]) map[status].push(t);
@@ -121,7 +247,7 @@ function StoryRow({
   }, [tasks]);
 
   return (
-    <div className={`flex border-b border-grim-border/30 hover:bg-grim-surface-hover/30 transition-colors ${moving ? "opacity-50" : ""}`}>
+    <div className={`flex border-b border-grim-border/30 hover:bg-grim-surface-hover/30 transition-colors ${moving ? "opacity-50 pointer-events-none" : ""}`}>
       {/* Story info — left column */}
       <div className="w-[220px] shrink-0 p-2 border-r border-grim-border/30">
         <div className="flex items-start gap-1.5">
@@ -148,17 +274,35 @@ function StoryRow({
             <div className="text-[7px] text-grim-text-dim mt-0.5">{tasksDone}/{tasks.length} tasks</div>
           </div>
         )}
-        {/* Add task button */}
-        <button
-          onClick={onAddTask}
-          className="mt-1 ml-3 text-[8px] text-grim-text-dim hover:text-grim-accent transition-colors"
-        >
-          + task
-        </button>
+        {/* Actions row */}
+        <div className="flex items-center gap-2 mt-1 pl-3">
+          <button
+            onClick={onAddTask}
+            className="text-[8px] text-grim-text-dim hover:text-grim-accent transition-colors"
+          >
+            + task
+          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowMoveMenu(!showMoveMenu)}
+              className="text-[8px] text-grim-text-dim hover:text-grim-accent transition-colors"
+            >
+              move
+            </button>
+            {showMoveMenu && (
+              <StatusMenu
+                currentStatus={story.status}
+                onSelect={onMoveStory}
+                onClose={() => setShowMoveMenu(false)}
+                includeClose
+              />
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Task columns */}
-      {TASK_COLUMNS.map((col) => (
+      {/* Task columns — only active columns, not closed */}
+      {BOARD_COLUMNS.map((col) => (
         <div key={col.key} className="flex-1 min-w-[120px] p-1.5 border-r border-grim-border/20 last:border-r-0">
           <div className="space-y-1">
             {tasksByStatus[col.key]?.map((task) => (
@@ -177,35 +321,57 @@ function StoryRow({
 }
 
 // ---------------------------------------------------------------------------
-// Feature group header
+// Feature group header — collapsible
 // ---------------------------------------------------------------------------
 
-function FeatureHeader({ featureId, storyCount }: { featureId: string; storyCount: number }) {
+function FeatureHeader({
+  featureId,
+  storyCount,
+  closedCount,
+  collapsed,
+  onToggle,
+}: {
+  featureId: string;
+  storyCount: number;
+  closedCount: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
   const label = featureId.replace("feat-", "").replace(/-/g, " ");
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-grim-accent/5 border-b border-grim-border/30">
+    <button
+      onClick={onToggle}
+      className="flex items-center gap-2 px-3 py-1.5 bg-grim-accent/5 border-b border-grim-border/30 w-full text-left hover:bg-grim-accent/10 transition-colors"
+    >
+      <span className="text-[8px] text-grim-text-dim">{collapsed ? "+" : "-"}</span>
       <span className="text-[9px] font-semibold text-grim-accent uppercase tracking-wider">
         {label}
       </span>
-      <span className="text-[8px] text-grim-text-dim">{storyCount} stories</span>
-    </div>
+      <span className="text-[8px] text-grim-text-dim">
+        {storyCount} active{closedCount > 0 ? `, ${closedCount} closed` : ""}
+      </span>
+    </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Edit modal (story or task)
+// Edit modal (story or task) — with delete, Escape key, clickable tasks
 // ---------------------------------------------------------------------------
 
 function EditModal({
   item,
   type,
   onSave,
+  onDelete,
   onClose,
+  onEditTask,
 }: {
   item: TaskItem;
   type: "story" | "task";
   onSave: (fields: Record<string, unknown>) => void;
+  onDelete?: () => void;
   onClose: () => void;
+  onEditTask?: (task: TaskItem) => void;
 }) {
   const [title, setTitle] = useState(item.title);
   const [status, setStatus] = useState(item.status);
@@ -213,6 +379,9 @@ function EditModal({
   const [estimate, setEstimate] = useState(item.estimate_days?.toString() ?? "");
   const [description, setDescription] = useState(item.description ?? "");
   const [notes, setNotes] = useState(item.notes ?? "");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  useEscapeKey(onClose);
 
   const handleSave = () => {
     const fields: Record<string, unknown> = {};
@@ -227,113 +396,140 @@ function EditModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-grim-surface border border-grim-border rounded-xl p-5 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-semibold text-grim-text">Edit {type === "story" ? "Story" : "Task"}</h3>
-            <p className="text-[9px] text-grim-text-dim font-mono mt-0.5">{item.id}</p>
-          </div>
-          <button onClick={onClose} className="text-grim-text-dim hover:text-grim-text text-lg">x</button>
-        </div>
-
-        <div className="space-y-3">
-          {/* Title */}
-          <div>
-            <label className="text-[9px] text-grim-text-dim block mb-1">Title</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
-            />
-          </div>
-
-          {/* Status + Priority row */}
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-[9px] text-grim-text-dim block mb-1">Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
-              >
-                {TASK_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-              </select>
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+        <div className="bg-grim-surface border border-grim-border rounded-xl p-5 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-grim-text">Edit {type === "story" ? "Story" : "Task"}</h3>
+              <p className="text-[9px] text-grim-text-dim font-mono mt-0.5">{item.id}</p>
             </div>
-            {type === "story" && (
-              <div className="flex-1">
-                <label className="text-[9px] text-grim-text-dim block mb-1">Priority</label>
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value)}
-                  className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
-                >
-                  <option value="critical">Critical</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </div>
-            )}
-            <div className="w-20">
-              <label className="text-[9px] text-grim-text-dim block mb-1">Est. days</label>
+            <button onClick={onClose} className="text-grim-text-dim hover:text-grim-text text-lg leading-none">&times;</button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[9px] text-grim-text-dim block mb-1">Title</label>
               <input
-                type="number"
-                step="0.5"
-                value={estimate}
-                onChange={(e) => setEstimate(e.target.value)}
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
                 className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
               />
             </div>
-          </div>
 
-          {/* Description / Notes */}
-          <div>
-            <label className="text-[9px] text-grim-text-dim block mb-1">
-              {type === "story" ? "Description" : "Notes"}
-            </label>
-            <textarea
-              value={type === "story" ? description : notes}
-              onChange={(e) => type === "story" ? setDescription(e.target.value) : setNotes(e.target.value)}
-              rows={3}
-              className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent resize-none"
-            />
-          </div>
-
-          {/* Nested tasks (read-only in story edit) */}
-          {type === "story" && item.tasks && item.tasks.length > 0 && (
-            <div>
-              <label className="text-[9px] text-grim-text-dim block mb-1">Tasks ({item.tasks.length})</label>
-              <div className="space-y-1">
-                {item.tasks.map((t) => (
-                  <div key={t.id} className="flex items-center gap-2 text-[9px] px-2 py-1 bg-grim-bg rounded">
-                    <span className={`w-2 h-2 rounded-sm ${t.status === "closed" || t.status === "resolved" ? "bg-grim-accent" : "bg-grim-border"}`} />
-                    <span className="flex-1 text-grim-text">{t.title}</span>
-                    <span className="text-grim-text-dim">{t.status}</span>
-                  </div>
-                ))}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-[9px] text-grim-text-dim block mb-1">Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
+                >
+                  {ALL_STATUSES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                </select>
+              </div>
+              {type === "story" && (
+                <div className="flex-1">
+                  <label className="text-[9px] text-grim-text-dim block mb-1">Priority</label>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                    className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
+                  >
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </div>
+              )}
+              <div className="w-20">
+                <label className="text-[9px] text-grim-text-dim block mb-1">Est. days</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={estimate}
+                  onChange={(e) => setEstimate(e.target.value)}
+                  className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent"
+                />
               </div>
             </div>
-          )}
 
-          {/* Actions */}
-          <div className="flex gap-2 justify-end pt-2">
-            <button onClick={onClose} className="text-[10px] px-3 py-1.5 rounded bg-grim-border/30 text-grim-text-dim hover:text-grim-text transition-colors">
-              Cancel
-            </button>
-            <button onClick={handleSave} className="text-[10px] px-3 py-1.5 rounded bg-grim-accent text-white hover:bg-grim-accent-dim transition-colors">
-              Save
-            </button>
+            <div>
+              <label className="text-[9px] text-grim-text-dim block mb-1">
+                {type === "story" ? "Description" : "Notes"}
+              </label>
+              <textarea
+                value={type === "story" ? description : notes}
+                onChange={(e) => type === "story" ? setDescription(e.target.value) : setNotes(e.target.value)}
+                rows={3}
+                className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text focus:outline-none focus:border-grim-accent resize-none"
+              />
+            </div>
+
+            {/* Tasks list — clickable to edit */}
+            {type === "story" && item.tasks && item.tasks.length > 0 && (
+              <div>
+                <label className="text-[9px] text-grim-text-dim block mb-1">Tasks ({item.tasks.length})</label>
+                <div className="space-y-1">
+                  {item.tasks.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { if (onEditTask) { onClose(); onEditTask(t); } }}
+                      className="flex items-center gap-2 text-[9px] px-2 py-1 bg-grim-bg rounded w-full text-left hover:bg-grim-surface-hover transition-colors"
+                    >
+                      <span className={`w-2 h-2 rounded-sm shrink-0 ${t.status === "closed" || t.status === "resolved" ? "bg-grim-accent" : "bg-grim-border"}`} />
+                      <span className="flex-1 text-grim-text truncate">{t.title}</span>
+                      <span className="text-grim-text-dim shrink-0">{t.status}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2 justify-between pt-2">
+              <div>
+                {onDelete && (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="text-[10px] px-3 py-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={onClose} className="text-[10px] px-3 py-1.5 rounded bg-grim-border/30 text-grim-text-dim hover:text-grim-text transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleSave} className="text-[10px] px-3 py-1.5 rounded bg-grim-accent text-white hover:bg-grim-accent-dim transition-colors">
+                  Save
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title={`Delete ${type}?`}
+          message={`This will permanently remove "${item.title}". This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => { setShowDeleteConfirm(false); onDelete!(); onClose(); }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Create modal (story or task)
+// Create modal (story or task) — with Escape key
 // ---------------------------------------------------------------------------
 
 function CreateModal({
@@ -343,7 +539,7 @@ function CreateModal({
   onClose,
 }: {
   type: "story" | "task";
-  parentId: string; // feat_id for stories, story_id for tasks
+  parentId: string;
   onSave: (args: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
@@ -351,6 +547,8 @@ function CreateModal({
   const [priority, setPriority] = useState("medium");
   const [estimate, setEstimate] = useState("1");
   const [description, setDescription] = useState("");
+
+  useEscapeKey(onClose);
 
   const handleCreate = () => {
     if (!title.trim()) return;
@@ -374,15 +572,19 @@ function CreateModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="bg-grim-surface border border-grim-border rounded-xl p-5 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-grim-text mb-4">
+        <h3 className="text-sm font-semibold text-grim-text mb-1">
           New {type === "story" ? "Story" : "Task"}
         </h3>
+        <p className="text-[9px] text-grim-text-dim mb-4 font-mono">
+          {type === "story" ? `Feature: ${parentId}` : `Story: ${parentId}`}
+        </p>
         <div className="space-y-3">
           <input
             type="text"
             placeholder={type === "story" ? "Story title..." : "Task title..."}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
             className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text placeholder-grim-text-dim focus:outline-none focus:border-grim-accent"
             autoFocus
           />
@@ -416,11 +618,11 @@ function CreateModal({
             className="w-full text-[11px] px-3 py-2 rounded-lg bg-grim-bg border border-grim-border text-grim-text placeholder-grim-text-dim focus:outline-none focus:border-grim-accent resize-none"
           />
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="text-[10px] px-3 py-1.5 rounded bg-grim-border/30 text-grim-text-dim hover:text-grim-text">Cancel</button>
+            <button onClick={onClose} className="text-[10px] px-3 py-1.5 rounded bg-grim-border/30 text-grim-text-dim hover:text-grim-text transition-colors">Cancel</button>
             <button
               onClick={handleCreate}
               disabled={!title.trim()}
-              className="text-[10px] px-3 py-1.5 rounded bg-grim-accent text-white hover:bg-grim-accent-dim disabled:opacity-30"
+              className="text-[10px] px-3 py-1.5 rounded bg-grim-accent text-white hover:bg-grim-accent-dim disabled:opacity-30 transition-colors"
             >
               Create
             </button>
@@ -432,7 +634,7 @@ function CreateModal({
 }
 
 // ---------------------------------------------------------------------------
-// Backlog tab — flat list of all stories
+// Backlog tab — flat list with project filter
 // ---------------------------------------------------------------------------
 
 function BacklogView({
@@ -449,14 +651,13 @@ function BacklogView({
   if (stories.length === 0) {
     return (
       <div className="text-xs text-grim-text-dim py-16 text-center">
-        No stories found. Create features with stories using the task-manage skill.
+        No stories in the backlog. All stories are either on the board or haven&apos;t been created yet.
       </div>
     );
   }
 
   return (
     <div className="border border-grim-border rounded-lg overflow-hidden">
-      {/* Header */}
       <div className="grid grid-cols-[1fr_100px_80px_80px_60px_80px] gap-2 px-3 py-2 bg-grim-surface text-[9px] font-medium text-grim-text-dim border-b border-grim-border">
         <span>Title</span>
         <span>Feature</span>
@@ -465,7 +666,6 @@ function BacklogView({
         <span>Est.</span>
         <span>Tasks</span>
       </div>
-      {/* Rows */}
       {stories.map((story) => {
         const tasksDone = (story.tasks ?? []).filter((t) => t.status === "resolved" || t.status === "closed").length;
         const taskCount = story.tasks?.length ?? story.task_count ?? 0;
@@ -559,27 +759,82 @@ export function TasksBoard() {
   const [tab, setTab] = useState<TabId>("board");
   const [editItem, setEditItem] = useState<{ item: TaskItem; type: "story" | "task" } | null>(null);
   const [createModal, setCreateModal] = useState<{ type: "story" | "task"; parentId: string } | null>(null);
+  const [collapsedFeatures, setCollapsedFeatures] = useState<Set<string>>(new Set());
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
-  // Group board stories by feature
-  const storiesByFeature = useMemo(() => {
-    if (!board) return new Map<string, TaskItem[]>();
+  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+  }, []);
+
+  const toggleFeature = useCallback((feat: string) => {
+    setCollapsedFeatures((prev) => {
+      const next = new Set(prev);
+      if (next.has(feat)) next.delete(feat);
+      else next.add(feat);
+      return next;
+    });
+  }, []);
+
+  // Group board stories by feature, separating active from closed
+  const { activeFeatures, closedCount } = useMemo(() => {
+    if (!board?.columns) return { activeFeatures: new Map<string, TaskItem[]>(), closedCount: 0 };
+    const columns = board.columns ?? {};
     const map = new Map<string, TaskItem[]>();
-    for (const col of Object.values(board.columns)) {
+    let closed = 0;
+    for (const [colName, col] of Object.entries(columns)) {
       for (const story of col) {
+        if (colName === "closed" || story.status === "closed") {
+          closed++;
+          continue; // Skip closed stories from the board view
+        }
         const feat = story.feature || "ungrouped";
         if (!map.has(feat)) map.set(feat, []);
-        // Only add if not already present (stories appear in one column)
         if (!map.get(feat)!.some((s) => s.id === story.id)) {
           map.get(feat)!.push(story);
         }
       }
     }
-    return map;
+    return { activeFeatures: map, closedCount: closed };
   }, [board]);
 
-  const totalStories = board
-    ? Object.values(board.columns).reduce((sum, col) => sum + col.length, 0)
-    : 0;
+  const activeStoryCount = useMemo(() => {
+    let count = 0;
+    for (const stories of activeFeatures.values()) count += stories.length;
+    return count;
+  }, [activeFeatures]);
+
+  const handleArchive = useCallback(async () => {
+    setShowArchiveConfirm(false);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_GRIM_API || ""}/api/tasks/archive`, { method: "POST" });
+      if (res.ok) {
+        showToast(`Archived ${closedCount} closed stories`);
+        refresh();
+      } else {
+        showToast("Archive failed", "error");
+      }
+    } catch {
+      showToast("Archive failed", "error");
+    }
+  }, [closedCount, showToast, refresh]);
+
+  const handleDelete = useCallback(async (itemId: string) => {
+    // Set status to closed (soft-delete — we don't have a hard delete endpoint)
+    await updateItem(itemId, { status: "closed" });
+    showToast("Item closed");
+  }, [updateItem, showToast]);
+
+  const handleCreate = useCallback(async (args: Record<string, unknown>) => {
+    const result = await createItem(args as Parameters<typeof createItem>[0]);
+    if (result) showToast(`${args.type === "story" ? "Story" : "Task"} created`);
+    else showToast("Create failed", "error");
+  }, [createItem, showToast]);
+
+  const handleUpdate = useCallback(async (itemId: string, fields: Record<string, unknown>) => {
+    await updateItem(itemId, fields);
+    showToast("Updated");
+  }, [updateItem, showToast]);
 
   return (
     <div className="max-w-full mx-auto space-y-4 pb-8">
@@ -594,13 +849,13 @@ export function TasksBoard() {
           />
           <p className="text-xs text-grim-text-dim mt-0.5">
             {tab === "board"
-              ? `${totalStories} stories on board`
+              ? `${activeStoryCount} active stories`
               : `${allStories.length} total stories`}
+            {closedCount > 0 && tab === "board" ? ` / ${closedCount} closed` : ""}
             {backlog?.count ? ` / ${backlog.count} in backlog` : ""}
           </p>
         </div>
         <div className="flex gap-1">
-          {/* Tab buttons */}
           <button
             onClick={() => setTab("board")}
             className={`text-[10px] px-3 py-1.5 rounded-l-lg border transition-colors ${
@@ -622,12 +877,24 @@ export function TasksBoard() {
             Backlog
           </button>
         </div>
-        <button
-          onClick={refresh}
-          className="text-[10px] px-2 py-1.5 rounded bg-grim-surface border border-grim-border text-grim-text-dim hover:text-grim-text transition-colors"
-        >
-          Refresh
-        </button>
+        {/* Archive + Refresh */}
+        <div className="flex gap-1">
+          {closedCount > 0 && tab === "board" && (
+            <button
+              onClick={() => setShowArchiveConfirm(true)}
+              className="text-[10px] px-2 py-1.5 rounded bg-grim-surface border border-grim-border text-grim-text-dim hover:text-grim-accent transition-colors"
+              title={`Archive ${closedCount} closed stories`}
+            >
+              Archive ({closedCount})
+            </button>
+          )}
+          <button
+            onClick={refresh}
+            className="text-[10px] px-2 py-1.5 rounded bg-grim-surface border border-grim-border text-grim-text-dim hover:text-grim-text transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Loading */}
@@ -646,14 +913,14 @@ export function TasksBoard() {
       {/* Board tab */}
       {!loading && tab === "board" && board && (
         <>
-          {totalStories > 0 ? (
+          {activeStoryCount > 0 ? (
             <div className="border border-grim-border rounded-lg overflow-hidden">
-              {/* Column headers */}
+              {/* Column headers — only active columns */}
               <div className="flex bg-grim-surface border-b border-grim-border">
                 <div className="w-[220px] shrink-0 px-3 py-2 text-[9px] font-medium text-grim-text-dim border-r border-grim-border/30">
                   Story
                 </div>
-                {TASK_COLUMNS.map((col) => (
+                {BOARD_COLUMNS.map((col) => (
                   <div key={col.key} className="flex-1 min-w-[120px] px-2 py-2 text-[9px] font-medium text-grim-text-dim text-center border-r border-grim-border/20 last:border-r-0 flex items-center justify-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: col.color }} />
                     {col.label}
@@ -662,38 +929,58 @@ export function TasksBoard() {
               </div>
 
               {/* Feature groups + story rows */}
-              {[...storiesByFeature.entries()].map(([feat, stories]) => (
-                <div key={feat}>
-                  <FeatureHeader featureId={feat} storyCount={stories.length} />
-                  {stories.map((story) => (
-                    <StoryRow
-                      key={story.id}
-                      story={story}
-                      onMoveStory={(col) => moveStory(story.id, col)}
-                      onEditStory={() => setEditItem({ item: story, type: "story" })}
-                      onEditTask={(task) => setEditItem({ item: task, type: "task" })}
-                      onUpdateTaskStatus={updateTaskStatus}
-                      onAddTask={() => setCreateModal({ type: "task", parentId: story.id })}
-                      moving={moving === story.id}
+              {[...activeFeatures.entries()].map(([feat, stories]) => {
+                const isCollapsed = collapsedFeatures.has(feat);
+                // Count closed stories in this feature from the original board data
+                const featClosedCount = board
+                  ? (board.columns["closed"] ?? []).filter((s) => (s.feature || "ungrouped") === feat).length
+                  : 0;
+
+                return (
+                  <div key={feat}>
+                    <FeatureHeader
+                      featureId={feat}
+                      storyCount={stories.length}
+                      closedCount={featClosedCount}
+                      collapsed={isCollapsed}
+                      onToggle={() => toggleFeature(feat)}
                     />
-                  ))}
-                  {/* Add story to feature */}
-                  <div className="px-3 py-1.5 border-b border-grim-border/30">
-                    <button
-                      onClick={() => setCreateModal({ type: "story", parentId: feat })}
-                      className="text-[8px] text-grim-text-dim hover:text-grim-accent transition-colors"
-                    >
-                      + Add story to {feat.replace("feat-", "")}
-                    </button>
+                    {!isCollapsed && (
+                      <>
+                        {stories.map((story) => (
+                          <StoryRow
+                            key={story.id}
+                            story={story}
+                            onMoveStory={(col) => moveStory(story.id, col)}
+                            onEditStory={() => setEditItem({ item: story, type: "story" })}
+                            onEditTask={(task) => setEditItem({ item: task, type: "task" })}
+                            onUpdateTaskStatus={updateTaskStatus}
+                            onAddTask={() => setCreateModal({ type: "task", parentId: story.id })}
+                            moving={moving === story.id}
+                          />
+                        ))}
+                        <div className="px-3 py-1.5 border-b border-grim-border/30">
+                          <button
+                            onClick={() => setCreateModal({ type: "story", parentId: feat })}
+                            className="text-[8px] text-grim-text-dim hover:text-grim-accent transition-colors"
+                          >
+                            + Add story to {feat.replace("feat-", "")}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <IconTasks size={48} className="text-grim-accent opacity-30" />
               <p className="text-xs text-grim-text-dim">
-                No stories on the board. Move stories from the Backlog tab or create new ones.
+                No active stories on the board.{" "}
+                {closedCount > 0
+                  ? `${closedCount} closed stories can be archived.`
+                  : "Move stories from the Backlog tab or create new ones."}
               </p>
             </div>
           )}
@@ -730,8 +1017,10 @@ export function TasksBoard() {
         <EditModal
           item={editItem.item}
           type={editItem.type}
-          onSave={(fields) => updateItem(editItem.item.id, fields)}
+          onSave={(fields) => handleUpdate(editItem.item.id, fields)}
+          onDelete={() => handleDelete(editItem.item.id)}
           onClose={() => setEditItem(null)}
+          onEditTask={(task) => setEditItem({ item: task, type: "task" })}
         />
       )}
 
@@ -740,8 +1029,28 @@ export function TasksBoard() {
         <CreateModal
           type={createModal.type}
           parentId={createModal.parentId}
-          onSave={(args) => createItem(args as Parameters<typeof createItem>[0])}
+          onSave={handleCreate}
           onClose={() => setCreateModal(null)}
+        />
+      )}
+
+      {/* Archive confirmation */}
+      {showArchiveConfirm && (
+        <ConfirmDialog
+          title="Archive closed stories?"
+          message={`This will archive ${closedCount} closed stories, removing them from the board. They'll remain in their feature FDOs.`}
+          confirmLabel="Archive"
+          onConfirm={handleArchive}
+          onCancel={() => setShowArchiveConfirm(false)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast(null)}
         />
       )}
     </div>

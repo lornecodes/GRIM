@@ -116,8 +116,8 @@ async def lifespan(app: FastAPI):
     _config = load_config(grim_root=grim_root)
 
     # Set workspace root
-    from core.tools.workspace import set_workspace_root
-    set_workspace_root(grim_root.parent)
+    from core.tools.context import tool_context
+    tool_context.configure(workspace_root=grim_root.parent)
 
     logger.info("GRIM starting — env: %s, vault: %s", _config.env, _config.vault_path)
 
@@ -935,7 +935,7 @@ async def _mcp_task_call(tool_name: str, args: dict) -> dict:
         return {"error": "No MCP session"}
     try:
         raw = await asyncio.wait_for(
-            session.call_tool(tool_name, args), timeout=10
+            session.call_tool(tool_name, args), timeout=30
         )
         text = raw.content[0].text if raw.content else "{}"
         return json.loads(text)
@@ -945,10 +945,20 @@ async def _mcp_task_call(tool_name: str, args: dict) -> dict:
         return {"error": str(exc)}
 
 
+def _check_mcp_error(data: dict) -> JSONResponse | None:
+    """If data has an 'error' key, return a 500 JSONResponse. Otherwise None."""
+    if "error" in data:
+        return JSONResponse(data, status_code=500)
+    return None
+
+
 @app.get("/api/projects")
 async def api_projects():
     """List projects (epics) for the task board dropdown."""
     data = await _mcp_task_call("kronos_task_list", {})
+    err = _check_mcp_error(data)
+    if err:
+        return err
     # Extract unique projects from stories
     projects: dict[str, dict] = {}
     for story in data.get("stories", []):
@@ -958,14 +968,6 @@ async def api_projects():
                 "id": pid,
                 "title": pid.replace("proj-", "").replace("-", " ").title(),
             }
-    # Also fetch project FDOs for proper titles
-    search_data = await _mcp_task_call("kronos_search", {"query": "epic project", "semantic": False})
-    for result in search_data.get("results", []):
-        rid = result.get("id", "")
-        if rid.startswith("proj-") and rid in projects:
-            projects[rid]["title"] = result.get("title", projects[rid]["title"])
-        elif rid.startswith("proj-"):
-            projects[rid] = {"id": rid, "title": result.get("title", rid)}
     return JSONResponse({"projects": list(projects.values())})
 
 
@@ -976,14 +978,22 @@ async def api_board_view(project_id: str | None = None):
     if project_id:
         args["project_id"] = project_id
     data = await _mcp_task_call("kronos_board_view", args)
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.get("/api/tasks/backlog")
-async def api_backlog_view():
+async def api_backlog_view(project_id: str | None = None, feat_id: str | None = None,
+                           priority: str | None = None):
     """Stories not on the board."""
-    data = await _mcp_task_call("kronos_backlog_view", {})
-    return JSONResponse(data)
+    args: dict = {}
+    if project_id:
+        args["project_id"] = project_id
+    if feat_id:
+        args["feat_id"] = feat_id
+    if priority:
+        args["priority"] = priority
+    data = await _mcp_task_call("kronos_backlog_view", args)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.get("/api/tasks/list")
@@ -1000,14 +1010,14 @@ async def api_task_list(status: str | None = None, priority: str | None = None,
     if project_id:
         args["project_id"] = project_id
     data = await _mcp_task_call("kronos_task_list", args)
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.get("/api/tasks/{item_id}")
 async def api_task_get(item_id: str):
     """Get a single story or task by ID."""
     data = await _mcp_task_call("kronos_task_get", {"item_id": item_id})
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 class TaskCreateRequest(BaseModel):
@@ -1029,7 +1039,7 @@ async def api_task_create(req: TaskCreateRequest):
     """Create a story or task."""
     args = req.model_dump(exclude_none=True)
     data = await _mcp_task_call("kronos_task_create", args)
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 class TaskUpdateRequest(BaseModel):
@@ -1051,7 +1061,7 @@ async def api_task_update(item_id: str, req: TaskUpdateRequest):
         "item_id": item_id,
         "fields": fields,
     })
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 class TaskMoveRequest(BaseModel):
@@ -1064,7 +1074,7 @@ async def api_task_move(story_id: str, req: TaskMoveRequest):
     data = await _mcp_task_call("kronos_task_move", {
         "story_id": story_id, "column": req.column
     })
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.post("/api/tasks/archive")
@@ -1074,7 +1084,7 @@ async def api_task_archive(feat_id: str | None = None):
     if feat_id:
         args["feat_id"] = feat_id
     data = await _mcp_task_call("kronos_task_archive", args)
-    return JSONResponse(data)
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.get("/api/calendar")
@@ -1126,6 +1136,150 @@ async def api_calendar_sync():
     """Sync schedule from board state."""
     data = await _mcp_task_call("kronos_calendar_sync", {})
     return JSONResponse(data)
+
+
+# ---------------------------------------------------------------------------
+# Vault Explorer endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/vault/list")
+async def api_vault_list(domain: str | None = None):
+    """List FDOs, optionally filtered by domain."""
+    args: dict = {}
+    if domain:
+        args["domain"] = domain
+    data = await _mcp_task_call("kronos_list", args)
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+@app.get("/api/vault/search")
+async def api_vault_search(q: str, semantic: bool = True):
+    """Search FDOs via hybrid search."""
+    data = await _mcp_task_call("kronos_search", {
+        "query": q, "semantic": semantic,
+    })
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+@app.get("/api/vault/tags")
+async def api_vault_tags(domain: str | None = None):
+    """Get all tags with counts, optionally filtered by domain."""
+    args: dict = {}
+    if domain:
+        args["domain"] = domain
+    data = await _mcp_task_call("kronos_tags", args)
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+@app.get("/api/vault/graph")
+async def api_vault_graph(id: str | None = None, depth: int = 1, scope: str = "all"):
+    """Get graph data. Without id, builds full vault graph."""
+    if id:
+        data = await _mcp_task_call("kronos_graph", {
+            "id": id, "depth": depth, "scope": scope,
+        })
+        return _check_mcp_error(data) or JSONResponse(data)
+
+    # Full graph: list all FDOs, then batch graph calls for edges
+    list_data = await _mcp_task_call("kronos_list", {})
+    err = _check_mcp_error(list_data)
+    if err:
+        return err
+
+    all_nodes: dict[str, dict] = {}
+    for fdo in list_data.get("fdos", []):
+        all_nodes[fdo["id"]] = {
+            "id": fdo["id"], "title": fdo["title"],
+            "domain": fdo["domain"], "status": fdo.get("status", "seed"),
+            "confidence": fdo.get("confidence", 0.5),
+            "tags": fdo.get("tags", []),
+        }
+
+    all_edges: list[dict] = []
+    edge_set: set[tuple] = set()
+    sem = asyncio.Semaphore(10)
+
+    async def fetch_edges(fdo_id: str) -> list[dict]:
+        async with sem:
+            g = await _mcp_task_call("kronos_graph", {
+                "id": fdo_id, "depth": 1, "scope": scope,
+            })
+            return g.get("edges", [])
+
+    tasks = [fetch_edges(fid) for fid in all_nodes]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for edge_list in results:
+        if isinstance(edge_list, list):
+            for e in edge_list:
+                key = (e["from"], e["to"], e.get("type", "related"))
+                if key not in edge_set:
+                    edge_set.add(key)
+                    all_edges.append(e)
+
+    return JSONResponse({
+        "nodes": all_nodes,
+        "edges": all_edges,
+        "count": len(all_nodes),
+    })
+
+
+@app.get("/api/vault/stats")
+async def api_vault_stats():
+    """Aggregate vault stats for dashboard widget."""
+    data = await _mcp_task_call("kronos_validate", {})
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+@app.get("/api/vault/{fdo_id}")
+async def api_vault_get(fdo_id: str):
+    """Get full FDO by ID."""
+    data = await _mcp_task_call("kronos_get", {"id": fdo_id})
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+class VaultCreateRequest(BaseModel):
+    id: str
+    title: str
+    domain: str
+    confidence: float
+    body: str
+    status: str | None = "seed"
+    tags: list[str] | None = None
+    related: list[str] | None = None
+    confidence_basis: str | None = None
+    pac_parent: str | None = None
+    source_repos: list[str] | None = None
+
+
+@app.post("/api/vault")
+async def api_vault_create(req: VaultCreateRequest):
+    """Create a new FDO."""
+    args = req.model_dump(exclude_none=True)
+    data = await _mcp_task_call("kronos_create", args)
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
+class VaultUpdateRequest(BaseModel):
+    title: str | None = None
+    status: str | None = None
+    confidence: float | None = None
+    tags: list[str] | None = None
+    related: list[str] | None = None
+    body: str | None = None
+    confidence_basis: str | None = None
+    pac_parent: str | None = None
+
+
+@app.put("/api/vault/{fdo_id}")
+async def api_vault_update(fdo_id: str, req: VaultUpdateRequest):
+    """Update FDO fields."""
+    fields = req.model_dump(exclude_none=True)
+    if not fields:
+        return JSONResponse({"error": "No fields to update"}, status_code=400)
+    data = await _mcp_task_call("kronos_update", {
+        "id": fdo_id, "fields": fields,
+    })
+    return _check_mcp_error(data) or JSONResponse(data)
 
 
 # ---------------------------------------------------------------------------

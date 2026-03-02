@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +65,9 @@ export function useTasks() {
       const res = await fetch(`${apiBase}/api/projects`);
       if (res.ok) {
         const data = await res.json();
-        setProjects(data.projects || []);
+        if (data && !data.error) {
+          setProjects(data.projects || []);
+        }
       }
     } catch {
       // non-fatal
@@ -73,27 +75,51 @@ export function useTasks() {
   }, [apiBase]);
 
   // ── Fetch board (filtered by project) ───────────────────────────────────
+  const abortRef = useRef<AbortController | null>(null);
+
   const fetchBoard = useCallback(async () => {
+    // Cancel any in-flight request (e.g. when project changes quickly)
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const signal = controller.signal;
+
     try {
       setLoading(true);
       const projectParam = selectedProject ? `?project_id=${selectedProject}` : "";
       const [boardRes, backlogRes, listRes] = await Promise.all([
-        fetch(`${apiBase}/api/tasks/board${projectParam}`),
-        fetch(`${apiBase}/api/tasks/backlog${projectParam ? `?project_id=${selectedProject}` : ""}`),
-        fetch(`${apiBase}/api/tasks/list${projectParam ? `?project_id=${selectedProject}` : ""}`),
+        fetch(`${apiBase}/api/tasks/board${projectParam}`, { signal }),
+        fetch(`${apiBase}/api/tasks/backlog${projectParam}`, { signal }),
+        fetch(`${apiBase}/api/tasks/list${projectParam}`, { signal }),
       ]);
-      if (!boardRes.ok) throw new Error(`Board fetch failed: ${boardRes.status}`);
+
+      if (!boardRes.ok) {
+        const errData = await boardRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Board fetch failed: ${boardRes.status}`);
+      }
       const boardData = await boardRes.json();
-      setBoard(boardData);
+      // Validate the response has the expected shape
+      if (boardData && boardData.columns && typeof boardData.columns === "object") {
+        setBoard(boardData);
+      } else {
+        throw new Error(boardData?.error || "Invalid board response");
+      }
+
       if (backlogRes.ok) {
-        setBacklog(await backlogRes.json());
+        const backlogData = await backlogRes.json();
+        if (backlogData && !backlogData.error) {
+          setBacklog(backlogData);
+        }
       }
       if (listRes.ok) {
         const listData = await listRes.json();
-        setAllStories(listData.stories || []);
+        if (listData && !listData.error) {
+          setAllStories(listData.stories || []);
+        }
       }
       setError(null);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load board");
     } finally {
       setLoading(false);
@@ -109,9 +135,13 @@ export function useTasks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ column }),
       });
-      if (!res.ok) throw new Error(`Move failed: ${res.status}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Move failed: ${res.status}`);
+      }
       await fetchBoard();
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Move failed");
     } finally {
       setMoving(null);
@@ -136,7 +166,10 @@ export function useTasks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(args),
       });
-      if (!res.ok) throw new Error(`Create failed: ${res.status}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Create failed: ${res.status}`);
+      }
       const data = await res.json();
       await fetchBoard();
       return data;
@@ -154,7 +187,10 @@ export function useTasks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(fields),
       });
-      if (!res.ok) throw new Error(`Update failed: ${res.status}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Update failed: ${res.status}`);
+      }
       await fetchBoard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");

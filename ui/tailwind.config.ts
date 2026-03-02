@@ -48,10 +48,15 @@ const config: Config = {
           "0%, 80%, 100%": { opacity: "0.3" },
           "40%": { opacity: "1" },
         },
+        "slide-in-right": {
+          from: { transform: "translateX(100%)" },
+          to: { transform: "translateX(0)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease-out",
         "pulse-dot": "pulse-dot 1.2s infinite",
+        "slide-in-right": "slide-in-right 0.2s ease-out",
       },
     },
   },

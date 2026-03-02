@@ -30,10 +30,22 @@
 
 set -euo pipefail
 
+# ── MSYS / Git Bash path fix ─────────────────────────────────
+# Prevent Git Bash from mangling Unix-style paths when passing
+# them to Docker/docker-compose (e.g. /c/Users → C:\c\Users).
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="*"
+
 # ── Config ────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRIM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# On Git Bash / MSYS, convert to Windows-native paths for Docker Desktop.
+# pwd returns /c/Users/... but Docker needs C:/Users/... or C:\Users\...
+if command -v cygpath &>/dev/null; then
+    GRIM_DIR="$(cygpath -m "$GRIM_DIR")"
+fi
 IMAGE_NAME="grim"
 IRONCLAW_IMAGE_NAME="ironclaw"
 KEEP_IMAGES="${GRIM_KEEP:-3}"
@@ -143,7 +155,10 @@ cmd_test() {
 
     # Resolve vault path for MCP tests (handler + E2E need the real vault)
     local vault
-    vault="${VAULT_PATH:-$(cd "$GRIM_DIR/.." && pwd)/kronos-vault}"
+    local workspace
+    workspace="$(cd "$GRIM_DIR/.." && pwd)"
+    if command -v cygpath &>/dev/null; then workspace="$(cygpath -m "$workspace")"; fi
+    vault="${VAULT_PATH:-$workspace/kronos-vault}"
     if [[ ! -d "$vault" ]]; then
         _warn "Kronos vault not found at $vault — skipping MCP tests"
         _warn "Set VAULT_PATH to your kronos-vault directory"
@@ -152,7 +167,7 @@ cmd_test() {
 
     # Core + model routing + IronClaw + agent integration tests — no vault needed
     _log "── Core + routing + IronClaw + agent tests (container) ──"
-    MSYS_NO_PATHCONV=1 docker run --rm \
+    docker run --rm \
         -e KRONOS_VAULT_PATH=/app/tests/vault \
         -e KRONOS_SKILLS_PATH=/app/skills \
         "$IMAGE_NAME:latest" \
@@ -162,12 +177,21 @@ cmd_test() {
             tests/test_ironclaw.py \
             tests/test_agent_integration.py \
             tests/test_memory_system.py \
+            tests/test_agent_registry.py \
+            tests/test_tool_registry.py \
+            tests/test_keyword_router.py \
+            tests/test_tool_context.py \
+            tests/test_base_agent_callable.py \
+            tests/test_notes_tools.py \
+            tests/test_graph_smoke.py \
+            tests/test_matcher_smoke.py \
+            tests/test_vault_endpoints.py \
             -v --tb=short
 
     if [[ -n "$vault" ]]; then
         # MCP handler tests (57) — needs real vault (rw for write tests)
         _log "── MCP handler tests ──"
-        MSYS_NO_PATHCONV=1 docker run --rm \
+        docker run --rm \
             -v "$vault:/kronos-vault" \
             -e KRONOS_SKILLS_PATH=/app/skills \
             -e PYTHONPATH=/app/mcp/kronos/src \
@@ -178,7 +202,7 @@ cmd_test() {
         # MCP E2E tests — optional, subprocess-based (may timeout in cold containers)
         if [[ "${GRIM_E2E:-0}" == "1" ]]; then
             _log "── MCP E2E protocol tests ──"
-            MSYS_NO_PATHCONV=1 docker run --rm \
+            docker run --rm \
                 -v "$vault:/kronos-vault" \
                 -e KRONOS_VAULT_PATH=/kronos-vault \
                 -e KRONOS_SKILLS_PATH=/app/skills \

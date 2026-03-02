@@ -1,7 +1,7 @@
 # Vault Sync — Claude Skill Protocol
 
 > **Skill**: `vault-sync`  
-> **Version**: 1.0  
+> **Version**: 1.1
 > **Purpose**: Keep Kronos vault FDOs current as code evolves in source repositories.  
 > **When to use**: After meaningful code changes — new features, refactors, architecture shifts, experiment results. Not for trivial fixes.
 
@@ -92,7 +92,9 @@ Look for these red flags in existing FDOs:
 - **Feature claims**: FDO claims a feature that was removed/changed
 - **Status lag**: Code has been validated but FDO still says "seed"
 - **Missing connections**: New module relates to existing FDOs but isn't linked
-- **Outdated counts/metrics**: FDO cites old numbers (e.g., "12 tools" but now there are 15)
+- **Outdated counts/metrics**: FDO cites old numbers (e.g., "12 tools" but now there are 30)
+- **Stale ADRs/designs**: Decision docs reference old test counts, missing features listed as "future", outdated component trees or architecture diagrams
+- **Stale roadmaps**: "Future Phases" sections listing things already built, project FDOs with outdated phase status
 
 ---
 
@@ -140,7 +142,53 @@ When code is removed or replaced:
 
 ---
 
-## Phase 4: Graph Integrity
+## Phase 4: Ripple Propagation
+
+**Goal**: Propagate updates through connected FDOs until nothing is stale. Like a synapse — activation cascades through the graph.
+
+### Why This Matters
+
+When you update an FDO (e.g., bump tool count from 12 to 30 in `mcp-bridge`), every FDO that references that count is now stale. ADRs, design docs, project FDOs, and roadmaps all embed counts, feature lists, and status claims that drift silently. Ripple propagation catches this.
+
+### Algorithm
+
+1. **Collect updated FDO IDs** from Phase 3
+2. **For each updated FDO**, traverse `related` links (depth 1) using `kronos_graph`
+3. **For each connected FDO**, scan for staleness markers that reference the updated FDO's domain:
+   - **Counts**: tool counts, test counts, skill counts, FDO counts, page counts
+   - **Feature lists**: "future phases" that are now complete, capability lists missing new items
+   - **Status claims**: "Phase 1 complete" when Phase 3 is done, "developing" when stable
+   - **Architecture diagrams**: component trees, node counts, service lists
+   - **confidence_basis**: references old metrics
+4. **If stale content found**, update that FDO and add it to the ripple set
+5. **Repeat** from step 2 with newly updated FDOs (max depth: 3 hops to prevent runaway)
+6. **Stop** when a full pass finds nothing to update
+
+### Priority Targets for Ripple
+
+These FDO types are most prone to embedding stale metrics:
+- `adr-*` — ADRs cite test counts, tool counts, architecture decisions
+- `design-*` — Design docs have component trees, phase statuses, tech stacks
+- `proj-*` — Project FDOs track overall metrics, phase completion
+- `feat-*` — Feature FDOs embed story counts, confidence bases
+- Any FDO with `confidence_basis` — often cites specific numbers
+
+### Output: Ripple Report
+
+```
+### Ripple Propagation
+| FDO | Hop | What was stale | What was updated |
+|-----|-----|----------------|------------------|
+| adr-docker-release | 1 | "185 tests" | updated to "651+ tests" |
+| design-grim-ui | 1 | Phase 3 as latest | added Phases 4-6 |
+| proj-grim | 2 | "32 MCP tools" | updated to "30 MCP tools" |
+
+**Hops**: 2 | **FDOs touched**: 3 | **Converged**: yes
+```
+
+---
+
+## Phase 5: Graph Integrity
 
 **Goal**: Ensure updates didn't break the relationship graph.
 
@@ -166,7 +214,7 @@ Get-ChildItem "kronos-vault\**\*.md" -Recurse | ForEach-Object {
 
 ---
 
-## Phase 5: Confirmation
+## Phase 6: Confirmation
 
 **Goal**: Report what changed and verify with user.
 
@@ -232,6 +280,19 @@ Get-ChildItem "kronos-vault\**\*.md" -Recurse | ForEach-Object {
 2. Set `superseded_by` if replacement exists
 3. Remove from `pac_children` of parent
 4. Keep `related:` links intact (archived nodes are still part of the graph)
+
+### Metrics changed (test count, tool count, skill count, page count)
+1. Update the primary FDO that owns the metric
+2. **Ripple**: Search all `adr-*`, `design-*`, `proj-*`, `feat-*` FDOs that cite the old number
+3. Update confidence_basis on any FDO that embeds the metric
+4. Check "Future Phases" / roadmap sections — mark completed items as done
+
+### ADR or design doc out of date
+1. Update the body with current state (architecture, component trees, test counts)
+2. Keep the original Decision and Context sections (those are historical record)
+3. Add an Evolution section if the implementation has diverged significantly
+4. Update Consequences to reflect what actually happened
+5. **Ripple**: Check if parent project FDOs reference the stale ADR content
 
 ## Appendix B: Confidence Adjustment Guide
 
