@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableConfig
 from core.config import GrimConfig
 from core.state import GrimState
 from core.tools.kronos_read import COMPANION_TOOLS
+from core.tools.kronos_tasks import TASK_READ_TOOLS
 
 if TYPE_CHECKING:
     from core.reasoning_cache import ReasoningCache
@@ -31,12 +32,15 @@ logger = logging.getLogger(__name__)
 # Max tool-call round trips per turn
 MAX_TOOL_STEPS = 3
 
+# Companion gets vault read tools + task read tools (board, backlog, calendar)
+_ALL_COMPANION_TOOLS = [*COMPANION_TOOLS, *TASK_READ_TOOLS]
+
 
 def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | None = None):
     """Create a companion node closure with config."""
 
     # Build a name→tool lookup for execution
-    tool_map = {t.name: t for t in COMPANION_TOOLS}
+    tool_map = {t.name: t for t in _ALL_COMPANION_TOOLS}
 
     async def companion_node(state: GrimState, run_config: RunnableConfig = None) -> dict:
         """Generate GRIM's response in companion (thinker) mode.
@@ -56,13 +60,14 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
             max_tokens=config.max_tokens,
             default_headers={"X-Caller-ID": "grim"},
         )
-        llm_with_tools = llm.bind_tools(COMPANION_TOOLS) if COMPANION_TOOLS else llm
+        llm_with_tools = llm.bind_tools(_ALL_COMPANION_TOOLS) if _ALL_COMPANION_TOOLS else llm
 
         logger.info("Companion: using model %s", selected_model)
 
         messages = list(state.get("messages", []))
         knowledge_context = state.get("knowledge_context", [])
         matched_skills = state.get("matched_skills", [])
+        recent_notes = state.get("recent_notes", [])
 
         # Build system prompt with static/dynamic split for prompt caching
         from core.personality.prompt_builder import build_system_prompt_parts
@@ -77,6 +82,7 @@ def make_companion_node(config: GrimConfig, reasoning_cache: ReasoningCache | No
             personality_cache_path=config.personality_cache_path,
             caller_id=state.get("caller_id"),
             caller_context=state.get("caller_context"),
+            recent_notes=recent_notes,
         )
 
         # Build system instruction with cache_control on stable prefix.

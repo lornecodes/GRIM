@@ -14,27 +14,27 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from core.tools.context import tool_context
+
 logger = logging.getLogger(__name__)
 
-# MCP client reference — set at boot by graph.py
-_mcp_session: Any = None
 _MCP_TIMEOUT = 15  # seconds per MCP call
 
 
 def set_mcp_session(session: Any) -> None:
-    """Inject the MCP client session (called once at boot)."""
-    global _mcp_session
-    _mcp_session = session
+    """Inject the MCP client session. Deprecated: use tool_context.configure()."""
+    tool_context.mcp_session = session
 
 
 def get_mcp_session() -> Any:
-    """Return the current MCP session (for diagnostics)."""
-    return _mcp_session
+    """Return the current MCP session."""
+    return tool_context.mcp_session
 
 
 async def _call_mcp(method: str, **kwargs: Any) -> Any:
     """Call a Kronos MCP tool and return the result."""
-    if _mcp_session is None:
+    session = tool_context.mcp_session
+    if session is None:
         logger.warning("MCP session not initialized")
         return {"error": "Kronos vault is not connected."}
 
@@ -43,7 +43,7 @@ async def _call_mcp(method: str, **kwargs: Any) -> Any:
 
     try:
         result = await asyncio.wait_for(
-            _mcp_session.call_tool(method, kwargs),
+            session.call_tool(method, kwargs),
             timeout=_MCP_TIMEOUT,
         )
     except asyncio.TimeoutError:
@@ -112,3 +112,7 @@ async def kronos_list(domain: str | None = None) -> str:
 
 # Convenience: all read-only tools as a list for LangGraph binding
 COMPANION_TOOLS = [kronos_search, kronos_get, kronos_list]
+
+# Register with tool registry
+from core.tools.registry import tool_registry
+tool_registry.register_group("kronos_read", COMPANION_TOOLS)

@@ -162,6 +162,8 @@ class GrimState(TypedDict, total=False):
     matched_skills: list[SkillContext]
     skill_protocols: dict[str, str]  # skill_name → protocol.md content
 
+    skill_delegation_hint: Optional[str]  # delegation target from skill match
+
     # Routing decision
     mode: Literal["companion", "delegate"]
     delegation_type: Optional[
@@ -194,6 +196,9 @@ class GrimState(TypedDict, total=False):
 
     # Persistent objectives
     objectives: list  # list[Objective] — active objectives loaded at session start
+
+    # Recent notes from rolling logs (populated by memory node)
+    recent_notes: list[dict[str, Any]]
 
     # Evolution tracking
     session_topics: list[str]

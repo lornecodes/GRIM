@@ -102,3 +102,7 @@ MEMORY_AGENT_TOOLS = [
     kronos_create,
     kronos_update,
 ]
+
+# Register with tool registry
+from core.tools.registry import tool_registry
+tool_registry.register_group("kronos_write", [kronos_create, kronos_update])

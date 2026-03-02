@@ -16,17 +16,27 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from core.tools.context import tool_context
+
 logger = logging.getLogger(__name__)
 
-# Workspace root — resolved at import time, overridable
-_workspace_root: Path = Path(__file__).resolve().parent.parent.parent.parent
+# Default workspace root — resolved at import time
+_DEFAULT_WORKSPACE_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
 # That's GRIM/../.. = core_workspace root
+
+# Initialize tool_context with default if not yet set
+if tool_context.workspace_root is None:
+    tool_context.workspace_root = _DEFAULT_WORKSPACE_ROOT
 
 
 def set_workspace_root(path: Path) -> None:
-    """Override the workspace root (called at boot from config)."""
-    global _workspace_root
-    _workspace_root = path
+    """Override the workspace root. Deprecated: use tool_context.configure()."""
+    tool_context.workspace_root = path
+
+
+def _get_workspace_root() -> Path:
+    """Return the current workspace root."""
+    return tool_context.workspace_root or _DEFAULT_WORKSPACE_ROOT
 
 
 def _resolve_path(rel: str) -> Path:
@@ -34,8 +44,9 @@ def _resolve_path(rel: str) -> Path:
 
     Security: refuses to escape the workspace.
     """
-    target = (_workspace_root / rel).resolve()
-    if not str(target).startswith(str(_workspace_root.resolve())):
+    ws_root = _get_workspace_root()
+    target = (ws_root / rel).resolve()
+    if not str(target).startswith(str(ws_root.resolve())):
         raise ValueError(f"Path escapes workspace: {rel}")
     return target
 
@@ -155,7 +166,7 @@ async def search_files(pattern: str, path: str = ".") -> str:
         JSON array of matching file paths.
     """
     target = _resolve_path(path)
-    matches = [str(p.relative_to(_workspace_root)) for p in target.glob(pattern)]
+    matches = [str(p.relative_to(_get_workspace_root())) for p in target.glob(pattern)]
     return json.dumps(matches[:100])  # cap results
 
 
@@ -193,7 +204,7 @@ async def grep_workspace(query: str, path: str = ".", file_pattern: str = "*") -
             for i, line in enumerate(filepath.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                 if regex.search(line):
                     matches.append({
-                        "file": str(filepath.relative_to(_workspace_root)),
+                        "file": str(filepath.relative_to(_get_workspace_root())),
                         "line": i,
                         "text": line.strip()[:200],
                     })
@@ -256,7 +267,7 @@ async def run_shell(command: str, cwd: str = ".") -> str:
 
 async def _git(args: list[str], cwd: Path | None = None) -> dict:
     """Run a git command and return structured result."""
-    work_dir = cwd or _workspace_root
+    work_dir = cwd or _get_workspace_root()
     cmd = ["git"] + args
 
     proc = await asyncio.create_subprocess_exec(
@@ -399,3 +410,9 @@ GIT_TOOLS = [git_status, git_diff, git_log, git_add_commit]
 
 # Full set for agents that need everything
 ALL_WORKSPACE_TOOLS = FILE_TOOLS + SHELL_TOOLS + GIT_TOOLS
+
+# Register with tool registry
+from core.tools.registry import tool_registry
+tool_registry.register_group("file", FILE_TOOLS)
+tool_registry.register_group("shell", SHELL_TOOLS)
+tool_registry.register_group("git", GIT_TOOLS)

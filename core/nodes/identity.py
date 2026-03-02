@@ -70,23 +70,6 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
         caller_id = state.get("caller_id", "peter")
         caller_context = await _resolve_caller(caller_id, mcp_session, config)
 
-        # Build system prompt
-        prompt = build_system_prompt(
-            prompt_path=config.identity_prompt_path,
-            personality_path=config.identity_personality_path,
-            field_state=field_state,
-            identity_fdo=identity_fdo,
-            personality_cache_path=cache_path,
-            caller_id=caller_id,
-            caller_context=caller_context,
-        )
-
-        # Load persistent objectives
-        objectives = load_objectives(config.objectives_path)
-        if objectives:
-            active = [o for o in objectives if o.status == "active"]
-            logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
-
         # Load persistent working memory via MCP (falls back to direct file read)
         working_memory = ""
         try:
@@ -103,24 +86,32 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
                 raw_memory = read_memory(config.vault_path)
 
             if raw_memory:
-                # Truncate to avoid context bloat (keep under 2000 chars)
-                if len(raw_memory) > 2000:
-                    working_memory = raw_memory[:2000] + "\n\n...(truncated)"
+                # Truncate to avoid context bloat (keep under 4000 chars)
+                if len(raw_memory) > 4000:
+                    working_memory = raw_memory[:4000] + "\n\n...(truncated)"
                 else:
                     working_memory = raw_memory
                 logger.info("Loaded working memory (%d chars)", len(raw_memory))
         except Exception:
             logger.debug("Could not load working memory from vault")
 
-        # Inject working memory into system prompt with framing
-        if working_memory:
-            prompt = prompt + \
-                "\n\n---\n\n## Your Working Memory\n\n" \
-                "This is your persistent working memory from previous sessions. " \
-                "Use it to maintain continuity — reference recent topics, recall " \
-                "user preferences, and track active objectives. When asked about " \
-                "recent work, sessions, or what you've been doing, check here " \
-                "FIRST before searching the vault.\n\n" + working_memory
+        # Build system prompt (memory positioned early for LLM attention)
+        prompt = build_system_prompt(
+            prompt_path=config.identity_prompt_path,
+            personality_path=config.identity_personality_path,
+            field_state=field_state,
+            identity_fdo=identity_fdo,
+            personality_cache_path=cache_path,
+            caller_id=caller_id,
+            caller_context=caller_context,
+            working_memory=working_memory or None,
+        )
+
+        # Load persistent objectives
+        objectives = load_objectives(config.objectives_path)
+        if objectives:
+            active = [o for o in objectives if o.status == "active"]
+            logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
 
         logger.info(
             "Identity loaded — mode: %s, coherence: %.2f",

@@ -16,25 +16,22 @@ from typing import Optional
 from langchain_core.tools import tool
 
 from core.bridge.ironclaw import IronClawBridge, ToolResult
+from core.tools.context import tool_context
 
 logger = logging.getLogger(__name__)
 
-# Module-level bridge reference (set at graph build time)
-_bridge: IronClawBridge | None = None
-
 
 def set_bridge(bridge: IronClawBridge) -> None:
-    """Inject the IronClaw bridge instance."""
-    global _bridge
-    _bridge = bridge
+    """Inject the IronClaw bridge instance. Deprecated: use tool_context.configure()."""
+    tool_context.ironclaw_bridge = bridge
     logger.info("IronClaw tools: bridge connected")
 
 
 def _get_bridge() -> IronClawBridge:
     """Get the bridge, raising if not set."""
-    if _bridge is None:
+    if tool_context.ironclaw_bridge is None:
         raise RuntimeError("IronClaw bridge not initialized — call set_bridge() first")
-    return _bridge
+    return tool_context.ironclaw_bridge
 
 
 def _format_result(result: ToolResult) -> str:
@@ -195,3 +192,8 @@ IRONCLAW_READ_TOOLS = [
     claw_read_file,
     claw_list_dir,
 ]
+
+# Register with tool registry
+from core.tools.registry import tool_registry
+tool_registry.register_group("ironclaw", IRONCLAW_TOOLS)
+tool_registry.register_group("ironclaw_read", IRONCLAW_READ_TOOLS)

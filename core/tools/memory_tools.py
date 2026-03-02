@@ -64,3 +64,7 @@ async def update_grim_memory(section: str, content: str) -> str:
 
 
 MEMORY_TOOLS = [read_grim_memory, update_grim_memory]
+
+# Register with tool registry
+from core.tools.registry import tool_registry
+tool_registry.register_group("memory", MEMORY_TOOLS)
