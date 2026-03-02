@@ -26,7 +26,7 @@ logger = logging.getLogger("kronos-mcp.tasks")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-VALID_STATUSES = {"new", "active", "in_progress", "resolved", "closed"}
+VALID_STATUSES = {"draft", "new", "active", "in_progress", "resolved", "closed"}
 VALID_PRIORITIES = {"critical", "high", "medium", "low"}
 PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -189,8 +189,12 @@ class TaskEngine:
         description: str = "",
         acceptance_criteria: list[str] | None = None,
         tags: list[str] | None = None,
+        created_by: str = "human",
+        status: str = "new",
     ) -> dict:
         """Create a new story in a feature FDO."""
+        if status not in VALID_STATUSES:
+            return {"error": f"Invalid status: {status}", "valid": sorted(VALID_STATUSES)}
         if priority not in VALID_PRIORITIES:
             return {"error": f"Invalid priority: {priority}", "valid": list(VALID_PRIORITIES)}
 
@@ -207,15 +211,16 @@ class TaskEngine:
             fm, body = result
             stories = self._get_stories(fm)
 
-            # Generate sequential ID
-            story_id = self._next_story_id(feat_id, stories)
+            # Generate sequential ID (checks archived stories too)
+            story_id = self._next_story_id(feat_id, fm)
             today = str(date.today())
 
             story = {
                 "id": story_id,
                 "title": title,
-                "status": "new",
+                "status": status,
                 "priority": priority,
+                "created_by": created_by,
                 "estimate_days": estimate_days,
                 "description": description,
                 "acceptance_criteria": acceptance_criteria or [],
@@ -239,6 +244,7 @@ class TaskEngine:
         estimate_days: float = 0.5,
         assignee: str = "",
         notes: str = "",
+        created_by: str = "human",
     ) -> dict:
         """Create a new task under a story."""
         found = self._find_story(story_id)
@@ -274,6 +280,7 @@ class TaskEngine:
                 "estimate_days": estimate_days,
                 "assignee": assignee,
                 "notes": notes,
+                "created_by": created_by,
             }
 
             tasks.append(task)
@@ -310,6 +317,18 @@ class TaskEngine:
 
     def _update_story(self, story_id: str, fields: dict) -> dict:
         """Update fields on a story."""
+        # Block regression to draft — draft is creation-only
+        if "status" in fields and fields["status"] == "draft":
+            found = self._find_story(story_id)
+            if found:
+                _, path, fm, body, _ = found
+                result = self._parse_feature(path)
+                if result:
+                    fm2, _ = result
+                    for s in self._get_stories(fm2):
+                        if s["id"] == story_id and s.get("status") != "draft":
+                            return {"error": "Cannot set status back to 'draft'. Draft is an initial creation-only status."}
+
         found = self._find_story(story_id)
         if not found:
             return {"error": f"Story not found: {story_id}"}
@@ -472,6 +491,52 @@ class TaskEngine:
         results.sort(key=lambda s: (PRIORITY_ORDER.get(s["priority"], 99), s.get("created", "")))
         return results
 
+    # ── Validation ─────────────────────────────────────────────────────
+
+    MIN_TITLE_LENGTH = 10
+
+    def validate_story_creation(
+        self,
+        feat_id: str,
+        title: str,
+        estimate_days: float = 1.0,
+    ) -> list[str]:
+        """Pre-creation validation. Returns list of warning strings. Empty = OK.
+
+        Non-blocking — caller decides whether to proceed despite warnings.
+        """
+        warnings = []
+
+        # Title quality
+        stripped = title.strip()
+        if len(stripped) < self.MIN_TITLE_LENGTH:
+            warnings.append(
+                f"Title too short ({len(stripped)} chars, min {self.MIN_TITLE_LENGTH})"
+            )
+
+        # Duplicate detection within the feature
+        path = self._find_feature_file(feat_id)
+        if path:
+            result = self._parse_feature(path)
+            if result:
+                fm, _ = result
+                existing_titles = [
+                    s.get("title", "").lower().strip()
+                    for s in self._get_stories(fm)
+                ]
+                if stripped.lower() in existing_titles:
+                    warnings.append(
+                        f"Duplicate title: a story with this exact title already exists in {feat_id}"
+                    )
+
+        # Scope suggestion
+        if estimate_days > 10:
+            warnings.append(
+                f"Large estimate ({estimate_days} days) — consider creating a feature instead of a story"
+            )
+
+        return warnings
+
     # ── Archive ──────────────────────────────────────────────────────────
 
     def archive_closed(self, feat_id: str | None = None) -> dict:
@@ -528,20 +593,32 @@ class TaskEngine:
 
     # ── ID Generation ────────────────────────────────────────────────────
 
-    def _next_story_id(self, feat_id: str, stories: list[dict]) -> str:
-        """Generate sequential story ID: story-{feat-short}-NNN."""
-        # feat-grim-taskman -> grim-taskman
+    def _next_story_id(self, feat_id: str, fm: dict) -> str:
+        """Generate sequential story ID: story-{feat-short}-NNN.
+
+        Scans both active and archived stories to prevent ID collisions
+        after archival.
+        """
         short = feat_id.replace("feat-", "")
+        prefix = f"story-{short}-"
         existing_nums = []
-        for s in stories:
+
+        # Check active stories
+        for s in self._get_stories(fm):
             sid = s.get("id", "")
-            prefix = f"story-{short}-"
             if sid.startswith(prefix):
                 num_part = sid[len(prefix):]
                 if num_part.isdigit():
                     existing_nums.append(int(num_part))
 
-        # Also check archived stories
+        # Check archived stories
+        for s in fm.get("archived_stories", []) or []:
+            sid = s.get("id", "")
+            if sid.startswith(prefix):
+                num_part = sid[len(prefix):]
+                if num_part.isdigit():
+                    existing_nums.append(int(num_part))
+
         next_num = max(existing_nums, default=0) + 1
         return f"story-{short}-{next_num:03d}"
 

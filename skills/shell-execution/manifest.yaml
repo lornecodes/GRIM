@@ -13,13 +13,9 @@ permissions:
   - sandbox:required
 
 consumers:
-  coder-agent:
+  ironclaw-agent:
     role: execution
-    description: Runs build commands, tests, and dev tools
-    reads: [protocol.md, safety, allowed_categories]
-  ops-agent:
-    role: execution
-    description: Runs maintenance commands, deployments, system checks
+    description: Runs shell commands in sandboxed containers
     reads: [protocol.md, safety, allowed_categories]
 
 inputs:

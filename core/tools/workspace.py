@@ -405,8 +405,10 @@ async def git_add_commit(path: str, files: list[str], message: str) -> str:
 # ---------------------------------------------------------------------------
 
 FILE_TOOLS = [read_file, write_file, edit_file, list_directory, search_files, grep_workspace]
+FILE_READ_TOOLS = [read_file, list_directory, search_files, grep_workspace]
 SHELL_TOOLS = [run_shell]
 GIT_TOOLS = [git_status, git_diff, git_log, git_add_commit]
+GIT_READ_TOOLS = [git_status, git_diff, git_log]
 
 # Full set for agents that need everything
 ALL_WORKSPACE_TOOLS = FILE_TOOLS + SHELL_TOOLS + GIT_TOOLS
@@ -414,5 +416,7 @@ ALL_WORKSPACE_TOOLS = FILE_TOOLS + SHELL_TOOLS + GIT_TOOLS
 # Register with tool registry
 from core.tools.registry import tool_registry
 tool_registry.register_group("file", FILE_TOOLS)
+tool_registry.register_group("file_read", FILE_READ_TOOLS)
 tool_registry.register_group("shell", SHELL_TOOLS)
 tool_registry.register_group("git", GIT_TOOLS)
+tool_registry.register_group("git_read", GIT_READ_TOOLS)

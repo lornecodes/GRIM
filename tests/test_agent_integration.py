@@ -55,12 +55,18 @@ class TestAgentConstruction:
         assert agent.agent_name == "operator"
 
     def test_operator_agent_tools(self):
+        """v0.0.6: operator narrowed to git reads + companion (no shell/file/git writes)."""
         from core.agents.operator_agent import OperatorAgent
-        from core.tools.workspace import GIT_TOOLS, SHELL_TOOLS, FILE_TOOLS
+        from core.tools.workspace import GIT_READ_TOOLS
         from core.tools.kronos_read import COMPANION_TOOLS
         agent = OperatorAgent(self._make_config())
-        expected_count = len(GIT_TOOLS) + len(SHELL_TOOLS) + len(FILE_TOOLS) + len(COMPANION_TOOLS)
+        expected_count = len(GIT_READ_TOOLS) + len(COMPANION_TOOLS)
         assert len(agent.tools) == expected_count
+        tool_names = {t.name for t in agent.tools}
+        assert "git_status" in tool_names
+        assert "run_shell" not in tool_names
+        assert "write_file" not in tool_names
+        assert "git_add_commit" not in tool_names
 
     def test_memory_agent_name(self):
         from core.agents.memory_agent import MemoryAgent
@@ -80,12 +86,18 @@ class TestAgentConstruction:
         agent = ResearchAgent(self._make_config())
         assert agent.agent_name == "research"
 
-    def test_research_agent_has_kronos_write(self):
+    def test_research_agent_is_read_only(self):
+        """v0.0.6: research agent has no vault write tools."""
         from core.agents.research_agent import ResearchAgent
         agent = ResearchAgent(self._make_config())
         tool_names = {t.name for t in agent.tools}
-        assert "kronos_create" in tool_names
-        assert "kronos_update" in tool_names
+        assert "kronos_create" not in tool_names
+        assert "kronos_update" not in tool_names
+        assert "write_file" not in tool_names
+        assert "edit_file" not in tool_names
+        # Should still have read tools
+        assert "kronos_search" in tool_names
+        assert "read_file" in tool_names
 
     def test_ironclaw_agent_name(self):
         from core.agents.ironclaw_agent import IronClawAgent
@@ -107,6 +119,45 @@ class TestAgentConstruction:
         companion_names = {t.name for t in COMPANION_TOOLS}
         agent_names = {t.name for t in agent.tools}
         assert companion_names.issubset(agent_names)
+
+    def test_planning_agent_name(self):
+        from core.agents.planning_agent import PlanningAgent
+        agent = PlanningAgent(self._make_config())
+        assert agent.agent_name == "planning"
+
+    def test_planning_agent_tools(self):
+        """Planning agent has task tools + companion tools, no shell/file/git."""
+        from core.agents.planning_agent import PlanningAgent
+        from core.tools.kronos_tasks import TASK_ALL_TOOLS
+        from core.tools.kronos_read import COMPANION_TOOLS
+        agent = PlanningAgent(self._make_config())
+        expected_count = len(TASK_ALL_TOOLS) + len(COMPANION_TOOLS)
+        assert len(agent.tools) == expected_count
+        tool_names = {t.name for t in agent.tools}
+        assert "run_shell" not in tool_names
+        assert "write_file" not in tool_names
+        assert "git_add_commit" not in tool_names
+        assert "kronos_create" not in tool_names
+
+    def test_planning_agent_has_companion_tools(self):
+        from core.agents.planning_agent import PlanningAgent
+        from core.tools.kronos_read import COMPANION_TOOLS
+        agent = PlanningAgent(self._make_config())
+        companion_names = {t.name for t in COMPANION_TOOLS}
+        agent_names = {t.name for t in agent.tools}
+        assert companion_names.issubset(agent_names)
+
+    def test_planning_agent_has_task_tools(self):
+        from core.agents.planning_agent import PlanningAgent
+        agent = PlanningAgent(self._make_config())
+        tool_names = {t.name for t in agent.tools}
+        assert any("task" in n for n in tool_names)
+
+    def test_planning_agent_model(self):
+        from core.agents.planning_agent import PlanningAgent
+        cfg = self._make_config(model="claude-opus-4-6")
+        agent = PlanningAgent(cfg)
+        assert agent.llm.model == "claude-opus-4-6"
 
 
 # ─── Model Configuration ────────────────────────────────────────────────
@@ -169,6 +220,7 @@ class TestAgentModelConfig:
         from core.agents.operator_agent import OperatorAgent
         from core.agents.research_agent import ResearchAgent
         from core.agents.ironclaw_agent import IronClawAgent
+        from core.agents.planning_agent import PlanningAgent
 
         cfg = GrimConfig()
         cfg.model = "claude-opus-4-6"
@@ -179,6 +231,7 @@ class TestAgentModelConfig:
             OperatorAgent(cfg),
             ResearchAgent(cfg),
             IronClawAgent(cfg),
+            PlanningAgent(cfg),
         ]
 
         for agent in agents:
@@ -331,11 +384,21 @@ class TestDispatchWiring:
     def _make_agents(self):
         """Create mock agent callables."""
         agents = {}
-        for name in ["memory", "code", "research", "operate", "ironclaw"]:
+        for name in ["memory", "code", "research", "operate", "ironclaw", "planning"]:
             mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
             mock_fn.__name__ = f"{name}_agent_fn"
             agents[name] = mock_fn
         return agents
+
+    @pytest.mark.asyncio
+    async def test_dispatch_planning(self):
+        from core.nodes.dispatch import make_dispatch_node
+        agents = self._make_agents()
+        dispatch_fn = make_dispatch_node(agents)
+
+        result = await dispatch_fn({"delegation_type": "planning"})
+        agents["planning"].assert_called_once()
+        assert result["agent_result"].agent == "planning"
 
     @pytest.mark.asyncio
     async def test_dispatch_memory(self):
@@ -488,6 +551,67 @@ class TestRouterDelegation:
             assert result.get("delegation_type") == "ironclaw"
 
     @pytest.mark.asyncio
+    async def test_planning_keywords_no_longer_delegate(self):
+        """v0.0.6 Phase 2: planning is graph-level, not a delegation target.
+        'plan this implementation' matches 'implement' → ironclaw."""
+        from langchain_core.messages import HumanMessage
+        from core.nodes.router import make_router_node
+
+        cfg = GrimConfig()
+        router_fn = make_router_node(cfg)
+        result = await router_fn({
+            "messages": [HumanMessage(content="plan this implementation")],
+            "matched_skills": [],
+        })
+        assert result["mode"] == "delegate"
+        assert result["delegation_type"] == "ironclaw"
+
+    @pytest.mark.asyncio
+    async def test_code_keywords_delegate_to_ironclaw(self):
+        """v0.0.6: code keywords route to ironclaw, not code."""
+        from langchain_core.messages import HumanMessage
+        from core.nodes.router import make_router_node
+
+        cfg = GrimConfig()
+        router_fn = make_router_node(cfg)
+        result = await router_fn({
+            "messages": [HumanMessage(content="write code for a parser")],
+            "matched_skills": [],
+        })
+        assert result["mode"] == "delegate"
+        assert result["delegation_type"] == "ironclaw"
+
+    @pytest.mark.asyncio
+    async def test_operate_keywords_narrow_to_git_reads(self):
+        """v0.0.6: git status stays operate (read-only)."""
+        from langchain_core.messages import HumanMessage
+        from core.nodes.router import make_router_node
+
+        cfg = GrimConfig()
+        router_fn = make_router_node(cfg)
+        result = await router_fn({
+            "messages": [HumanMessage(content="git status")],
+            "matched_skills": [],
+        })
+        assert result["mode"] == "delegate"
+        assert result["delegation_type"] == "operate"
+
+    @pytest.mark.asyncio
+    async def test_shell_commands_delegate_to_ironclaw(self):
+        """v0.0.6: shell execution routes to ironclaw, not operate."""
+        from langchain_core.messages import HumanMessage
+        from core.nodes.router import make_router_node
+
+        cfg = GrimConfig()
+        router_fn = make_router_node(cfg)
+        result = await router_fn({
+            "messages": [HumanMessage(content="run command ls -la")],
+            "matched_skills": [],
+        })
+        assert result["mode"] == "delegate"
+        assert result["delegation_type"] == "ironclaw"
+
+    @pytest.mark.asyncio
     async def test_skill_consumer_routes_delegation(self):
         """A matched skill with consumer field should drive delegation."""
         from langchain_core.messages import HumanMessage
@@ -546,6 +670,12 @@ class TestAgentFactories:
     def test_make_ironclaw_agent_returns_callable(self):
         from core.agents.ironclaw_agent import make_ironclaw_agent
         fn = make_ironclaw_agent(GrimConfig())
+        assert callable(fn)
+        assert asyncio.iscoroutinefunction(fn)
+
+    def test_make_planning_agent_returns_callable(self):
+        from core.agents.planning_agent import make_planning_agent
+        fn = make_planning_agent(GrimConfig())
         assert callable(fn)
         assert asyncio.iscoroutinefunction(fn)
 
@@ -629,6 +759,30 @@ class TestAgentProtocolSelection:
             mock_exec.assert_called_once()
             call_kwargs = mock_exec.call_args[1]
             assert call_kwargs["skill_protocol"] == "Sandbox protocol"
+
+    @pytest.mark.asyncio
+    async def test_planning_prefers_sprint_plan(self):
+        from core.agents.planning_agent import make_planning_agent
+        from langchain_core.messages import HumanMessage
+
+        cfg = GrimConfig()
+        fn = make_planning_agent(cfg)
+
+        with patch("core.agents.base.BaseAgent.execute", new_callable=AsyncMock) as mock_exec:
+            from core.state import AgentResult
+            mock_exec.return_value = AgentResult(agent="planning", success=True, summary="done")
+
+            await fn({
+                "messages": [HumanMessage(content="plan the sprint")],
+                "skill_protocols": {
+                    "sprint-plan": "Sprint planning protocol",
+                    "task-manage": "Task management protocol",
+                },
+            })
+
+            mock_exec.assert_called_once()
+            call_kwargs = mock_exec.call_args[1]
+            assert call_kwargs["skill_protocol"] == "Sprint planning protocol"
 
     @pytest.mark.asyncio
     async def test_memory_prefers_kronos_capture(self):
@@ -745,7 +899,7 @@ class TestDispatchConfigPropagation:
 
     def _make_agents(self):
         agents = {}
-        for name in ["memory", "code", "research", "operate", "ironclaw"]:
+        for name in ["memory", "code", "research", "operate", "ironclaw", "planning"]:
             mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
             mock_fn.__name__ = f"{name}_agent_fn"
             agents[name] = mock_fn

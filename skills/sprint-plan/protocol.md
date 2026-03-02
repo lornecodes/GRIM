@@ -34,7 +34,12 @@ Before planning new work, review what's already in flight:
 3. Clean up:
    - Move done stories: `kronos_task_move(story_id="...", column="closed")`
    - Archive: `kronos_task_archive()`
-4. Now you know the true state of active work before adding more
+4. Check for draft items in the backlog:
+   ```
+   kronos_task_list(status="draft")
+   ```
+   - If drafts exist, prompt user to review and promote before planning
+5. Now you know the true state of active work before adding more
 
 ### Phase 1: Review Backlog
 
@@ -42,8 +47,11 @@ Before planning new work, review what's already in flight:
    ```
    kronos_backlog_view(project_id="proj-xxx")
    ```
-2. Present stories to user with priority, estimate, and feature grouping
-3. Note total estimate days in backlog
+2. Separate **draft** items from **ready** items:
+   - **Ready** (status=new): available for board placement
+   - **Pending Approval** (status=draft): need promotion first — show under separate heading
+3. Present ready stories to user with priority, estimate, and feature grouping
+4. Note total estimate days in backlog
 
 ### Phase 2: Select Stories
 
@@ -61,6 +69,8 @@ Before planning new work, review what's already in flight:
    ```
    kronos_task_move(story_id="story-xxx", column="new")
    ```
+   > **Draft guard**: If user picks a draft item, prompt to promote first:
+   > `kronos_task_update(item_id="story-xxx", fields={"status": "new"})`
 2. Optionally move highest priority to ACTIVE:
    ```
    kronos_task_move(story_id="story-xxx", column="active")

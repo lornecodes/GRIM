@@ -57,10 +57,28 @@ class TestAgentDiscovery:
     """Test auto-discovery from core/agents/ directory."""
 
     def test_discovers_all_agents(self, grim_config):
-        """Should discover all 6 agents."""
+        """Should discover all 6 agents (v0.0.6: planning is graph-level, not dispatched)."""
         reg = AgentRegistry.discover(grim_config)
         expected = {"memory", "code", "research", "operate", "audit", "ironclaw"}
         assert set(reg.names()) == expected
+
+    def test_default_config_disables_code(self):
+        """Default config disables 'code' agent (v0.0.6: code ops → IronClaw)."""
+        config = GrimConfig()
+        assert "code" in config.agents_disabled
+
+    def test_code_agent_excluded_with_default_config(self):
+        """With default agents_disabled, code agent is not in registry."""
+        config = GrimConfig()
+        reg = AgentRegistry.discover(config, disabled=config.agents_disabled)
+        assert "code" not in reg
+        # Planning is now a graph-level branch, not a dispatched agent
+        assert "planning" not in reg
+
+    def test_planning_agent_not_discovered(self, grim_config):
+        """Planning agent is deprecated — superseded by planning_companion graph node."""
+        reg = AgentRegistry.discover(grim_config)
+        assert "planning" not in reg
 
     def test_disabled_agents_excluded(self, grim_config):
         """Disabled agents should not appear in registry."""
@@ -68,11 +86,10 @@ class TestAgentDiscovery:
         assert "ironclaw" not in reg
         assert "audit" not in reg
         assert "memory" in reg
-        assert "code" in reg
 
     def test_all_disabled(self, grim_config):
         """If all agents are disabled, registry should be empty."""
-        all_names = ["memory", "code", "research", "operate", "audit", "ironclaw"]
+        all_names = ["memory", "code", "research", "operate", "audit", "ironclaw", "planning"]
         reg = AgentRegistry.discover(grim_config, disabled=all_names)
         assert len(reg) == 0
 

@@ -3,6 +3,7 @@
 import { useGrimStore } from "@/store";
 import { StatusDot } from "./StatusDot";
 import { GrimSprite } from "./GrimSprite";
+import { GRIM_VERSION } from "@/config/version";
 
 export function AppHeader() {
   const wsStatus = useGrimStore((s) => s.wsStatus);
@@ -15,6 +16,7 @@ export function AppHeader() {
       <div className="flex items-center gap-2.5">
         <GrimSprite size="sm" />
         <h1 className="text-[15px] font-semibold tracking-[2px]">GRIM</h1>
+        <span className="text-[9px] text-grim-accent/60 font-mono ml-0.5">v{GRIM_VERSION}</span>
         <span className="text-[10px] text-grim-text-dim ml-1">Mission Control</span>
       </div>
       <div className="flex items-center gap-4">

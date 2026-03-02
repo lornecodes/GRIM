@@ -40,19 +40,19 @@ consumers:
 | `kronos-recall/` | ✅ Built | recognition | memory-agent | Hybrid search + retrieval |
 | `kronos-reflect/` | ✅ Built | recognition | memory-agent | Inbox triage, vault health |
 | `deep-ingest/` | ✅ Built | delegation | research-agent | 7-phase deep FDO creation |
-| `vault-sync/` | ✅ Built | delegation | ops-agent | 5-phase vault sync after code changes |
-| `docker-release/` | ✅ Built | delegation | ops-agent | Docker image build, test, deploy via release.sh |
-| `cliproxyapi/` | ✅ Built | delegation | ops-agent | CLIProxyAPI OAuth setup, health, troubleshooting |
+| `vault-sync/` | ✅ Built | delegation | memory-agent | 5-phase vault sync after code changes |
+| `docker-release/` | ✅ Built | delegation | ironclaw-agent | Docker image build, test, deploy via release.sh |
+| `cliproxyapi/` | ✅ Built | delegation | ironclaw-agent | CLIProxyAPI OAuth setup, health, troubleshooting |
 | `project-lifecycle/` | ✅ Built | delegation | memory-agent | Roadmap, design spec, and ADR FDO management |
 
 ### Agent-Only Skills (agents execute, GRIM doesn't read)
 
 | Skill | Status | Agent(s) | Description |
 |-------|--------|----------|-------------|
-| `code-execution/` | ✅ Built | coder-agent | Write, run, test code safely |
-| `file-operations/` | ✅ Built | coder-agent, ops-agent, memory-agent | Safe file system interaction |
-| `git-operations/` | ✅ Built | ops-agent | Commit, branch, push, PR |
-| `shell-execution/` | ✅ Built | coder-agent, ops-agent | Run shell commands safely |
+| `code-execution/` | ✅ Built | ironclaw-agent | Write, run, test code safely |
+| `file-operations/` | ✅ Built | memory-agent | Safe file system interaction |
+| `git-operations/` | ✅ Built | ops-agent (read), ironclaw-agent (write) | Status, diff, log, commit, push |
+| `shell-execution/` | ✅ Built | ironclaw-agent | Run shell commands in sandboxed containers |
 
 ### Superseded / Planned
 
@@ -96,10 +96,12 @@ skill-name/
 
 | Agent | Responsibility | Skills |
 |-------|---------------|--------|
-| **memory-agent** | All Kronos vault operations | kronos-capture, kronos-promote, kronos-relate, kronos-recall, kronos-reflect, project-lifecycle, file-operations |
-| **coder-agent** | Code creation and modification | code-execution, file-operations, shell-execution |
-| **ops-agent** | Infrastructure, git, deployment | git-operations, file-operations, shell-execution, vault-sync, docker-release, cliproxyapi |
-| **research-agent** | Deep analysis and ingestion | deep-ingest, kronos-recall |
+| **memory-agent** | Vault writes, task management | kronos-capture, kronos-promote, kronos-relate, kronos-recall, kronos-reflect, project-lifecycle, file-operations, vault-sync |
+| **planning-agent** | Work scoping, board management | sprint-plan, task-manage |
+| **research-agent** | Deep analysis and ingestion (read-only) | deep-ingest, kronos-recall |
+| **ops-agent** | Infrastructure awareness, git reads | git-operations (read-only) |
+| **ironclaw-agent** | All execution (code, shell, deploy) | code-execution, shell-execution, git-operations (write), docker-release, cliproxyapi, ship-it, staging-cleanup, staging-organize |
+| **audit-agent** | Review staged IronClaw output | ironclaw-review |
 
 ## Development Mode
 

@@ -28,7 +28,9 @@ from server.app import app
 
 
 def run_async(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run a coroutine synchronously. Uses asyncio.run() to avoid stale event loop
+    issues when tests run after other async test modules."""
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------

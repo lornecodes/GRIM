@@ -21,6 +21,9 @@ full gated pipeline — unit tests through post-deploy verification.
 ## Pipeline Overview
 
 ```
+Gate 0: Version Check
+  └─ Verify/bump ui/src/config/version.ts + ui/package.json
+     │
 Gate 1: Unit Tests (host-side, fast)
   ├─ Python: core + model routing + ironclaw + agent integration
   └─ UI: vitest (components, persistence, sessions)
@@ -55,6 +58,22 @@ Gate 6: Cleanup
 ```
 
 ## Execution
+
+### Gate 0: Version Check
+
+Verify the version in `ui/src/config/version.ts` matches the release target.
+If shipping a new version (e.g., 0.0.5 → 0.0.6), bump it now:
+
+```bash
+# Check current version
+cat ui/src/config/version.ts
+
+# Update if needed (also sync package.json)
+# ui/src/config/version.ts  →  export const GRIM_VERSION = "0.0.6";
+# ui/package.json            →  "version": "0.0.6"
+```
+
+Both files must agree. The version displays in the UI header.
 
 ### Gate 1: Unit Tests
 

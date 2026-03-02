@@ -69,7 +69,7 @@ consumers:
     role: delegation
     description: Routes sync requests after detecting code changes
     reads: [triggers, phases]
-  ops-agent:
+  memory-agent:
     role: execution
-    description: Follows 6-phase protocol to detect changes, update FDOs, and ripple through graph
+    description: Follows 6-phase protocol to detect changes, update FDOs, and ripple through graph (vault writes)
     reads: [protocol.md, phases, change_types, quality_gates]

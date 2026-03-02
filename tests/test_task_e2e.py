@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import pytest
 import shutil
 import sys
 import tempfile
@@ -153,15 +154,35 @@ sys.path.insert(0, str(grim_root / "mcp" / "kronos" / "src"))
 
 print("Importing server module...")
 t0 = time.time()
+import kronos_mcp.server as _server
+from kronos_mcp.tasks import TaskEngine
+from kronos_mcp.board import BoardEngine
+from kronos_mcp.calendar import CalendarEngine
 from kronos_mcp.server import (
     handle_task_create, handle_task_update, handle_task_get,
     handle_task_list, handle_task_move, handle_task_archive,
     handle_board_view, handle_backlog_view,
     handle_calendar_view, handle_calendar_add, handle_calendar_update,
     handle_calendar_sync,
-    task_engine, board_engine, calendar_engine,
 )
 print(f"Import done in {time.time() - t0:.1f}s")
+
+
+def _reinit_engines():
+    """Reinitialize server engines to point to MOCK_VAULT.
+    Must be called at test time (not collection) to avoid being overwritten
+    by other test modules loaded after this one."""
+    _server.task_engine = TaskEngine(str(MOCK_VAULT))
+    _server.board_engine = BoardEngine(str(MOCK_VAULT), _server.task_engine)
+    _server.calendar_engine = CalendarEngine(str(MOCK_VAULT), _server.board_engine)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _mock_vault_engines():
+    """Ensure server engines use the mock vault for all tests in this module."""
+    _reinit_engines()
+    yield
+    # No need to restore — other test modules reinitialize their own engines
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -183,13 +204,11 @@ def call(handler, args: dict) -> dict:
     return json.loads(handler(args))
 
 
-# ── E2E Scenarios ───────────────────────────────────────────────────────────
+# ── Fixtures (shared state across dependent tests) ──────────────────────────
 
-def test_multi_project_setup():
+@pytest.fixture(scope="module")
+def stories():
     """Create stories across multiple projects/features."""
-    print("\n[E2E-1] Multi-project story creation")
-
-    # Phoenix Auth — 3 stories
     r1 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-phoenix-auth",
         "title": "Implement OAuth2 flow", "priority": "critical", "estimate_days": 3,
@@ -197,52 +216,70 @@ def test_multi_project_setup():
         "acceptance_criteria": ["Login works", "Token refresh works", "Logout clears session"],
         "tags": ["auth", "oauth"],
     })
-    record("phoenix auth story 1", "created" in r1, r1.get("created", r1.get("error")))
-
     r2 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-phoenix-auth",
         "title": "Add session management", "priority": "high", "estimate_days": 2,
         "tags": ["auth", "session"],
     })
-    record("phoenix auth story 2", "created" in r2, r2.get("created"))
-
     r3 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-phoenix-auth",
         "title": "Write auth tests", "priority": "medium", "estimate_days": 1,
     })
-    record("phoenix auth story 3", "created" in r3, r3.get("created"))
-
-    # Phoenix API — 2 stories
     r4 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-phoenix-api",
         "title": "Design REST endpoints", "priority": "high", "estimate_days": 2,
     })
-    record("phoenix api story 1", "created" in r4, r4.get("created"))
-
     r5 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-phoenix-api",
         "title": "Implement CRUD handlers", "priority": "medium", "estimate_days": 4,
     })
-    record("phoenix api story 2", "created" in r5, r5.get("created"))
-
-    # Atlas Dashboard — 2 stories
     r6 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-atlas-dashboard",
         "title": "Build widget framework", "priority": "high", "estimate_days": 3,
     })
-    record("atlas dashboard story 1", "created" in r6, r6.get("created"))
-
     r7 = call(handle_task_create, {
         "type": "story", "feat_id": "feat-atlas-dashboard",
         "title": "Create metrics panel", "priority": "low", "estimate_days": 2,
     })
-    record("atlas dashboard story 2", "created" in r7, r7.get("created"))
-
     return {
         "phoenix_auth": [r1.get("created"), r2.get("created"), r3.get("created")],
         "phoenix_api": [r4.get("created"), r5.get("created")],
         "atlas_dashboard": [r6.get("created"), r7.get("created")],
     }
+
+
+@pytest.fixture(scope="module")
+def tasks(stories):
+    """Create tasks on the OAuth story."""
+    auth_story = stories["phoenix_auth"][0]
+    created = []
+    for title in ["Set up OAuth provider", "Implement PKCE flow",
+                   "Build callback handler", "Add token storage"]:
+        r = call(handle_task_create, {
+            "type": "task", "story_id": auth_story, "title": title,
+        })
+        created.append(r.get("created"))
+    return created
+
+
+@pytest.fixture(scope="module")
+def oauth_id(stories):
+    """Move OAuth story to in_progress and return its ID."""
+    oid = stories["phoenix_auth"][0]
+    call(handle_task_move, {"story_id": oid, "column": "active"})
+    call(handle_task_move, {"story_id": oid, "column": "in_progress"})
+    return oid
+
+
+# ── E2E Scenarios ───────────────────────────────────────────────────────────
+
+def test_multi_project_setup(stories):
+    """Verify stories were created across multiple projects/features."""
+    print("\n[E2E-1] Multi-project story creation")
+    record("phoenix_auth stories created", all(stories["phoenix_auth"]))
+    record("phoenix_api stories created", all(stories["phoenix_api"]))
+    record("atlas_dashboard stories created", all(stories["atlas_dashboard"]))
+    record("total stories", len(stories["phoenix_auth"]) + len(stories["phoenix_api"]) + len(stories["atlas_dashboard"]) == 7)
 
 
 def test_task_creation(stories: dict):
@@ -269,7 +306,7 @@ def test_task_creation(stories: dict):
         })
         record(f"atlas task", "created" in r, r.get("created"))
 
-    return tasks_created
+    assert len(tasks_created) == 4, f"Expected 4 tasks, got {len(tasks_created)}"
 
 
 def test_cross_project_listing(stories: dict):
@@ -360,7 +397,7 @@ def test_board_workflow(stories: dict):
     item = json.loads(r) if isinstance(r, str) else r
     record("oauth status = in_progress", item.get("status") == "in_progress")
 
-    return oauth_id
+    assert oauth_id, "OAuth story ID should exist"
 
 
 def test_task_progress(stories: dict, tasks: list[str]):
@@ -547,7 +584,7 @@ def test_feature_discovery():
     """get_all_features returns enriched info."""
     print("\n[E2E-10] Feature discovery")
 
-    features = task_engine.get_all_features()
+    features = _server.task_engine.get_all_features()
     ids = [f["id"] for f in features]
     record("phoenix auth found", "feat-phoenix-auth" in ids)
     record("phoenix api found", "feat-phoenix-api" in ids)

@@ -19,6 +19,16 @@ This is the path from "code changed" to "new GRIM is running."
 
 ## Operations
 
+### Version Check (before building)
+
+Verify the version in `ui/src/config/version.ts` matches the release target.
+If shipping a new version, bump both files before building:
+
+- `ui/src/config/version.ts` → `export const GRIM_VERSION = "X.Y.Z";`
+- `ui/package.json` → `"version": "X.Y.Z"`
+
+Both files must agree. The version displays in the UI header.
+
 ### Build
 ```bash
 ./scripts/release.sh build

@@ -4,7 +4,7 @@ Tests all layers without live LLM or MCP:
 - State types (FieldState, SkillContext, FDOSummary, AgentResult)
 - Config loader (load_config, YAML parsing, env overrides)
 - Skill system (registry, loader, matcher)
-- All 8 nodes (identity, memory, skill_match, router, companion, dispatch, integrate, evolve)
+- All 14 nodes (identity, memory, skill_match, graph_router, personal_companion, router, companion, dispatch, audit_gate, audit, re_dispatch, integrate, evolve)
 - Graph wiring (build_graph, conditional routing)
 - Workspace tools (file ops, path security, shell)
 - Prompt builder (system prompt assembly)
@@ -42,7 +42,7 @@ from core.state import AgentResult, FDOSummary, FieldState, GrimState, SkillCont
 
 def run_async(coro):
     """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class MockMCPResult:
@@ -370,6 +370,73 @@ class TestSkillRegistry(unittest.TestCase):
         self.assertIn("2 skills", r)
 
 
+class TestConsumerToDelegation(unittest.TestCase):
+    """Test _consumer_to_delegation mapping (v0.0.6 roster)."""
+
+    def test_memory_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("memory-agent"), "memory")
+
+    def test_coder_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("coder-agent"), "code")
+
+    def test_research_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("research-agent"), "research")
+
+    def test_operator_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("operator-agent"), "operate")
+
+    def test_ops_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("ops-agent"), "operate")
+
+    def test_ironclaw_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("ironclaw-agent"), "ironclaw")
+
+    def test_audit_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("audit-agent"), "audit")
+
+    def test_planning_agent_mapping(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("planning-agent"), "planning")
+
+    def test_unknown_strips_agent_suffix(self):
+        from core.skills.registry import _consumer_to_delegation
+        self.assertEqual(_consumer_to_delegation("custom-agent"), "custom")
+
+    def test_delegation_target_with_planning_consumer(self):
+        """Skill with planning-agent execution consumer → 'planning'."""
+        from core.skills.registry import Skill, SkillConsumer
+        skill = Skill(
+            name="sprint-plan", version="1.0",
+            description="Sprint planning",
+            protocol="## Protocol",
+            consumers=[
+                SkillConsumer(name="grim", role="recognition"),
+                SkillConsumer(name="planning-agent", role="execution"),
+            ],
+        )
+        self.assertEqual(skill.delegation_target(), "planning")
+
+    def test_delegation_target_with_ironclaw_consumer(self):
+        """Skill with ironclaw-agent execution consumer → 'ironclaw'."""
+        from core.skills.registry import Skill, SkillConsumer
+        skill = Skill(
+            name="shell-execution", version="1.0",
+            description="Shell execution",
+            protocol="## Protocol",
+            consumers=[
+                SkillConsumer(name="ironclaw-agent", role="execution"),
+            ],
+        )
+        self.assertEqual(skill.delegation_target(), "ironclaw")
+
+
 class TestSkillLoader(unittest.TestCase):
     def test_load_real_skills(self):
         """Load skills from the actual skills/ directory."""
@@ -475,7 +542,7 @@ class TestSkillMatcher(unittest.TestCase):
                 if kw in msg:
                     matched_type = dtype
                     break
-        self.assertEqual(matched_type, "code")
+        self.assertEqual(matched_type, "ironclaw")
 
     def test_git_delegation_via_router_keywords(self):
         """Router catches 'commit' even when skill matcher doesn't."""
@@ -487,7 +554,7 @@ class TestSkillMatcher(unittest.TestCase):
                 if kw in msg:
                     matched_type = dtype
                     break
-        self.assertEqual(matched_type, "operate")
+        self.assertEqual(matched_type, "ironclaw")
 
     def test_matching_returns_sorted_by_score(self):
         from core.skills.matcher import match_skills
@@ -1173,7 +1240,7 @@ class TestRouterNode(unittest.TestCase):
             "matched_skills": [],
         }))
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "code")
+        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_keyword_delegation_research(self):
         from core.config import GrimConfig
@@ -1195,7 +1262,7 @@ class TestRouterNode(unittest.TestCase):
             "matched_skills": [],
         }))
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "operate")
+        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_route_decision_function(self):
         from core.nodes.router import route_decision
@@ -1210,18 +1277,50 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
         ctx = SkillContext(name="kronos-promote", version="1.0", description="")
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
-        # Code skills → code
+        # Code skills → ironclaw (v0.0.6: execution layer)
         ctx = SkillContext(name="code-execution", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "code")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
         # Deep ingest → research
         ctx = SkillContext(name="deep-ingest", version="1.0", description="")
         self.assertEqual(_skill_ctx_to_delegation(ctx), "research")
-        # Vault sync → operate
+        # Vault sync → memory (v0.0.6: vault writes belong to memory)
         ctx = SkillContext(name="vault-sync", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "operate")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
         # Unknown → None
         ctx = SkillContext(name="unknown-skill", version="1.0", description="")
         self.assertIsNone(_skill_ctx_to_delegation(ctx))
+
+    def test_planning_skill_delegation(self):
+        """v0.0.6 Phase 2: sprint-plan and task-manage route to memory (planning is graph-level)."""
+        from core.nodes.router import _skill_ctx_to_delegation
+        ctx = SkillContext(name="sprint-plan", version="1.0", description="")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
+        ctx = SkillContext(name="task-manage", version="1.0", description="")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
+
+    def test_ironclaw_execution_skills(self):
+        """v0.0.6: all execution skills route to ironclaw."""
+        from core.nodes.router import _skill_ctx_to_delegation
+        for skill_name in ["code-execution", "file-operations", "shell-execution",
+                           "docker-release", "cliproxyapi", "ship-it",
+                           "staging-organize", "staging-cleanup"]:
+            ctx = SkillContext(name=skill_name, version="1.0", description="")
+            self.assertEqual(
+                _skill_ctx_to_delegation(ctx), "ironclaw",
+                f"{skill_name} should route to ironclaw",
+            )
+
+    def test_audit_skill_delegation(self):
+        """ironclaw-review routes to audit agent."""
+        from core.nodes.router import _skill_ctx_to_delegation
+        ctx = SkillContext(name="ironclaw-review", version="1.0", description="")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "audit")
+
+    def test_git_operations_routes_to_operate(self):
+        """git-operations routes to operate (read-only infra)."""
+        from core.nodes.router import _skill_ctx_to_delegation
+        ctx = SkillContext(name="git-operations", version="1.0", description="")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "operate")
 
     def test_permission_based_delegation(self):
         """Router delegates based on permission hints when no name match."""
@@ -1230,14 +1329,14 @@ class TestRouterNode(unittest.TestCase):
         ctx = SkillContext(name="custom-skill", version="1.0", description="",
                            permissions=["vault:write"])
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
-        # Filesystem write → code
+        # Filesystem write → ironclaw (v0.0.6: execution layer)
         ctx = SkillContext(name="custom-skill", version="1.0", description="",
                            permissions=["filesystem:write"])
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "code")
-        # Shell write → operate
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
+        # Shell write → ironclaw (v0.0.6: execution layer)
         ctx = SkillContext(name="custom-skill", version="1.0", description="",
                            permissions=["shell:write"])
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "operate")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
 
 
 class TestDispatchNode(unittest.TestCase):
@@ -1796,7 +1895,8 @@ class TestAgentFactories(unittest.TestCase):
         self.assertNotIn("kronos_create", tool_names)
 
     @patch("core.agents.base.ChatAnthropic")
-    def test_operator_agent_has_git_tools(self, MockLLM):
+    def test_operator_agent_has_git_read_tools(self, MockLLM):
+        """v0.0.6: operator narrowed to git reads only."""
         mock_instance = MagicMock()
         mock_instance.bind_tools.return_value = mock_instance
         MockLLM.return_value = mock_instance
@@ -1808,7 +1908,8 @@ class TestAgentFactories(unittest.TestCase):
         self.assertIn("git_status", tool_names)
         self.assertIn("git_diff", tool_names)
         self.assertIn("git_log", tool_names)
-        self.assertIn("git_add_commit", tool_names)
+        self.assertNotIn("git_add_commit", tool_names)
+        self.assertNotIn("run_shell", tool_names)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

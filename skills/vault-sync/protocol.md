@@ -204,7 +204,8 @@ These FDO types are most prone to embedding stale metrics:
    - If tasks within a story were completed → update them: `kronos_task_update(item_id="task-xxx", fields={"status": "resolved"})`
 3. **Create stories for new work** — If the change introduced untracked work (new feature, new phase started):
    - Find or create the parent `feat-*` FDO
-   - Create a story: `kronos_task_create(type="story", feat_id="feat-xxx", title="...", priority="...", estimate_days=N)`
+   - Create a story with source tracking: `kronos_task_create(type="story", feat_id="feat-xxx", title="...", priority="...", estimate_days=N, created_by="agent:memory")`
+   - Vault-sync is explicitly user-triggered, so use `status="new"` (not draft)
    - If already done, move straight to CLOSED: `kronos_task_move(story_id="...", column="closed")`
 4. **Archive completed** — If stories moved to CLOSED:
    ```

@@ -20,14 +20,10 @@ consumers:
     role: recognition
     description: Recognizes when user wants to ship/deploy/release
     reads: [triggers, quality_gates]
-  ops-agent:
+  ironclaw-agent:
     role: execution
-    description: Executes the gated deployment pipeline
+    description: Executes the gated deployment pipeline and sandboxed test/build commands
     reads: [protocol.md, safety, quality_gates]
-  ironclaw:
-    role: execution
-    description: Can execute sandboxed test/build commands
-    reads: [protocol.md]
 
 inputs:
   scope:

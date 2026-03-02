@@ -13,14 +13,6 @@ permissions:
   - filesystem:write
 
 consumers:
-  coder-agent:
-    role: execution
-    description: File manipulation as part of coding tasks
-    reads: [protocol.md, safety, quality_gates]
-  ops-agent:
-    role: execution
-    description: File organization, cleanup, archival operations
-    reads: [protocol.md, safety, quality_gates]
   memory-agent:
     role: execution
     description: Direct file access as Kronos MCP fallback

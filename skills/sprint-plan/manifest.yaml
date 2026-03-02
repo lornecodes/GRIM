@@ -21,6 +21,10 @@ consumers:
     role: execution
     description: Executes sprint planning via MCP tools
     reads: [protocol.md, phases, quality_gates]
+  planning-companion:
+    role: planning
+    description: Graph-level planning node — scopes work and determines sprint priorities
+    reads: [protocol.md, phases, quality_gates]
 
 inputs:
   action:
@@ -45,8 +49,8 @@ triggers:
   - proactive: "Board is empty and backlog has items"
   - keywords:
       strong: ["plan sprint", "what should I work on", "load up the board",
-               "close sprint", "sprint review"]
-      weak: ["sprint", "plan", "next up", "capacity"]
+               "close sprint", "sprint review", "promote drafts", "review drafts"]
+      weak: ["sprint", "plan", "next up", "capacity", "draft"]
 
 phases:
   1_review_backlog: "Show backlog sorted by priority"
@@ -57,6 +61,7 @@ phases:
 safety:
   - "Always confirm story selection with user before loading board"
   - "Warn if total estimates exceed reasonable capacity"
+  - "Draft items cannot be loaded onto the board — promote to NEW first"
 
 quality_gates:
   - "All selected stories have estimates"

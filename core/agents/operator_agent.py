@@ -1,4 +1,4 @@
-"""Operator Agent — git, shell, and infrastructure operations."""
+"""Operator Agent — infrastructure awareness and read-only git operations."""
 from __future__ import annotations
 
 import logging
@@ -6,31 +6,26 @@ import logging
 from core.agents.base import BaseAgent
 from core.config import GrimConfig
 from core.tools.kronos_read import COMPANION_TOOLS
-from core.tools.workspace import GIT_TOOLS, SHELL_TOOLS, FILE_TOOLS
+from core.tools.workspace import GIT_READ_TOOLS
 
 logger = logging.getLogger(__name__)
 
 
 class OperatorAgent(BaseAgent):
-    """Agent for operations, git, shell, and infrastructure."""
+    """Agent for infrastructure awareness and read-only git operations."""
 
     agent_name = "operator"
-    protocol_priority = [
-        "git-operations",
-        "shell-execution",
-        "vault-sync",
-    ]
+    protocol_priority = ["git-operations"]
     default_protocol = (
-        "You are an operations agent with full terminal/bash access.\n"
-        "Use run_shell to execute any command the user needs: "
-        "ping, curl, python, git, docker, system utilities, etc.\n"
-        "Use git tools for git operations. Use file tools for reading/writing files.\n"
+        "You are an infrastructure awareness agent with read-only git access.\n"
+        "Use git tools to check repo status, review diffs, and browse commit logs.\n"
+        "For shell execution, file writes, or git commits — those go through IronClaw.\n"
         "Always execute the task — do not say you can't do something "
         "if you have a tool that can do it."
     )
 
     def __init__(self, config: GrimConfig) -> None:
-        tools = GIT_TOOLS + SHELL_TOOLS + FILE_TOOLS + list(COMPANION_TOOLS)
+        tools = list(GIT_READ_TOOLS) + list(COMPANION_TOOLS)
         super().__init__(config=config, tools=tools)
 
 

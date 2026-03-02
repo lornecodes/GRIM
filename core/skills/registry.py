@@ -85,6 +85,7 @@ def _consumer_to_delegation(consumer_name: str) -> str:
         "ops-agent": "operate",
         "ironclaw-agent": "ironclaw",
         "audit-agent": "audit",
+        "planning-agent": "planning",
     }
     return mapping.get(consumer_name, consumer_name.replace("-agent", ""))
 

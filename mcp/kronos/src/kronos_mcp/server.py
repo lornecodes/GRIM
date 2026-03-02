@@ -79,8 +79,30 @@ from .calendar import CalendarEngine
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
+# ── Logging ──────────────────────────────────────────────────────────────────
+# CRITICAL: MCP stdio servers communicate via stdin/stdout. If logging goes to
+# stderr and the parent process doesn't drain it fast enough, the stderr pipe
+# buffer fills up (~512KB on Windows), blocking any logging call, which blocks
+# the asyncio event loop, which prevents stdout responses from being written.
+#
+# Fix: log to a file instead of stderr. Falls back to NullHandler if the log
+# file can't be created (e.g. read-only filesystem).
+_log_path = os.path.join(os.getenv("KRONOS_VAULT_PATH", "."), "..", ".kronos-mcp.log")
+try:
+    _log_path = os.path.abspath(_log_path)
+    _handler = logging.FileHandler(_log_path, encoding="utf-8")
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S"
+    ))
+    logging.root.addHandler(_handler)
+    logging.root.setLevel(logging.INFO)
+except Exception:
+    logging.basicConfig(level=logging.WARNING)  # Fallback: minimal stderr logging
+
 logger = logging.getLogger("kronos-mcp")
+
+# Suppress MCP library's per-request INFO logs (they go to root → our file handler)
+logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -638,6 +660,15 @@ TOOLS: list[Tool] = [
                 "notes": {
                     "type": "string",
                     "description": "Notes (tasks only)",
+                },
+                "created_by": {
+                    "type": "string",
+                    "description": "Who created this item (e.g. 'human', 'agent:planning', 'agent:memory')",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["draft", "new"],
+                    "description": "Initial status — 'draft' for AI-created items pending approval, 'new' for human-created (default: new)",
                 },
             },
             "required": ["type", "title"],
@@ -1973,15 +2004,27 @@ def handle_task_create(args: dict) -> str:
         feat_id = (args.get("feat_id") or "").strip()
         if not feat_id:
             return _json({"error": "feat_id required for stories"})
-        return _json(task_engine.create_story(
+
+        # Pre-creation validation (non-blocking warnings)
+        est = float(args.get("estimate_days") or 1.0)
+        warnings = task_engine.validate_story_creation(
+            feat_id=feat_id, title=title, estimate_days=est,
+        )
+
+        result = task_engine.create_story(
             feat_id=feat_id,
             title=title,
             priority=args.get("priority") or "medium",
-            estimate_days=float(args.get("estimate_days") or 1.0),
+            estimate_days=est,
             description=args.get("description") or "",
             acceptance_criteria=args.get("acceptance_criteria"),
             tags=args.get("tags"),
-        ))
+            created_by=args.get("created_by") or "human",
+            status=args.get("status") or "new",
+        )
+        if warnings and not result.get("error"):
+            result["warnings"] = warnings
+        return _json(result)
     elif item_type == "task":
         story_id = (args.get("story_id") or "").strip()
         if not story_id:
@@ -1992,6 +2035,7 @@ def handle_task_create(args: dict) -> str:
             estimate_days=float(args.get("estimate_days") or 0.5),
             assignee=args.get("assignee") or "",
             notes=args.get("notes") or "",
+            created_by=args.get("created_by") or "human",
         ))
     else:
         return _json({"error": f"Invalid type: {item_type}", "valid": ["story", "task"]})

@@ -9,7 +9,37 @@ import json
 from unittest.mock import MagicMock, patch, call
 import pytest
 
-from kronos_mcp.cache import KronosCache, TOOL_TTLS, WRITE_TOOLS, _make_key
+# Import cache module directly to avoid kronos_mcp.__init__ -> server.py
+# (server.py requires KRONOS_VAULT_PATH at import time)
+import importlib.util
+import sys
+from pathlib import Path
+
+_mcp_src = Path(__file__).resolve().parent.parent / "mcp" / "kronos" / "src" / "kronos_mcp"
+_cache_path = _mcp_src / "cache.py"
+
+# Register a stub kronos_mcp package so unittest.mock.patch can resolve
+# "kronos_mcp.cache.X" without triggering the real __init__.py -> server.py chain
+import types
+if "kronos_mcp" not in sys.modules:
+    _pkg = types.ModuleType("kronos_mcp")
+    _pkg.__path__ = [str(_mcp_src)]
+    sys.modules["kronos_mcp"] = _pkg
+
+_spec = importlib.util.spec_from_file_location("kronos_mcp.cache", _cache_path)
+_cache_mod = importlib.util.module_from_spec(_spec)
+sys.modules["kronos_mcp.cache"] = _cache_mod
+_spec.loader.exec_module(_cache_mod)
+
+KronosCache = _cache_mod.KronosCache
+TOOL_TTLS = _cache_mod.TOOL_TTLS
+WRITE_TOOLS = _cache_mod.WRITE_TOOLS
+MEMORY_WRITE_TOOLS = _cache_mod.MEMORY_WRITE_TOOLS
+TASK_WRITE_TOOLS = _cache_mod.TASK_WRITE_TOOLS
+_make_key = _cache_mod._make_key
+
+# All tools that perform writes (union of all write sets)
+ALL_WRITE_TOOLS = WRITE_TOOLS | MEMORY_WRITE_TOOLS | TASK_WRITE_TOOLS
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -160,13 +190,13 @@ class TestTTLCorrectness:
     def test_all_read_tools_have_ttl(self):
         """Every tool in TOOL_TTLS that isn't a write tool must have a numeric TTL."""
         for tool, ttl in TOOL_TTLS.items():
-            if tool not in WRITE_TOOLS:
+            if tool not in ALL_WRITE_TOOLS:
                 assert isinstance(ttl, int), f"{tool} should have numeric TTL, got {ttl}"
                 assert ttl > 0, f"{tool} TTL should be positive"
 
     def test_all_write_tools_have_none_ttl(self):
-        for tool in WRITE_TOOLS:
-            assert TOOL_TTLS.get(tool) is None
+        for tool in ALL_WRITE_TOOLS:
+            assert TOOL_TTLS.get(tool) is None, f"{tool} should have None TTL (write tool)"
 
 
 # ─── Invalidation (Critical — Peter flagged this) ────────────────────────────

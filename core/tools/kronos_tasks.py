@@ -93,7 +93,7 @@ async def kronos_task_list(
     Args:
         project_id: Filter by project (e.g., "proj-grim").
         feat_id: Filter by feature (e.g., "feat-grim-ui").
-        status: Filter by status (new, active, in_progress, resolved, closed).
+        status: Filter by status (draft, new, active, in_progress, resolved, closed).
         priority: Filter by priority (critical, high, medium, low).
 
     Returns:
@@ -147,12 +147,17 @@ async def kronos_task_create(
     priority: str = "medium",
     estimate_days: float = 1.0,
     description: str = "",
+    acceptance_criteria: str = "",
+    tags: str = "",
     notes: str = "",
     assignee: str = "",
+    created_by: str = "",
+    status: str = "",
 ) -> str:
     """Create a new story or task.
 
     Stories live inside feat-* FDOs. Tasks are nested under stories.
+    AI-created items should use status="draft" and created_by="agent:<name>".
 
     Args:
         type: "story" or "task".
@@ -162,11 +167,15 @@ async def kronos_task_create(
         priority: Priority level for stories (critical, high, medium, low).
         estimate_days: Estimated days to complete.
         description: Story description.
+        acceptance_criteria: JSON array string of acceptance criteria (stories only).
+        tags: JSON array string of tags (stories only).
         notes: Task notes.
         assignee: Task assignee.
+        created_by: Who created this (e.g. "human", "agent:planning").
+        status: Initial status — "draft" for AI-created, "new" for human-created.
 
     Returns:
-        JSON with creation result.
+        JSON with creation result (may include warnings).
     """
     kwargs: dict[str, Any] = {"type": type, "title": title}
     if feat_id:
@@ -179,10 +188,24 @@ async def kronos_task_create(
         kwargs["estimate_days"] = estimate_days
     if description:
         kwargs["description"] = description
+    if acceptance_criteria:
+        try:
+            kwargs["acceptance_criteria"] = json.loads(acceptance_criteria)
+        except (json.JSONDecodeError, TypeError):
+            kwargs["acceptance_criteria"] = [acceptance_criteria]
+    if tags:
+        try:
+            kwargs["tags"] = json.loads(tags)
+        except (json.JSONDecodeError, TypeError):
+            kwargs["tags"] = [tags]
     if notes:
         kwargs["notes"] = notes
     if assignee:
         kwargs["assignee"] = assignee
+    if created_by:
+        kwargs["created_by"] = created_by
+    if status:
+        kwargs["status"] = status
     result = await _call_mcp("kronos_task_create", **kwargs)
     return json.dumps(result, indent=2)
 

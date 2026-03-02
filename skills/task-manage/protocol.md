@@ -25,7 +25,9 @@ Epic   (proj-*)    — persistent project FDOs
           └─ Task       — nested under story
 ```
 
-Board columns: **NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED**
+Board columns: **DRAFT → NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED**
+
+> **Draft state**: AI-created items start as DRAFT and must be promoted to NEW before board placement. This prevents vault pollution from untriaged AI suggestions.
 
 ---
 
@@ -37,12 +39,21 @@ Board columns: **NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED**
    - If no feature exists, create one using `kronos_create` with domain matching the project
    - Template: `kronos-vault/templates/feature-template.md`
 2. Create the story:
-   ```
-   kronos_task_create(type="story", feat_id="feat-xxx", title="...",
-                      priority="high", estimate_days=2,
-                      description="...", acceptance_criteria=["..."])
-   ```
-3. Optionally add to board: `kronos_task_move(story_id="...", column="new")`
+   - **Human-created** (default):
+     ```
+     kronos_task_create(type="story", feat_id="feat-xxx", title="...",
+                        priority="high", estimate_days=2,
+                        description="...", acceptance_criteria=["..."])
+     ```
+   - **Agent-created** (planning companion, automated):
+     ```
+     kronos_task_create(type="story", feat_id="feat-xxx", title="...",
+                        priority="high", estimate_days=2,
+                        description="...", acceptance_criteria=["..."],
+                        status="draft", created_by="agent:planning")
+     ```
+3. For human-created: optionally add to board: `kronos_task_move(story_id="...", column="new")`
+4. For agent-created drafts: must be promoted first (see PROMOTE action below)
 
 ### Create a Task
 
@@ -76,6 +87,32 @@ Board columns: **NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED**
    ```
    kronos_calendar_sync()
    ```
+
+---
+
+## Action: PROMOTE
+
+Review and promote draft items created by agents. Drafts cannot be placed on the board until promoted.
+
+1. List draft items:
+   ```
+   kronos_task_list(status="draft")
+   ```
+2. Present each draft to the user with:
+   - Title, priority, estimate, acceptance criteria
+   - Who created it (`created_by` field)
+   - Validation warnings (if any)
+3. For each draft, user decides: **promote**, **edit then promote**, or **discard**
+4. To promote:
+   ```
+   kronos_task_update(item_id="story-xxx", fields={"status": "new"})
+   ```
+5. Optionally move promoted items to the board:
+   ```
+   kronos_task_move(story_id="story-xxx", column="new")
+   ```
+
+> **CHECKPOINT**: Always let the user review drafts before promoting. Never auto-promote.
 
 ---
 
@@ -115,7 +152,7 @@ Run this after completing any meaningful code change (feature, fix, refactor). T
    - Update tasks within the story: `kronos_task_update(item_id="task-xxx", fields={"status": "resolved"})`
    - If all acceptance criteria met → move story: `kronos_task_move(story_id="...", column="resolved")`
 4. If no story exists for the work:
-   - Create one under the appropriate `feat-*` FDO
+   - Create one under the appropriate `feat-*` FDO with `created_by="agent:memory"`
    - Move directly to CLOSED (retroactive tracking is better than no tracking)
 5. Sync calendar if board changed: `kronos_calendar_sync()`
 
@@ -124,11 +161,12 @@ Run this after completing any meaningful code change (feature, fix, refactor). T
 ## Quality Gates
 
 Before marking done:
-- [ ] All created stories have title, priority, and estimate
-- [ ] Stories moving past NEW have acceptance criteria
-- [ ] Board state is consistent (no orphan IDs)
+- [ ] All created stories have title (>10 chars), priority, and estimate
+- [ ] Stories have acceptance criteria (≥2) before moving past NEW
+- [ ] Board state is consistent (no orphan IDs, no draft items on board)
 - [ ] Calendar synced if board changed
 - [ ] Recent completed work has corresponding stories (no untracked changes)
+- [ ] Agent-created items are marked as DRAFT with `created_by` set
 
 ## Currency Check
 

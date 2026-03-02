@@ -43,7 +43,7 @@ from core.state import AgentResult, GrimState, SkillContext
 
 def run_async(coro):
     """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def make_httpx_response(
@@ -538,7 +538,10 @@ class TestLangChainTools(unittest.TestCase):
         self.assertIn("claw_shell", tool_names)
         self.assertIn("claw_list_dir", tool_names)
         self.assertIn("claw_http_request", tool_names)
-        self.assertEqual(len(tool_names), 5)
+        self.assertIn("claw_list_agents", tool_names)
+        self.assertIn("claw_dispatch_workflow", tool_names)
+        self.assertIn("claw_scan_skill", tool_names)
+        self.assertEqual(len(tool_names), 8)
 
     def test_read_only_list(self):
         tool_names = [t.name for t in self.tools_mod.IRONCLAW_READ_TOOLS]

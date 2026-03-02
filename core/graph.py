@@ -4,9 +4,11 @@ The graph is built from composable sections. Each section adds a group
 of related nodes and edges. This makes it possible to build different
 graph configurations for different interaction modes.
 
-Default graph:
-    identity → compress → memory → skill_match → router →
-        [companion | dispatch] → audit_gate → [audit | integrate] → evolve
+v0.0.6 graph (multi-graph architecture):
+    identity → compress → memory → skill_match → graph_router →
+        [personal: personal_companion → integrate → evolve → END]
+        [research: router → [companion | dispatch] → audit_gate →
+            [audit | integrate] → evolve → END]
 """
 from __future__ import annotations
 
@@ -24,9 +26,12 @@ from core.nodes.companion import make_companion_node
 from core.nodes.compress import make_compress_node
 from core.nodes.dispatch import make_dispatch_node
 from core.nodes.evolve import make_evolve_node
+from core.nodes.graph_router import graph_route_decision, graph_router_node
 from core.nodes.identity import make_identity_node
 from core.nodes.integrate import integrate_node
 from core.nodes.memory import make_memory_node
+from core.nodes.personal_companion import make_personal_companion_node
+from core.nodes.planning_companion import make_planning_companion_node
 from core.nodes.re_dispatch import audit_decision, re_dispatch_node
 from core.nodes.router import make_router_node, route_decision
 from core.nodes.skill_match import make_skill_match_node
@@ -73,23 +78,43 @@ def add_preprocessing(
     }
 
 
+def add_graph_routing(graph: StateGraph) -> dict[str, Any]:
+    """Add graph-level routing: graph_router → [research | personal].
+
+    Sits after preprocessing (skill_match), before graph-specific nodes.
+    Routes to specialized graph pipelines based on user intent.
+    """
+    graph.add_node("graph_router", graph_router_node)
+    graph.add_edge("skill_match", "graph_router")
+
+    graph.add_conditional_edges(
+        "graph_router",
+        graph_route_decision,
+        {
+            "research": "router",
+            "personal": "personal_companion",
+            "planning": "planning_companion",
+        },
+    )
+
+    return {"graph_router": graph_router_node}
+
+
 def add_routing(
     graph: StateGraph,
     config: GrimConfig,
     reasoning_cache: Any = None,
 ) -> dict[str, Any]:
-    """Add routing nodes: router → [companion | dispatch].
+    """Add research graph routing: router → [companion | dispatch].
 
     Companion handles thinking; dispatch delegates to agents.
+    The graph_router feeds into this section via the "research" edge.
     """
     router_fn = make_router_node(config)
     companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
 
     graph.add_node("router", router_fn)
     graph.add_node("companion", companion_fn)
-
-    # Preprocessing feeds into router
-    graph.add_edge("skill_match", "router")
 
     # Router branches: companion (think) or dispatch (delegate)
     graph.add_conditional_edges(
@@ -99,6 +124,39 @@ def add_routing(
     )
 
     return {"router": router_fn, "companion": companion_fn}
+
+
+def add_personal_graph(
+    graph: StateGraph,
+    config: GrimConfig,
+    reasoning_cache: Any = None,
+) -> dict[str, Any]:
+    """Add personal companion graph branch.
+
+    Personal mode: personality-forward, no delegation, straight to integrate.
+    """
+    personal_fn = make_personal_companion_node(config, reasoning_cache=reasoning_cache)
+    graph.add_node("personal_companion", personal_fn)
+    graph.add_edge("personal_companion", "integrate")
+
+    return {"personal_companion": personal_fn}
+
+
+def add_planning_graph(
+    graph: StateGraph,
+    config: GrimConfig,
+    reasoning_cache: Any = None,
+) -> dict[str, Any]:
+    """Add planning companion graph branch.
+
+    Planning mode: work breakdown, scoping, draft creation, board population.
+    Has full task tools + vault read. Goes straight to integrate after responding.
+    """
+    planning_fn = make_planning_companion_node(config, reasoning_cache=reasoning_cache)
+    graph.add_node("planning_companion", planning_fn)
+    graph.add_edge("planning_companion", "integrate")
+
+    return {"planning_companion": planning_fn}
 
 
 def add_agents(
@@ -220,7 +278,10 @@ def build_graph(
     graph = StateGraph(GrimState)
 
     add_preprocessing(graph, config, mcp_session, skill_registry, reasoning_cache)
+    add_graph_routing(graph)
     add_routing(graph, config, reasoning_cache)
+    add_personal_graph(graph, config, reasoning_cache)
+    add_planning_graph(graph, config, reasoning_cache)
     add_agents(graph, agents)
     add_postprocessing(graph, config, mcp_session)
 
@@ -230,6 +291,6 @@ def build_graph(
 
     compiled = graph.compile(checkpointer=checkpointer)
     agent_count = len(agents)
-    logger.info("GRIM state graph compiled — 12 nodes, %d agents", agent_count)
+    logger.info("GRIM state graph compiled — 15 nodes, %d agents", agent_count)
 
     return compiled

@@ -3,6 +3,13 @@
 Fallback routing layer — used when no skill consumer or continuity
 signal matches. Maps substring patterns in user messages to delegation
 targets.
+
+v0.0.6 boundaries:
+  - GRIM = management layer (plan, manage, orchestrate, review)
+  - IronClaw = execution layer (code writes, shell, testing, file ops)
+  - "code" delegation removed — all code ops route to "ironclaw"
+  - "operate" narrowed to git reads + file reads — execution → "ironclaw"
+  - "planning" added for task breakdown and board management
 """
 from __future__ import annotations
 
@@ -22,15 +29,9 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "move to active", "move to in progress", "move to resolved", "move to closed",
         "update the story", "update the task", "close this story",
         "archive closed", "sync calendar", "add calendar event",
-        "plan sprint", "groom backlog",
     ],
-    "code": [
-        "write code", "implement", "create file",
-        "fix this code", "refactor", "add a test",
-        "write a function", "write a class", "edit the code",
-        "modify the file", "update the code", "debug this",
-        "write a script", "code this", "build this",
-    ],
+    # NOTE: "planning" removed from delegation keywords — planning is now a
+    # graph-level branch handled by graph_router.py, not a delegation target.
     "research": [
         "analyze this", "ingest", "summarize this paper",
         "deep dive", "review this document",
@@ -42,6 +43,34 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         # Direct IronClaw references
         "ironclaw", "iron claw", "iron-claw",
         "use the engine", "engine agent",
+        # Code operations (was "code" delegation — all go to IronClaw)
+        "write code", "implement", "create file",
+        "fix this code", "refactor", "add a test",
+        "write a function", "write a class", "edit the code",
+        "modify the file", "update the code", "debug this",
+        "write a script", "code this", "build this",
+        # Shell / command execution (was "operate")
+        "run command", "run this", "execute this",
+        "shell", "powershell", "bash", "terminal",
+        "echo ", "mkdir", "ls ", "dir ", "pwd",
+        "curl ", "wget ",
+        # Git write operations (was "operate")
+        "git push", "commit", "push to github",
+        # HTTP execution (was "operate")
+        "http request", "fetch ", "call the api",
+        "check the weather", "hit the endpoint",
+        "make a request",
+        # Ops / deployment (was "operate")
+        "upload to zenodo", "deploy", "test execution",
+        # Network / system queries (was "operate")
+        "ip address", "my ip", "what is my ip",
+        "ping ", "traceroute", "nslookup", "dig ",
+        "ifconfig", "ipconfig", "hostname",
+        "netstat", "who am i", "whoami",
+        "uname", "uptime",
+        "which ", "where ",
+        "what os", "what operating system",
+        "system info", "disk space", "memory usage",
         # Sandboxed execution
         "run sandboxed", "execute safely", "isolated shell",
         "sandboxed execution", "run in sandbox",
@@ -55,38 +84,18 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "security scan", "scan for vulnerabilities", "security audit",
         "security analysis", "vulnerability scan",
         "scan this code", "audit this code",
-        # Container/Docker tasks via IronClaw
+        # Container/Docker tasks
         "container analysis", "docker analysis",
         "analyze the container", "inspect the container",
     ],
     "operate": [
-        # Shell / commands
-        "run command", "run this", "execute this",
-        "shell", "powershell", "bash", "terminal",
-        "echo ", "mkdir", "ls ", "dir ", "pwd",
-        "curl ", "wget ",
-        # Git
+        # Git reads only (narrowed — no writes, no shell)
         "git status", "git log", "git diff", "git pull",
-        "git push", "commit", "push to github",
-        # Files
+        # File reads only
         "list files", "show me the directory", "what files",
         "read the file", "show me the file", "cat ",
-        # HTTP
-        "http request", "fetch ", "call the api",
-        "check the weather", "hit the endpoint",
-        "make a request",
-        # Ops
-        "upload to zenodo", "sync vault", "deploy",
-        "check the status", "test execution",
-        # Network / system queries
-        "ip address", "my ip", "what is my ip",
-        "ping ", "traceroute", "nslookup", "dig ",
-        "ifconfig", "ipconfig", "hostname",
-        "netstat", "who am i", "whoami",
-        "uname", "uptime",
-        "which ", "where ",
-        "what os", "what operating system",
-        "system info", "disk space", "memory usage",
+        # Infrastructure awareness
+        "check the status", "sync vault",
     ],
     "audit": [
         "review staging", "audit output", "check staged",
@@ -140,16 +149,17 @@ def match_action_intent(message: str) -> str | None:
     """Match action-intent patterns (verb + target).
 
     Catches requests like "run the command" that miss specific keywords.
+    Routes to ironclaw — action-intent means execution.
 
     Args:
         message: Lowercased user message.
 
     Returns:
-        "operate" if matched, else None.
+        "ironclaw" if matched, else None.
     """
     for verb in _ACTION_VERBS:
         if verb in message and any(t in message for t in _ACTION_TARGETS):
-            return "operate"
+            return "ironclaw"
     return None
 
 

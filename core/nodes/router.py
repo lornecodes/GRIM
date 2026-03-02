@@ -34,29 +34,37 @@ def _skill_ctx_to_delegation(skill_ctx) -> str | None:
     """
     name = skill_ctx.name
 
+    # v0.0.6 agent boundaries:
+    # GRIM = management (memory, planning, research read-only, operate read-only)
+    # IronClaw = execution (code, shell, deploy, file writes, git writes)
     if name.startswith("kronos-") or name.startswith("memory-"):
         return "memory"
-    if name in ("code-execution", "file-operations"):
-        return "code"
+    if name in ("vault-sync",):
+        return "memory"
+    if name in ("sprint-plan", "task-manage"):
+        # v0.0.6 Phase 2: planning is graph-level, task skills execute via memory agent
+        return "memory"
     if name in ("deep-ingest",):
         return "research"
-    if name in ("vault-sync", "git-operations", "shell-execution"):
+    if name in ("git-operations",):
         return "operate"
+    if name in ("code-execution", "file-operations", "shell-execution"):
+        return "ironclaw"
+    if name in ("docker-release", "cliproxyapi", "ship-it"):
+        return "ironclaw"
+    if name in ("staging-organize", "staging-cleanup"):
+        return "ironclaw"
     if name in ("sandboxed-execution", "secure-shell", "ironclaw-execute"):
         return "ironclaw"
     if name in ("ironclaw-review",):
         return "audit"
-    if name in ("staging-organize", "staging-cleanup"):
-        return "operate"
 
     perms = skill_ctx.permissions
     if any("write" in p for p in perms):
         if any("vault" in p for p in perms):
             return "memory"
-        if any("filesystem" in p for p in perms):
-            return "code"
-        if any("shell" in p for p in perms):
-            return "operate"
+        if any("filesystem" in p or "shell" in p for p in perms):
+            return "ironclaw"
 
     return None
 

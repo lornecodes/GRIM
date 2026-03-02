@@ -164,7 +164,10 @@ class GrimState(TypedDict, total=False):
 
     skill_delegation_hint: Optional[str]  # delegation target from skill match
 
-    # Routing decision
+    # Graph-level routing (v0.0.6 — multi-graph architecture)
+    graph_target: Literal["research", "personal", "planning"]
+
+    # Routing decision (within research graph)
     mode: Literal["companion", "delegate"]
     delegation_type: Optional[
         Literal["memory", "code", "research", "operate", "ironclaw", "audit"]

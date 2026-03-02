@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import pytest
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,10 @@ sys.path.insert(0, str(grim_root / "mcp" / "kronos" / "src"))
 
 print("Importing server module...")
 t0 = time.time()
+import kronos_mcp.server as _server
+from kronos_mcp.tasks import TaskEngine
+from kronos_mcp.board import BoardEngine
+from kronos_mcp.calendar import CalendarEngine
 from kronos_mcp.server import (
     handle_task_create, handle_task_update, handle_task_get,
     handle_task_list, handle_task_move, handle_task_archive,
@@ -37,9 +42,22 @@ from kronos_mcp.server import (
     handle_calendar_view, handle_calendar_add, handle_calendar_update,
     handle_calendar_sync,
     handle_create, vault, search_engine,
-    task_engine, board_engine, calendar_engine,
 )
 print(f"Import done in {time.time() - t0:.1f}s")
+
+
+def _reinit_engines():
+    """Reinitialize server engines to point to real vault."""
+    _server.task_engine = TaskEngine(vault_path)
+    _server.board_engine = BoardEngine(vault_path, _server.task_engine)
+    _server.calendar_engine = CalendarEngine(vault_path, _server.board_engine)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _real_vault_engines():
+    """Ensure server engines use the real vault for all tests in this module."""
+    _reinit_engines()
+    yield
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +110,7 @@ def cleanup_test_feature():
         vault._index.pop(TEST_FEAT_ID, None)
 
     # Clean board of any test story IDs
-    board = board_engine._load_board()
+    board = _server.board_engine._load_board()
     changed = False
     for col, ids in board["columns"].items():
         before = len(ids)
@@ -100,21 +118,23 @@ def cleanup_test_feature():
         if len(board["columns"][col]) != before:
             changed = True
     if changed:
-        board_engine._save_board(board)
+        _server.board_engine._save_board(board)
 
 
 def cleanup_test_personal():
     """Remove test personal calendar events."""
-    data = calendar_engine._load_yaml(calendar_engine.personal_path)
+    data = _server.calendar_engine._load_yaml(_server.calendar_engine.personal_path)
     entries = data.get("entries", [])
     data["entries"] = [e for e in entries if not e.get("title", "").startswith("_test")]
-    calendar_engine._save_yaml(calendar_engine.personal_path, data)
+    _server.calendar_engine._save_yaml(_server.calendar_engine.personal_path, data)
 
 
-# ── Tests ────────────────────────────────────────────────────────────────────
+# ── Fixtures ─────────────────────────────────────────────────────────────────
 
-def test_story_create():
-    print("\n[1] Create story")
+@pytest.fixture(scope="module")
+def story_id():
+    """Create test feature + story, return story ID. Cleaned up at module end."""
+    setup_test_feature()
     resp = handle_task_create({
         "type": "story",
         "feat_id": TEST_FEAT_ID,
@@ -126,13 +146,15 @@ def test_story_create():
         "tags": ["test"],
     })
     data = json.loads(resp)
-    record("story created", "created" in data, f"id={data.get('created', data.get('error'))}")
-    record("story has correct feature", data.get("feature") == TEST_FEAT_ID)
-    return data.get("created")
+    sid = data.get("created")
+    yield sid
+    cleanup_test_feature()
+    cleanup_test_personal()
 
 
-def test_task_create(story_id: str):
-    print("\n[2] Create task")
+@pytest.fixture(scope="module")
+def task_id(story_id):
+    """Create a task on the test story, return task ID."""
     resp = handle_task_create({
         "type": "task",
         "story_id": story_id,
@@ -140,12 +162,46 @@ def test_task_create(story_id: str):
         "estimate_days": 0.5,
     })
     data = json.loads(resp)
-    record("task created", "created" in data, f"id={data.get('created', data.get('error'))}")
-    record("task linked to story", data.get("story") == story_id)
     return data.get("created")
 
 
-def test_story_get(story_id: str):
+@pytest.fixture(scope="module")
+def event_id():
+    """Create a test personal calendar event, return event ID."""
+    resp = handle_calendar_add({
+        "title": "_test dentist appointment",
+        "date": "2026-03-15",
+        "time": "14:00",
+        "duration_hours": 1,
+        "notes": "Test event",
+    })
+    data = json.loads(resp)
+    return data.get("created")
+
+
+# ── Tests ────────────────────────────────────────────────────────────────────
+
+def test_story_create(story_id):
+    """Verify story was created by the fixture."""
+    print("\n[1] Verify story creation")
+    assert story_id, "story_id fixture should have created a story"
+    resp = handle_task_get({"item_id": story_id})
+    data = json.loads(resp)
+    record("story created", data.get("id") == story_id, f"id={story_id}")
+    record("story has correct feature", data.get("feature") == TEST_FEAT_ID)
+
+
+def test_task_create(task_id, story_id):
+    """Verify task was created by the fixture."""
+    print("\n[2] Verify task creation")
+    assert task_id, "task_id fixture should have created a task"
+    resp = handle_task_get({"item_id": task_id})
+    data = json.loads(resp)
+    record("task created", data.get("id") == task_id, f"id={task_id}")
+    record("task linked to story", data.get("story") == story_id)
+
+
+def test_story_get(story_id):
     print("\n[3] Get story")
     resp = handle_task_get({"item_id": story_id})
     data = json.loads(resp)
@@ -155,7 +211,7 @@ def test_story_get(story_id: str):
     record("story type is story", data.get("type") == "story")
 
 
-def test_task_get(task_id: str):
+def test_task_get(task_id):
     print("\n[4] Get task")
     resp = handle_task_get({"item_id": task_id})
     data = json.loads(resp)
@@ -163,7 +219,7 @@ def test_task_get(task_id: str):
     record("task type is task", data.get("type") == "task")
 
 
-def test_story_update(story_id: str):
+def test_story_update(story_id):
     print("\n[5] Update story")
     resp = handle_task_update({
         "item_id": story_id,
@@ -179,7 +235,7 @@ def test_story_update(story_id: str):
     record("estimate changed", data2.get("estimate_days") == 5)
 
 
-def test_task_update(task_id: str):
+def test_task_update(task_id):
     print("\n[6] Update task")
     resp = handle_task_update({
         "item_id": task_id,
@@ -284,7 +340,7 @@ def test_concurrent_creates():
 
 # ── Board Tests ──────────────────────────────────────────────────────────────
 
-def test_board_move(story_id: str):
+def test_board_move(story_id):
     print("\n[13] Board move")
     resp = handle_task_move({"story_id": story_id, "column": "active"})
     data = json.loads(resp)
@@ -326,7 +382,7 @@ def test_board_invalid_column():
     record("invalid column rejected", "error" in data)
 
 
-def test_board_resolve_close(story_id: str):
+def test_board_resolve_close(story_id):
     print("\n[17] Board resolve and close")
     resp = handle_task_move({"story_id": story_id, "column": "resolved"})
     data = json.loads(resp)
@@ -339,21 +395,14 @@ def test_board_resolve_close(story_id: str):
 
 # ── Calendar Tests ───────────────────────────────────────────────────────────
 
-def test_calendar_add():
-    print("\n[18] Calendar add personal event")
-    resp = handle_calendar_add({
-        "title": "_test dentist appointment",
-        "date": "2026-03-15",
-        "time": "14:00",
-        "duration_hours": 1,
-        "notes": "Test event",
-    })
-    data = json.loads(resp)
-    record("personal event created", "created" in data, f"id={data.get('created')}")
-    return data.get("created")
+def test_calendar_add(event_id):
+    """Verify personal event was created by the fixture."""
+    print("\n[18] Verify calendar add")
+    assert event_id, "event_id fixture should have created an event"
+    record("personal event created", True, f"id={event_id}")
 
 
-def test_calendar_update(event_id: str):
+def test_calendar_update(event_id):
     print("\n[19] Calendar update personal event")
     resp = handle_calendar_update({
         "event_id": event_id,
@@ -384,7 +433,7 @@ def test_calendar_view():
     record("includes personal events", len(personal) > 0, f"personal={len(personal)}")
 
 
-def test_calendar_delete(event_id: str):
+def test_calendar_delete(event_id):
     print("\n[22] Calendar delete personal event")
     resp = handle_calendar_update({
         "event_id": event_id,

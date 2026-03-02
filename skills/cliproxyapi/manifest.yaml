@@ -15,9 +15,9 @@ permissions:
 consumers:
   grim:
     role: delegation
-    description: Routes proxy-related requests to ops-agent
+    description: Routes proxy-related requests to ironclaw-agent
     reads: [triggers, quality_gates]
-  ops-agent:
+  ironclaw-agent:
     role: execution
     description: Runs proxy setup, auth, diagnostics via Docker commands
     reads: [protocol.md, inputs, outputs, safety, quality_gates]
@@ -41,7 +41,7 @@ outputs:
   error: string
 
 triggers:
-  - delegation: "GRIM routes a proxy/auth task to ops-agent"
+  - delegation: "GRIM routes a proxy/auth task to ironclaw-agent"
   - explicit: "User asks to set up proxy, run OAuth login, or check proxy health"
   - keywords:
       strong: ["cliproxyapi", "proxy login", "oauth login", "proxy setup", "claude max proxy"]

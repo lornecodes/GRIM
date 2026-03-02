@@ -50,7 +50,8 @@ class GrimConfig:
     models_disabled: list[str] = field(default_factory=list)
 
     # Agents — disabled agent IDs (e.g. ["ironclaw"] to disable sandbox)
-    agents_disabled: list[str] = field(default_factory=list)
+    # "code" disabled by default: all code ops go through IronClaw (v0.0.6)
+    agents_disabled: list[str] = field(default_factory=lambda: ["code"])
 
     # Evolution
     evolution_dir: Path = field(default_factory=lambda: Path("local/evolution"))

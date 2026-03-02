@@ -21,22 +21,32 @@ class TestMatchKeywords:
         ("store this information", "memory"),
         ("add to vault please", "memory"),
         ("create an fdo for this", "memory"),
-        # Task management (memory delegation)
+        # Task management (memory delegation — write operations)
         ("create a story for auth", "memory"),
         ("create a task for bug fix", "memory"),
         ("move to active column", "memory"),
         ("move to in progress", "memory"),
         ("sync calendar now", "memory"),
         ("add calendar event", "memory"),
-        ("plan sprint work", "memory"),
-        # Code delegation
-        ("write code for the parser", "code"),
-        ("implement the new feature", "code"),
-        ("refactor this function", "code"),
-        ("fix this code please", "code"),
-        ("add a test for it", "code"),
-        ("write a function to parse", "code"),
-        ("debug this issue", "code"),
+        # NOTE: Planning keywords removed from delegation — planning is now a
+        # graph-level branch handled by graph_router.py, not keyword_router.
+        # Code operations → IronClaw (v0.0.6 — no more code agent)
+        ("write code for the parser", "ironclaw"),
+        ("implement the new feature", "ironclaw"),
+        ("refactor this function", "ironclaw"),
+        ("fix this code please", "ironclaw"),
+        ("add a test for it", "ironclaw"),
+        ("write a function to parse", "ironclaw"),
+        ("debug this issue", "ironclaw"),
+        # Shell/execution → IronClaw (v0.0.6 — moved from operate)
+        ("run command ls -la", "ironclaw"),
+        ("shell out to bash", "ironclaw"),
+        ("deploy the application", "ironclaw"),
+        ("what is my ip address", "ironclaw"),
+        ("whoami on this machine", "ironclaw"),
+        ("curl the api endpoint", "ironclaw"),
+        ("git push to origin", "ironclaw"),
+        ("commit these changes", "ironclaw"),
         # Research delegation
         ("analyze this paper", "research"),
         ("deep dive into topology", "research"),
@@ -58,16 +68,13 @@ class TestMatchKeywords:
         ("execute safely in sandbox", "ironclaw"),
         ("run in sandbox mode", "ironclaw"),
         ("isolated shell execution", "ironclaw"),
-        # Operate delegation
-        ("run command ls -la", "operate"),
+        # Operate delegation (narrowed to git reads + file reads)
         ("git status", "operate"),
-        ("ping the server", "operate"),
-        ("curl the api endpoint", "operate"),
-        ("shell out to bash", "operate"),
+        ("git log please", "operate"),
+        ("git diff main", "operate"),
+        ("list files in the directory", "operate"),
+        ("read the file contents", "operate"),
         ("check the status of service", "operate"),
-        ("deploy the application", "operate"),
-        ("what is my ip address", "operate"),
-        ("whoami on this machine", "operate"),
         # Audit delegation
         ("review staging output", "audit"),
         ("audit the files", "audit"),
@@ -90,10 +97,14 @@ class TestMatchKeywords:
         for dtype, keywords in DELEGATION_KEYWORDS.items():
             assert len(keywords) > 0, f"No keywords for {dtype}"
 
-    def test_all_six_delegation_types(self):
-        """Should have exactly 6 delegation types."""
-        expected = {"memory", "code", "research", "ironclaw", "operate", "audit"}
+    def test_all_delegation_types(self):
+        """Should have exactly 5 delegation types (v0.0.6: planning moved to graph-level)."""
+        expected = {"memory", "research", "ironclaw", "operate", "audit"}
         assert set(DELEGATION_KEYWORDS.keys()) == expected
+
+    def test_no_code_delegation_type(self):
+        """v0.0.6: 'code' delegation removed — all code ops route to ironclaw."""
+        assert "code" not in DELEGATION_KEYWORDS
 
     def test_case_sensitivity(self):
         """Keywords use substring matching on lowercased input."""
@@ -101,6 +112,103 @@ class TestMatchKeywords:
         assert match_keywords("remember this") == "memory"
         # Won't match mixed case unless caller lowers first
         assert match_keywords("REMEMBER THIS") is None
+
+
+class TestKeywordBoundaries:
+    """Test v0.0.6 boundary enforcement and overlap resolution."""
+
+    def test_no_code_key_in_delegation(self):
+        """'code' delegation type must not exist."""
+        assert "code" not in DELEGATION_KEYWORDS
+
+    @pytest.mark.parametrize("msg,expected", [
+        # Code ops → ironclaw (not code)
+        ("write code for parser", "ironclaw"),
+        ("implement the feature", "ironclaw"),
+        ("refactor the module", "ironclaw"),
+        ("debug this issue", "ironclaw"),
+        ("add a test for auth", "ironclaw"),
+        # Shell ops → ironclaw (not operate)
+        ("run command ls", "ironclaw"),
+        ("shell out to bash", "ironclaw"),
+        ("deploy the app", "ironclaw"),
+        ("curl the endpoint", "ironclaw"),
+        # Git writes → ironclaw (not operate)
+        ("git push to origin", "ironclaw"),
+        ("commit these changes", "ironclaw"),
+        # Git reads → operate (not ironclaw)
+        ("git status", "operate"),
+        ("git log please", "operate"),
+        ("git diff main", "operate"),
+        # NOTE: Planning keywords removed from delegation — handled at graph level
+        # Task writes → memory
+        ("create a story for auth", "memory"),
+        ("create a task for bug", "memory"),
+        ("move to active column", "memory"),
+    ])
+    def test_v006_boundary_routing(self, msg, expected):
+        """Verify v0.0.6 agent boundaries are enforced correctly."""
+        assert match_keywords(msg.lower()) == expected
+
+    def test_planning_not_in_delegation_keywords(self):
+        """Planning is now graph-level, not in delegation keywords."""
+        assert "planning" not in DELEGATION_KEYWORDS
+
+    def test_operate_does_not_contain_shell(self):
+        """Operate keywords should NOT include shell/execution."""
+        operate_kws = DELEGATION_KEYWORDS["operate"]
+        for kw in operate_kws:
+            assert "run command" not in kw
+            assert "shell" not in kw
+            assert "execute" not in kw
+            assert "deploy" not in kw
+
+    def test_operate_does_not_contain_git_writes(self):
+        """Operate keywords should NOT include git write operations."""
+        operate_kws = DELEGATION_KEYWORDS["operate"]
+        for kw in operate_kws:
+            assert "git push" not in kw
+            assert "commit" not in kw
+
+    def test_ironclaw_has_code_keywords(self):
+        """IronClaw should have all the code operation keywords."""
+        ic_kws = DELEGATION_KEYWORDS["ironclaw"]
+        assert "write code" in ic_kws
+        assert "implement" in ic_kws
+        assert "refactor" in ic_kws
+        assert "debug this" in ic_kws
+
+    def test_ironclaw_has_shell_keywords(self):
+        """IronClaw should have shell execution keywords."""
+        ic_kws = DELEGATION_KEYWORDS["ironclaw"]
+        assert "run command" in ic_kws
+        assert "shell" in ic_kws
+        assert "deploy" in ic_kws
+
+    @pytest.mark.parametrize("msg", [
+        "implement the plan",
+        "plan this implementation",
+    ])
+    def test_ambiguous_plan_implement(self, msg):
+        """'plan' is no longer a delegation keyword (graph-level now).
+        'implement' matches ironclaw via keyword_router."""
+        result = match_keywords(msg.lower())
+        # "implement" is an ironclaw keyword — planning is graph-level
+        assert result == "ironclaw"
+
+    def test_keyword_order_is_deterministic(self):
+        """Same input always produces same output (dict iteration order)."""
+        msg = "plan this implementation"
+        results = {match_keywords(msg) for _ in range(10)}
+        assert len(results) == 1, "match_keywords must be deterministic"
+
+    def test_each_category_has_unique_purpose(self):
+        """No two categories should have identical keyword lists."""
+        categories = list(DELEGATION_KEYWORDS.values())
+        for i, kws_a in enumerate(categories):
+            for j, kws_b in enumerate(categories):
+                if i != j:
+                    assert set(kws_a) != set(kws_b)
 
 
 class TestMatchActionIntent:
@@ -118,7 +226,8 @@ class TestMatchActionIntent:
         "run the cli tool",
     ])
     def test_action_intent_matches(self, msg):
-        assert match_action_intent(msg.lower()) == "operate"
+        """v0.0.6: action-intent routes to ironclaw (execution layer)."""
+        assert match_action_intent(msg.lower()) == "ironclaw"
 
     def test_no_match_verb_only(self):
         """Verb without a matching target should not match."""
@@ -131,10 +240,10 @@ class TestMatchActionIntent:
     def test_no_match_unrelated(self):
         assert match_action_intent("tell me about pac framework") is None
 
-    def test_returns_operate_only(self):
-        """Action-intent always returns 'operate' or None."""
+    def test_returns_ironclaw_only(self):
+        """Action-intent always returns 'ironclaw' or None (v0.0.6)."""
         result = match_action_intent("execute the shell command")
-        assert result in ("operate", None)
+        assert result in ("ironclaw", None)
 
 
 class TestIsFollowUp:
@@ -166,3 +275,59 @@ class TestIsFollowUp:
 
     def test_empty_string(self):
         assert is_follow_up("") is False
+
+
+class TestContinuityForPlanning:
+    """Test follow-up signals work for planning delegation continuity."""
+
+    def test_follow_up_after_planning(self):
+        """'also' and 'now' are follow-up signals that would re-delegate."""
+        assert is_follow_up("also break down the auth module") is True
+        assert is_follow_up("now prioritize those stories") is True
+
+    def test_planning_then_follow_up_pattern(self):
+        """Planning is graph-level now; keyword match hits ironclaw via 'implement'."""
+        # First turn: "implement" is an ironclaw keyword
+        assert match_keywords("plan this implementation") == "ironclaw"
+        # Follow-up turn: follow-up signal detected
+        assert is_follow_up("also scope the backend work") is True
+
+    def test_ironclaw_then_follow_up(self):
+        """Follow-up after ironclaw delegation."""
+        assert match_keywords("write code for parser") == "ironclaw"
+        assert is_follow_up("now add error handling") is True
+
+    def test_non_follow_up_breaks_continuity(self):
+        """A fresh request (no follow-up signal) should not re-delegate."""
+        assert is_follow_up("search the vault for pac framework") is False
+
+
+class TestDelegationCompleteness:
+    """Verify all 5 delegation types are well-covered by keywords."""
+
+    def test_all_types_have_multiple_keywords(self):
+        """Each delegation type should have at least 3 keywords."""
+        for dtype, keywords in DELEGATION_KEYWORDS.items():
+            assert len(keywords) >= 3, f"{dtype} has only {len(keywords)} keywords"
+
+    def test_planning_not_in_delegation(self):
+        """Planning is graph-level (graph_router.py), not a delegation type."""
+        assert "planning" not in DELEGATION_KEYWORDS
+
+    def test_ironclaw_covers_former_code_and_operate(self):
+        """IronClaw should have keywords from both former code and operate agents."""
+        kws = DELEGATION_KEYWORDS["ironclaw"]
+        # Former code keywords
+        assert any("code" in k for k in kws)
+        assert any("implement" in k for k in kws)
+        # Former operate shell keywords
+        assert any("shell" in k for k in kws)
+        assert any("deploy" in k for k in kws)
+
+    def test_memory_still_has_vault_ops(self):
+        """Memory should retain all vault write keywords."""
+        kws = " ".join(DELEGATION_KEYWORDS["memory"])
+        assert "capture" in kws
+        assert "remember" in kws
+        assert "vault" in kws
+        assert "story" in kws  # task management writes

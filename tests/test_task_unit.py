@@ -1132,6 +1132,246 @@ class TestBoardEngineBatch(TestCase):
         self.assertIn("story-test-beta-002", backlog_ids)
 
 
+class TestDraftStatus(TestCase):
+    """Test draft status for AI-created items (v0.0.6 Phase 2)."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_draft_in_valid_statuses(self):
+        """Draft should be a valid status."""
+        self.assertIn("draft", VALID_STATUSES)
+
+    def test_create_story_with_draft_status(self):
+        """Creating a story with status=draft should work."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Draft story", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        self.assertIn("created", result)
+        story = self.engine.get_item(result["created"])
+        self.assertEqual(story["status"], "draft")
+
+    def test_create_story_default_status_is_new(self):
+        """Default status for story creation should be 'new'."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Normal story", priority="medium",
+            estimate_days=1,
+        )
+        story = self.engine.get_item(result["created"])
+        self.assertEqual(story["status"], "new")
+
+    def test_create_story_with_created_by(self):
+        """Stories should track who created them."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Agent story", priority="medium",
+            estimate_days=1, created_by="agent:planning",
+        )
+        story = self.engine.get_item(result["created"])
+        self.assertEqual(story["created_by"], "agent:planning")
+
+    def test_create_story_default_created_by_is_human(self):
+        """Default created_by should be 'human'."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Human story", priority="medium",
+            estimate_days=1,
+        )
+        story = self.engine.get_item(result["created"])
+        self.assertEqual(story["created_by"], "human")
+
+    def test_create_task_with_created_by(self):
+        """Tasks should track who created them."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Parent story", priority="medium",
+            estimate_days=1,
+        )
+        story_id = result["created"]
+        task_result = self.engine.create_task(
+            story_id, "Agent task", created_by="agent:planning",
+        )
+        task = self.engine.get_item(task_result["created"])
+        self.assertEqual(task["created_by"], "agent:planning")
+
+    def test_create_story_rejects_invalid_status(self):
+        """Creating with an invalid status should fail."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Bad status", priority="medium",
+            estimate_days=1, status="garbage",
+        )
+        self.assertIn("error", result)
+
+    def test_draft_regression_blocked(self):
+        """Cannot set status back to draft once promoted."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Story to promote", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        story_id = result["created"]
+        # Promote to new
+        self.engine.update_item(story_id, {"status": "new"})
+        story = self.engine.get_item(story_id)
+        self.assertEqual(story["status"], "new")
+        # Try to regress to draft
+        result = self.engine.update_item(story_id, {"status": "draft"})
+        self.assertIn("error", result)
+
+    def test_draft_to_draft_noop(self):
+        """Setting draft to draft should be allowed (no-op)."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Draft story", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        story_id = result["created"]
+        result = self.engine.update_item(story_id, {"status": "draft"})
+        # Should not error (it's a no-op, status stays draft)
+        self.assertNotIn("error", result)
+
+
+class TestValidateStoryCreation(TestCase):
+    """Test validate_story_creation() pre-creation warnings."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_short_title_warning(self):
+        """Titles under 10 chars should trigger a warning."""
+        warnings = self.engine.validate_story_creation("feat-test-alpha", "Short")
+        self.assertTrue(any("title" in w.lower() for w in warnings))
+
+    def test_good_title_no_warning(self):
+        """A good title should not trigger title warning."""
+        warnings = self.engine.validate_story_creation(
+            "feat-test-alpha", "A good descriptive story title",
+        )
+        self.assertFalse(any("title" in w.lower() for w in warnings))
+
+    def test_duplicate_title_warning(self):
+        """Creating a story with a duplicate title should warn."""
+        self.engine.create_story(
+            "feat-test-alpha", "Unique story title here", priority="medium",
+            estimate_days=1,
+        )
+        warnings = self.engine.validate_story_creation(
+            "feat-test-alpha", "Unique story title here",
+        )
+        self.assertTrue(any("duplicate" in w.lower() for w in warnings))
+
+    def test_large_estimate_warning(self):
+        """Estimate >10 days should suggest feature-level scope."""
+        warnings = self.engine.validate_story_creation(
+            "feat-test-alpha", "A very large story", estimate_days=15,
+        )
+        self.assertTrue(any("feature" in w.lower() or "large" in w.lower() for w in warnings))
+
+    def test_all_clear_returns_empty(self):
+        """No warnings when everything is fine."""
+        warnings = self.engine.validate_story_creation(
+            "feat-test-alpha", "A perfectly normal story", estimate_days=3,
+        )
+        self.assertEqual(warnings, [])
+
+
+class TestArchivedIdCollision(TestCase):
+    """Test that _next_story_id checks archived stories."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def _get_feature_with_archived(self):
+        """Create a feature with an archived story."""
+        # Create a story
+        result = self.engine.create_story(
+            "feat-test-alpha", "Story to archive", priority="medium",
+            estimate_days=1,
+        )
+        story_id = result["created"]
+        # Move to closed
+        self.engine.update_item(story_id, {"status": "closed"})
+        # Archive it
+        self.engine.archive_closed("feat-test-alpha")
+        return story_id
+
+    def test_next_id_skips_archived(self):
+        """New story ID should not collide with archived story IDs."""
+        archived_id = self._get_feature_with_archived()
+        # Create another story — should get a new ID, not collide
+        result = self.engine.create_story(
+            "feat-test-alpha", "New story after archive", priority="medium",
+            estimate_days=1,
+        )
+        self.assertIn("created", result)
+        new_id = result["created"]
+        self.assertNotEqual(new_id, archived_id)
+
+
+class TestBoardDraftGuard(TestCase):
+    """Test board rejects draft stories."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.engine = TaskEngine(self.vault_path)
+        self.board_engine = BoardEngine(self.vault_path, self.engine)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_board_add_rejects_draft(self):
+        """add_to_board should reject draft stories."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Draft story for board", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        story_id = result["created"]
+        board_result = self.board_engine.add_to_board(story_id)
+        self.assertIn("error", board_result)
+        self.assertIn("draft", board_result["error"].lower())
+
+    def test_board_move_rejects_draft(self):
+        """move_story should reject draft stories not on board."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Draft story for move", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        story_id = result["created"]
+        move_result = self.board_engine.move_story(story_id, "new")
+        self.assertIn("error", move_result)
+        self.assertIn("draft", move_result["error"].lower())
+
+    def test_promote_then_board_succeeds(self):
+        """After promoting draft to new, board should accept."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Draft to promote", priority="medium",
+            estimate_days=1, status="draft",
+        )
+        story_id = result["created"]
+        # Promote
+        self.engine.update_item(story_id, {"status": "new"})
+        # Now board should accept
+        board_result = self.board_engine.move_story(story_id, "new")
+        self.assertNotIn("error", board_result)
+
+    def test_created_by_persists_through_get(self):
+        """created_by should be visible when fetching the story."""
+        result = self.engine.create_story(
+            "feat-test-alpha", "Tracked story", priority="medium",
+            estimate_days=1, created_by="agent:memory",
+        )
+        story = self.engine.get_item(result["created"])
+        self.assertEqual(story["created_by"], "agent:memory")
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

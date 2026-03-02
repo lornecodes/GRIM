@@ -15,7 +15,7 @@ permissions:
   - vault:read
 
 consumers:
-  ops-agent:
+  ironclaw-agent:
     role: execution
     description: Moves accepted files to correct project locations
     reads: [protocol.md, placement_rules]

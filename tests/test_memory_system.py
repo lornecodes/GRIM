@@ -50,7 +50,7 @@ from core.state import AgentResult, FDOSummary, FieldState, GrimState, SkillCont
 
 def run_async(coro):
     """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 class MockMCPResult:
@@ -708,22 +708,22 @@ class TestRouterMemory(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "code")
 
     def test_keyword_my_ip(self):
-        """'my ip' keyword routes to operate."""
+        """v0.0.6: 'my ip' keyword routes to ironclaw (execution)."""
         result = self._route("whats my ip")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "operate")
+        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_keyword_ip_address(self):
-        """'ip address' keyword routes to operate."""
+        """v0.0.6: 'ip address' keyword routes to ironclaw (execution)."""
         result = self._route("show me my ip address")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "operate")
+        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_action_intent_cli(self):
-        """Action verb + 'cli' routes to operate."""
+        """v0.0.6: action-intent routes to ironclaw (execution)."""
         result = self._route("check my cli setup")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "operate")
+        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_no_followup_without_last_delegation(self):
         """Follow-up signals don't trigger without last_delegation_type."""

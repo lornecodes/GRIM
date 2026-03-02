@@ -33,7 +33,7 @@ from core.state import AgentResult, AuditVerdict, GrimState, StagingArtifact
 
 def run_async(coro):
     """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -498,18 +498,20 @@ class TestRouterAuditKeywords(unittest.TestCase):
         self.assertEqual(_skill_ctx_to_delegation(ctx), "audit")
 
     def test_skill_to_delegation_staging_organize(self):
+        """v0.0.6: staging skills route to ironclaw (execution)."""
         from core.nodes.router import _skill_ctx_to_delegation
         from core.state import SkillContext
 
         ctx = SkillContext(name="staging-organize", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "operate")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
 
     def test_skill_to_delegation_staging_cleanup(self):
+        """v0.0.6: staging skills route to ironclaw (execution)."""
         from core.nodes.router import _skill_ctx_to_delegation
         from core.state import SkillContext
 
         ctx = SkillContext(name="staging-cleanup", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "operate")
+        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
 
 
 if __name__ == "__main__":

@@ -86,6 +86,13 @@ class BoardEngine:
         if not story:
             return {"error": f"Story not found: {story_id}"}
 
+        # Draft guard — must promote to 'new' before board placement
+        if story.get("status") == "draft":
+            return {
+                "error": f"Cannot place draft story on board. Promote to 'new' first: "
+                f"kronos_task_update(item_id='{story_id}', fields={{\"status\": \"new\"}})"
+            }
+
         with self._lock:
             board = self._load_board()
 
@@ -135,7 +142,13 @@ class BoardEngine:
                     break
 
             if current_col is None:
-                # Not on board yet — add it
+                # Not on board yet — check draft guard before adding
+                story = self.task_engine.get_item(story_id)
+                if story and story.get("status") == "draft":
+                    return {
+                        "error": f"Cannot place draft story on board. Promote to 'new' first: "
+                        f"kronos_task_update(item_id='{story_id}', fields={{\"status\": \"new\"}})"
+                    }
                 board["columns"][column].append(story_id)
                 self._save_board(board)
                 self.task_engine.update_item(story_id, {"status": COLUMN_STATUS[column]})

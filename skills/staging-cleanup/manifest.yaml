@@ -12,7 +12,7 @@ permissions:
   - staging:read
 
 consumers:
-  ops-agent:
+  ironclaw-agent:
     role: execution
     description: Cleans up old staging directories
     reads: [protocol.md, retention_rules]

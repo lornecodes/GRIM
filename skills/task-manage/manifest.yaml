@@ -23,11 +23,15 @@ consumers:
     role: execution
     description: Creates and updates stories/tasks via MCP tools
     reads: [protocol.md, phases, quality_gates]
+  planning-companion:
+    role: planning
+    description: Graph-level planning node — scopes work and creates draft items
+    reads: [protocol.md, phases, quality_gates]
 
 inputs:
   action:
     type: enum
-    values: [create, update, move, groom, review]
+    values: [create, update, move, groom, review, promote]
     required: true
     description: >
       create: Create a story or task
@@ -35,6 +39,7 @@ inputs:
       move: Move a story between board columns
       groom: Review and reprioritize backlog
       review: Show board state and progress
+      promote: Review and promote draft items to 'new' status
   feat_id:
     type: string
     required: false
@@ -54,8 +59,9 @@ triggers:
   - proactive: "User mentions work items, priorities, or board state"
   - keywords:
       strong: ["create task", "create story", "add story", "move to active",
-               "move to in progress", "show board", "show backlog", "groom backlog"]
-      weak: ["task", "story", "board", "backlog", "priority", "estimate"]
+               "move to in progress", "show board", "show backlog", "groom backlog",
+               "promote draft", "approve draft", "show drafts", "review drafts"]
+      weak: ["task", "story", "board", "backlog", "priority", "estimate", "draft"]
 
 phases:
   1_assess: "Understand the request — which action, which items"
@@ -67,16 +73,20 @@ safety:
   - "Never delete stories without explicit confirmation"
   - "Always confirm before moving items to CLOSED"
   - "Stories must have acceptance criteria before moving to IN_PROGRESS"
+  - "AI-created items default to DRAFT status — must be promoted to NEW before board placement"
+  - "Draft items cannot be placed on the board — promote first"
 
 quality_gates:
   story:
-    - "Has a clear title"
+    - "Has a clear title (>10 chars)"
     - "Has priority set"
     - "Has estimate_days set"
-    - "Has acceptance criteria before moving past NEW"
+    - "Has acceptance criteria (≥2) before moving past NEW"
+    - "Draft items must be promoted before board placement"
   task:
     - "Has a clear title"
     - "Has estimate_days set"
   board:
     - "No orphaned story IDs (all board entries link to real stories)"
     - "Story status matches its board column"
+    - "No draft items on the board"

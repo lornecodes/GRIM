@@ -6,27 +6,27 @@ import logging
 from core.agents.base import BaseAgent
 from core.config import GrimConfig
 from core.tools.kronos_read import COMPANION_TOOLS
-from core.tools.kronos_write import kronos_create, kronos_update
-from core.tools.workspace import FILE_TOOLS
+from core.tools.workspace import FILE_READ_TOOLS
 
 logger = logging.getLogger(__name__)
 
 
 class ResearchAgent(BaseAgent):
-    """Agent for research analysis and document ingestion."""
+    """Agent for research analysis and document ingestion (read-only)."""
 
     agent_name = "research"
     protocol_priority = ["deep-ingest", "kronos-recall"]
     default_protocol = (
-        "You are a research agent with Kronos vault access and file reading tools.\n"
+        "You are a research agent with Kronos vault read access and file reading tools.\n"
         "Use kronos tools to search, retrieve, and analyze FDOs from the knowledge graph.\n"
         "Use file tools to read source material and documents.\n"
+        "Analyze, synthesize, and report. Vault writes go through the Memory agent.\n"
         "Always execute the task — do not say you can't do something "
         "if you have a tool that can do it."
     )
 
     def __init__(self, config: GrimConfig) -> None:
-        tools = FILE_TOOLS + list(COMPANION_TOOLS) + [kronos_create, kronos_update]
+        tools = list(FILE_READ_TOOLS) + list(COMPANION_TOOLS)
         super().__init__(config=config, tools=tools)
 
     def build_context(self, state: dict) -> dict:
