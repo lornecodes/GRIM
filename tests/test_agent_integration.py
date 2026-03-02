@@ -71,8 +71,9 @@ class TestAgentConstruction:
         from core.agents.memory_agent import MemoryAgent
         from core.tools.kronos_write import MEMORY_AGENT_TOOLS
         from core.tools.memory_tools import MEMORY_TOOLS
+        from core.tools.kronos_tasks import TASK_ALL_TOOLS
         agent = MemoryAgent(self._make_config())
-        assert len(agent.tools) == len(MEMORY_AGENT_TOOLS) + len(MEMORY_TOOLS)
+        assert len(agent.tools) == len(MEMORY_AGENT_TOOLS) + len(MEMORY_TOOLS) + len(TASK_ALL_TOOLS)
 
     def test_research_agent_name(self):
         from core.agents.research_agent import ResearchAgent

@@ -78,10 +78,10 @@ cd ui && npx vitest run && cd ..
 - `test_model_routing.py`: 54 tests
 - `test_ironclaw.py`: 51 tests
 - `test_agent_integration.py`: 59 tests
-- `test_memory_system.py`: 72 tests
+- `test_memory_system.py`: 100 tests
 - UI: 29 tests
 
-**Total: ~384 tests must pass.**
+**Total: ~412 tests must pass.**
 
 If any test fails: STOP. Fix the failure before proceeding.
 
@@ -138,12 +138,13 @@ Or manually:
 python -m pytest tests/test_integration.py -v
 ```
 
-35 tests across 5 tiers:
+41 tests across 6 tiers:
 - **Tier 1** (Infrastructure): health endpoint, UI serves, docs endpoint, 404 handling
 - **Tier 2** (MCP): direct Kronos vault queries work
 - **Tier 3** (REST chat): POST /api/chat returns response, sessions persist
 - **Tier 4** (WebSocket): streaming connection, traces received
 - **Tier 5** (Error handling): empty messages, missing fields, invalid sessions
+- **Tier 6** (Memory): memory endpoint, sections parsed, vault mounted, content present
 
 Use `--no-llm` flag to skip LLM-dependent tests (tiers 3-4) if API key unavailable.
 

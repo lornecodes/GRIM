@@ -575,6 +575,76 @@ def test_error_handling(port: int) -> int:
     return failed
 
 
+def test_memory_system(port: int) -> int:
+    """Tier 6: Memory system — read-only verification (no writes to memory.md)."""
+    print("\n[6] Memory System (read-only)")
+    failed = 0
+
+    # 6a. GET /api/memory returns content
+    status, body, _ = http_get(port, "/api/memory", timeout=15)
+    try:
+        record("memory endpoint returns 200", status == 200, f"status={status}")
+    except AssertionError:
+        failed += 1
+        return failed
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        try:
+            record("memory returns JSON", False, f"body={body[:200]}")
+        except AssertionError:
+            failed += 1
+        return failed
+
+    content = data.get("content", "")
+    try:
+        record("memory has content", len(content) > 50,
+               f"length={len(content)}")
+    except AssertionError:
+        failed += 1
+
+    # Should have the expected header
+    try:
+        record("memory has GRIM header", "GRIM Working Memory" in content,
+               f"preview={content[:80]}")
+    except AssertionError:
+        failed += 1
+
+    # 6b. Sections parsed
+    sections = data.get("sections", {})
+    try:
+        record("memory has sections", len(sections) > 0,
+               f"count={len(sections)}, keys={list(sections.keys())[:5]}")
+    except AssertionError:
+        failed += 1
+
+    expected_sections = {"Active Objectives", "Recent Topics", "User Preferences"}
+    found = expected_sections.intersection(set(sections.keys()))
+    try:
+        record("expected sections present", len(found) >= 2,
+               f"found={found}")
+    except AssertionError:
+        failed += 1
+
+    # 6c. Health endpoint confirms vault is mounted
+    status, body, _ = http_get(port, "/health")
+    try:
+        health = json.loads(body)
+        vault_path = health.get("vault", "")
+        record("vault path is /vault (not test fallback)",
+               vault_path == "/vault",
+               f"vault={vault_path}")
+    except (json.JSONDecodeError, AssertionError) as e:
+        if isinstance(e, AssertionError):
+            failed += 1
+        else:
+            record("health JSON parse", False, f"body={body[:100]}")
+            failed += 1
+
+    return failed
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def run_all(port: int, no_llm: bool = False) -> int:
@@ -599,6 +669,9 @@ def run_all(port: int, no_llm: bool = False) -> int:
 
     # Tier 5: Error handling (no API key needed)
     total_failed += test_error_handling(port)
+
+    # Tier 6: Memory system (read-only, no API key needed)
+    total_failed += test_memory_system(port)
 
     return total_failed
 

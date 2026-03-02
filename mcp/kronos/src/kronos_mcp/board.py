@@ -154,13 +154,20 @@ class BoardEngine:
     def board_view(self, project_id: str | None = None) -> dict:
         """Get the full board with enriched story data per column."""
         board = self._load_board()
-        result = {"columns": {}, "last_synced": board.get("last_synced")}
+        result: dict[str, Any] = {"columns": {}, "last_synced": board.get("last_synced")}
+
+        # Collect all story IDs and batch-load in one vault scan
+        all_ids: list[str] = []
+        for col in COLUMNS:
+            all_ids.extend(board["columns"].get(col, []))
+
+        stories_by_id = self.task_engine.get_items_batch(all_ids) if all_ids else {}
 
         for col in COLUMNS:
             story_ids = board["columns"].get(col, [])
             enriched = []
             for sid in story_ids:
-                story = self.task_engine.get_item(sid)
+                story = stories_by_id.get(sid)
                 if not story:
                     enriched.append({"id": sid, "error": "story not found"})
                     continue
@@ -169,21 +176,7 @@ class BoardEngine:
                 if project_id and story.get("project") != project_id:
                     continue
 
-                tasks = story.get("tasks", [])
-                enriched.append({
-                    "id": sid,
-                    "title": story.get("title", ""),
-                    "status": story.get("status", "new"),
-                    "priority": story.get("priority", "medium"),
-                    "estimate_days": story.get("estimate_days", 0),
-                    "description": story.get("description", ""),
-                    "feature": story.get("feature", ""),
-                    "project": story.get("project", ""),
-                    "tasks": tasks,
-                    "task_count": len(tasks),
-                    "tasks_done": sum(1 for t in tasks if t.get("status") in ("resolved", "closed")),
-                    "tags": story.get("tags", []),
-                })
+                enriched.append(story)
 
             result["columns"][col] = enriched
 

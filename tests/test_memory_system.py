@@ -28,6 +28,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core.tools.context import tool_context as _tool_context
+
 import yaml
 
 # Ensure GRIM root and MCP server are on path
@@ -247,7 +249,7 @@ class TestMemoryTools(unittest.TestCase):
         mock_session = MockMCPSession(responses={
             "kronos_memory_read": {"content": SAMPLE_MEMORY, "sections": ["Active Objectives"]},
         })
-        with patch("core.tools.kronos_read._mcp_session", mock_session):
+        with patch.object(_tool_context, "mcp_session", mock_session):
             result = run_async(read_grim_memory.ainvoke({}))
             self.assertIn("Active Objectives", result)
 
@@ -257,7 +259,7 @@ class TestMemoryTools(unittest.TestCase):
         mock_session = MockMCPSession(responses={
             "kronos_memory_read": {"content": "", "sections": []},
         })
-        with patch("core.tools.kronos_read._mcp_session", mock_session):
+        with patch.object(_tool_context, "mcp_session", mock_session):
             result = run_async(read_grim_memory.ainvoke({}))
             # Empty content returns "(memory is empty)"
             self.assertIn("empty", result.lower())
@@ -265,7 +267,7 @@ class TestMemoryTools(unittest.TestCase):
     def test_read_tool_no_mcp(self):
         """read_grim_memory without MCP session returns error."""
         from core.tools.memory_tools import read_grim_memory
-        with patch("core.tools.kronos_read._mcp_session", None):
+        with patch.object(_tool_context, "mcp_session", None):
             result = run_async(read_grim_memory.ainvoke({}))
             # Should get an error about vault not connected
             self.assertTrue("error" in result.lower() or "not connected" in result.lower())
@@ -276,7 +278,7 @@ class TestMemoryTools(unittest.TestCase):
         mock_session = MockMCPSession(responses={
             "kronos_memory_update": {"ok": True, "section": "Key Learnings", "char_count": 30},
         })
-        with patch("core.tools.kronos_read._mcp_session", mock_session):
+        with patch.object(_tool_context, "mcp_session", mock_session):
             result = run_async(update_grim_memory.ainvoke({
                 "section": "Key Learnings",
                 "content": "- New learning: tests matter",
@@ -293,7 +295,7 @@ class TestMemoryTools(unittest.TestCase):
         mock_session = MockMCPSession(responses={
             "kronos_memory_read": {"content": "- Peter prefers CLI aesthetic", "section": "User Preferences"},
         })
-        with patch("core.tools.kronos_read._mcp_session", mock_session):
+        with patch.object(_tool_context, "mcp_session", mock_session):
             result = run_async(read_grim_memory.ainvoke({"section": "User Preferences"}))
             self.assertIn("CLI aesthetic", result)
 
@@ -639,6 +641,7 @@ class TestRouterMemory(unittest.TestCase):
         """memory-read skill routes to memory agent."""
         result = self._route(
             "what do you remember?",
+            skill_delegation_hint="memory",
             matched_skills=[
                 SkillContext(
                     name="memory-read",
@@ -655,6 +658,7 @@ class TestRouterMemory(unittest.TestCase):
         """memory-update skill routes to memory agent."""
         result = self._route(
             "remember this for next time",
+            skill_delegation_hint="memory",
             matched_skills=[
                 SkillContext(
                     name="memory-update",

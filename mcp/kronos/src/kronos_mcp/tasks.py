@@ -93,6 +93,63 @@ class TaskEngine:
         """Set stories list in frontmatter."""
         fm["stories"] = stories
 
+    # ── Batch Operations ─────────────────────────────────────────────────
+
+    def _scan_all_features(self) -> list[tuple[dict, str, "Path"]]:
+        """Scan vault once and return all parsed features.
+
+        Returns list of (frontmatter, body, path) tuples.
+        """
+        results = []
+        for md_path in self.vault_path.rglob("feat-*.md"):
+            parsed = self._parse_feature(md_path)
+            if parsed:
+                fm, body = parsed
+                results.append((fm, body, md_path))
+        return results
+
+    def get_items_batch(self, story_ids: list[str]) -> dict[str, dict]:
+        """Get multiple stories by ID in a single vault scan.
+
+        Returns {story_id: enriched_story_dict} for found stories.
+        Missing stories are omitted from the result.
+        """
+        if not story_ids:
+            return {}
+
+        wanted = set(story_ids)
+        found: dict[str, dict] = {}
+
+        for fm, body, md_path in self._scan_all_features():
+            feat_id = fm["id"]
+            project_id = self._project_for_feature(fm)
+
+            for story in self._get_stories(fm):
+                sid = story.get("id", "")
+                if sid in wanted:
+                    tasks = story.get("tasks", [])
+                    found[sid] = {
+                        "id": sid,
+                        "title": story.get("title", ""),
+                        "status": story.get("status", "new"),
+                        "priority": story.get("priority", "medium"),
+                        "estimate_days": story.get("estimate_days", 0),
+                        "description": story.get("description", ""),
+                        "feature": feat_id,
+                        "project": project_id,
+                        "tasks": tasks,
+                        "task_count": len(tasks),
+                        "tasks_done": sum(
+                            1 for t in tasks if t.get("status") in ("resolved", "closed")
+                        ),
+                        "tags": story.get("tags", []),
+                    }
+                    # Early exit if we found everything
+                    if len(found) == len(wanted):
+                        return found
+
+        return found
+
     # ── Feature Discovery ────────────────────────────────────────────────
 
     def get_all_features(self) -> list[dict]:

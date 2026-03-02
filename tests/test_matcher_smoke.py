@@ -1,21 +1,30 @@
-"""Quick smoke test for the skill matcher."""
-from core.config import load_config
+"""Smoke tests for skill matching."""
+import pytest
+
+from core.config import GrimConfig
 from core.skills.loader import load_skills
 from core.skills.matcher import match_skills
 
-cfg = load_config()
-registry = load_skills(cfg.skills_path)
 
-tests = [
-    "remember this concept about topology",
-    "can you capture this idea about Mobius surfaces?",
-    "what do I know about PAC framework?",
-    "promote the inbox items to FDOs",
-    "lets just talk about physics",
-    "review vault health",
-]
+@pytest.mark.smoke
+class TestMatcherSmoke:
+    """Verify skill matcher loads and scores correctly."""
 
-for msg in tests:
-    matched = match_skills(msg, registry)
-    names = [s.name for s in matched]
-    print(f'  "{msg[:50]}" -> {names}')
+    def test_skills_load(self, grim_config):
+        """Skill registry should load without errors."""
+        registry = load_skills(grim_config.skills_path)
+        assert len(registry) > 0, "No skills loaded"
+
+    def test_vault_skill_matches_capture(self, grim_config):
+        """'remember this' should match a kronos capture skill."""
+        registry = load_skills(grim_config.skills_path)
+        matched = match_skills("remember this concept about topology", registry)
+        names = [s.name for s in matched]
+        assert any("capture" in n or "kronos" in n for n in names), f"No capture skill matched: {names}"
+
+    def test_no_match_for_casual(self, grim_config):
+        """Casual conversation should match few or no specific skills."""
+        registry = load_skills(grim_config.skills_path)
+        matched = match_skills("lets just talk about physics", registry)
+        # Should either be empty or low-confidence matches
+        assert len(matched) <= 3, f"Too many matches for casual: {[s.name for s in matched]}"

@@ -904,6 +904,234 @@ class TestDateHelpers(TestCase):
         self.assertEqual(result, date(2026, 3, 9))
 
 
+# ── Batch Loading Tests ──────────────────────────────────────────────────────
+
+FEATURE_WITH_CLOSED = """\
+---
+id: feat-test-gamma
+title: "Test Feature Gamma"
+domain: ai-systems
+created: "2026-03-01"
+updated: "2026-03-01"
+status: developing
+confidence: 0.6
+related:
+  - proj-test
+tags: [test]
+stories:
+  - id: story-test-gamma-001
+    title: "Gamma story active"
+    status: active
+    priority: critical
+    estimate_days: 2
+    description: ""
+    tasks:
+      - id: task-test-gamma-001-001
+        title: "Gamma task one"
+        status: new
+        estimate_days: 0.5
+      - id: task-test-gamma-001-002
+        title: "Gamma task two"
+        status: resolved
+        estimate_days: 1
+    tags: []
+    created: "2026-03-01"
+    updated: "2026-03-01"
+    log: []
+  - id: story-test-gamma-002
+    title: "Gamma story closed"
+    status: closed
+    priority: low
+    estimate_days: 1
+    description: ""
+    tasks: []
+    tags: []
+    created: "2026-03-01"
+    updated: "2026-03-01"
+    log: []
+---
+
+# Test Feature Gamma
+"""
+
+
+class TestTaskEngineBatch(TestCase):
+    """Tests for get_items_batch() and _scan_all_features()."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(
+            MINIMAL_FEATURE_FDO, FEATURE_WITH_STORIES, FEATURE_WITH_CLOSED, NON_FEATURE_FDO
+        )
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_batch_empty_list(self):
+        result = self.engine.get_items_batch([])
+        self.assertEqual(result, {})
+
+    def test_batch_single_story(self):
+        result = self.engine.get_items_batch(["story-test-beta-001"])
+        self.assertIn("story-test-beta-001", result)
+        story = result["story-test-beta-001"]
+        self.assertEqual(story["title"], "Pre-existing story")
+        self.assertEqual(story["priority"], "high")
+        self.assertEqual(story["feature"], "feat-test-beta")
+        self.assertEqual(story["project"], "proj-test")
+
+    def test_batch_multiple_stories(self):
+        ids = ["story-test-beta-001", "story-test-beta-002", "story-test-gamma-001"]
+        result = self.engine.get_items_batch(ids)
+        self.assertEqual(len(result), 3)
+        self.assertIn("story-test-beta-001", result)
+        self.assertIn("story-test-beta-002", result)
+        self.assertIn("story-test-gamma-001", result)
+
+    def test_batch_missing_story(self):
+        result = self.engine.get_items_batch(["story-nonexistent-999"])
+        self.assertEqual(len(result), 0)
+
+    def test_batch_mixed_found_and_missing(self):
+        ids = ["story-test-beta-001", "story-nonexistent-999", "story-test-gamma-001"]
+        result = self.engine.get_items_batch(ids)
+        self.assertEqual(len(result), 2)
+        self.assertIn("story-test-beta-001", result)
+        self.assertIn("story-test-gamma-001", result)
+        self.assertNotIn("story-nonexistent-999", result)
+
+    def test_batch_enriches_task_counts(self):
+        result = self.engine.get_items_batch(["story-test-gamma-001"])
+        story = result["story-test-gamma-001"]
+        self.assertEqual(story["task_count"], 2)
+        self.assertEqual(story["tasks_done"], 1)  # task-002 is resolved
+        self.assertEqual(len(story["tasks"]), 2)
+
+    def test_batch_includes_tasks(self):
+        result = self.engine.get_items_batch(["story-test-beta-001"])
+        story = result["story-test-beta-001"]
+        self.assertEqual(story["task_count"], 1)
+        self.assertEqual(story["tasks"][0]["id"], "task-001")
+
+    def test_batch_story_with_no_tasks(self):
+        result = self.engine.get_items_batch(["story-test-beta-002"])
+        story = result["story-test-beta-002"]
+        self.assertEqual(story["task_count"], 0)
+        self.assertEqual(story["tasks_done"], 0)
+        self.assertEqual(story["tasks"], [])
+
+    def test_batch_closed_story(self):
+        result = self.engine.get_items_batch(["story-test-gamma-002"])
+        story = result["story-test-gamma-002"]
+        self.assertEqual(story["status"], "closed")
+        self.assertEqual(story["priority"], "low")
+
+    def test_scan_all_features(self):
+        results = self.engine._scan_all_features()
+        feat_ids = {fm["id"] for fm, _, _ in results}
+        self.assertIn("feat-test-alpha", feat_ids)
+        self.assertIn("feat-test-beta", feat_ids)
+        self.assertIn("feat-test-gamma", feat_ids)
+        # Non-feature FDOs should not be included
+        self.assertNotIn("proj-test", feat_ids)
+
+    def test_batch_early_exit(self):
+        """When all requested stories are found, scanning should stop early."""
+        # Just verify correctness — the early-exit optimization is internal
+        result = self.engine.get_items_batch(["story-test-beta-001"])
+        self.assertEqual(len(result), 1)
+
+
+class TestBoardEngineBatch(TestCase):
+    """Tests that board_view and backlog_view use batch loading correctly."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(
+            MINIMAL_FEATURE_FDO, FEATURE_WITH_STORIES, FEATURE_WITH_CLOSED, NON_FEATURE_FDO
+        )
+        self.task_engine = TaskEngine(self.vault_path)
+        self.board_engine = BoardEngine(self.vault_path, self.task_engine)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_board_view_empty_board(self):
+        """Empty board should return valid structure with all columns."""
+        result = self.board_engine.board_view()
+        self.assertIn("columns", result)
+        for col in COLUMNS:
+            self.assertIn(col, result["columns"])
+            self.assertIsInstance(result["columns"][col], list)
+        self.assertEqual(result["total_stories"], 0)
+
+    def test_board_view_with_stories(self):
+        """Board view with stories should enrich them via batch loading."""
+        # Add stories to board
+        self.board_engine.move_story("story-test-beta-001", "active")
+        self.board_engine.move_story("story-test-gamma-001", "in_progress")
+
+        result = self.board_engine.board_view()
+        self.assertEqual(result["total_stories"], 2)
+
+        # Active column should have beta-001
+        active = result["columns"]["active"]
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["id"], "story-test-beta-001")
+        self.assertEqual(active[0]["title"], "Pre-existing story")
+        self.assertIn("tasks", active[0])
+
+        # In progress should have gamma-001
+        in_prog = result["columns"]["in_progress"]
+        self.assertEqual(len(in_prog), 1)
+        self.assertEqual(in_prog[0]["id"], "story-test-gamma-001")
+
+    def test_board_view_missing_story(self):
+        """Board with a story ID that doesn't exist should include error entry."""
+        # Manually write a bad ID into board.yaml
+        import yaml
+        board_path = self.tmp / "projects" / "board.yaml"
+        board_data = yaml.safe_load(board_path.read_text(encoding="utf-8"))
+        board_data["columns"]["new"].append("story-nonexistent-999")
+        board_path.write_text(yaml.dump(board_data), encoding="utf-8")
+
+        result = self.board_engine.board_view()
+        new_col = result["columns"]["new"]
+        self.assertEqual(len(new_col), 1)
+        self.assertEqual(new_col[0]["id"], "story-nonexistent-999")
+        self.assertIn("error", new_col[0])
+
+    def test_board_view_project_filter(self):
+        """Board view with project filter should only include matching stories."""
+        self.board_engine.move_story("story-test-beta-001", "active")
+        self.board_engine.move_story("story-test-gamma-001", "active")
+
+        # Both stories are from proj-test, so filtering by proj-test should include both
+        result = self.board_engine.board_view(project_id="proj-test")
+        active = result["columns"]["active"]
+        self.assertEqual(len(active), 2)
+
+        # Filtering by non-existent project should return empty
+        result = self.board_engine.board_view(project_id="proj-other")
+        active = result["columns"]["active"]
+        self.assertEqual(len(active), 0)
+
+    def test_board_view_returns_all_columns(self):
+        """board_view always returns all 5 columns even if empty."""
+        result = self.board_engine.board_view()
+        self.assertEqual(set(result["columns"].keys()), set(COLUMNS))
+
+    def test_backlog_view_excludes_board_stories(self):
+        """Backlog should not include stories already on the board."""
+        # Put one story on board
+        self.board_engine.move_story("story-test-beta-001", "active")
+
+        result = self.board_engine.backlog_view()
+        backlog_ids = {s["id"] for s in result["backlog"]}
+        self.assertNotIn("story-test-beta-001", backlog_ids)
+        # Other stories should be in backlog
+        self.assertIn("story-test-beta-002", backlog_ids)
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

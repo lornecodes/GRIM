@@ -444,15 +444,17 @@ class TestToolBridgeInjection(unittest.TestCase):
 
     def test_set_and_get_bridge(self):
         import core.tools.ironclaw_tools as tools_mod
+        from core.tools.context import tool_context
         bridge = IronClawBridge("http://localhost:3100")
         tools_mod.set_bridge(bridge)
         self.assertIs(tools_mod._get_bridge(), bridge)
         # Cleanup
-        tools_mod._bridge = None
+        tool_context.ironclaw_bridge = None
 
     def test_get_bridge_unset_raises(self):
         import core.tools.ironclaw_tools as tools_mod
-        tools_mod._bridge = None
+        from core.tools.context import tool_context
+        tool_context.ironclaw_bridge = None
         with self.assertRaises(RuntimeError):
             tools_mod._get_bridge()
 

@@ -1,0 +1,69 @@
+name: kronos-bp
+version: "1.0"
+description: >
+  Promote patterns from notes and journals into best-practice FDOs.
+  Best practices are distilled wisdom: stable patterns with evidence,
+  examples, and anti-patterns. Tagged 'best-practice' and placed in
+  the relevant domain (not a separate domain). Workspace-wide scope.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:write
+  - vault:read
+
+consumers:
+  memory-agent:
+    role: execution
+    description: Creates best-practice FDOs via kronos_create
+    reads: [protocol.md, inputs, outputs, quality_gates]
+  grim:
+    role: recognition
+    description: Identifies when a pattern has enough evidence to become a best practice
+    reads: [triggers, quality_gates]
+
+inputs:
+  pattern_name:
+    type: string
+    required: true
+    description: Name of the best practice pattern
+  domain:
+    type: enum
+    values: [physics, ai-systems, tools, personal, modelling, computing]
+    required: true
+    description: Domain where this practice primarily applies
+  evidence:
+    type: list
+    required: true
+    description: FDO IDs or note anchors that support this practice
+  tags:
+    type: list
+    required: true
+    description: Tags (must include 'best-practice')
+
+outputs:
+  fdo_id: string
+  fdo_path: string
+
+triggers:
+  - explicit: "User says 'make this a best practice', 'promote to best practice'"
+  - explicit: "User says 'distill this pattern', 'this should be a best practice'"
+  - proactive: "Same pattern observed in 3+ notes or journals"
+  - keywords:
+      strong: ["best practice", "promote to best practice", "distill this pattern"]
+      weak: ["pattern", "we always do this", "standard approach"]
+
+safety:
+  - "Require evidence from at least 2 sources (notes, journals, or experience)"
+  - "Never create a best practice that contradicts an existing one without noting the conflict"
+  - "Tag MUST include 'best-practice'"
+  - "Domain must be content-appropriate (not 'notes' or 'journal')"
+
+quality_gates:
+  - "Pattern has clear 'when to use' criteria"
+  - "At least one concrete example is included"
+  - "Anti-patterns section identifies what NOT to do"
+  - "Source evidence links to real notes/journals/FDOs"
+  - "'best-practice' tag is present"
+  - "Domain is correct (not a catch-all)"

@@ -1,0 +1,70 @@
+name: kronos-note
+version: "1.0"
+description: >
+  Quick note capture to the monthly rolling log in kronos-vault/notes/.
+  For fixes, workarounds, gotchas, and small learnings — a personal
+  Stack Overflow. Uses kronos_note_append MCP tool. Different from
+  kronos-journal (full FDOs) and kronos-capture (inbox DMZ).
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - vault:write
+  - vault:read
+
+consumers:
+  memory-agent:
+    role: execution
+    description: Appends note entries via kronos_note_append MCP tool
+    reads: [protocol.md, inputs, outputs, quality_gates]
+  grim:
+    role: recognition
+    description: Detects fix/workaround/gotcha moments and suggests noting them
+    reads: [triggers, quality_gates]
+
+inputs:
+  title:
+    type: string
+    required: true
+    description: Short, searchable title for the note
+  body:
+    type: string
+    required: true
+    description: Note content (problem + solution + why)
+  tags:
+    type: list
+    required: true
+    description: Tags for search (library names, error types, platforms)
+  related:
+    type: list
+    required: false
+    description: Related FDO IDs
+  source_paths:
+    type: list
+    required: false
+    description: Source file paths referenced
+
+outputs:
+  anchor: string
+  month_file: string
+
+triggers:
+  - explicit: "User says 'note this', 'quick note', 'jot this down'"
+  - explicit: "User says 'record this fix', 'save this workaround'"
+  - proactive: "A fix, workaround, or issue resolution just happened"
+  - proactive: "A non-obvious configuration or setup step was discovered"
+  - keywords:
+      strong: ["note this", "quick note", "jot this down", "record this fix", "save this workaround"]
+      weak: ["fixed it", "that worked", "gotcha", "workaround"]
+
+safety:
+  - "Never duplicate — search existing notes first"
+  - "Keep notes concise — this is Stack Overflow, not a blog post"
+  - "Include source_paths for any files referenced"
+
+quality_gates:
+  - "Title is specific and searchable (not 'fixed a bug')"
+  - "Tags are precise (library names, error types, not generic 'coding')"
+  - "Body includes the WHY, not just the what"
+  - "Source paths point to real files when referenced"

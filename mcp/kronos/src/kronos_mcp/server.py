@@ -36,6 +36,10 @@ Tools:
     kronos_calendar_update — Update/delete personal event
     kronos_calendar_sync  — Rebuild schedule from board
 
+  Notes:
+    kronos_note_append    — Append a note to the monthly rolling log
+    kronos_notes_recent   — Get recent note entries (last N days)
+
   Skills:
     kronos_skills         — List all available GRIM skills
     kronos_skill_load     — Load a skill's full instruction protocol
@@ -53,7 +57,7 @@ import os
 import re
 import time
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +69,9 @@ from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
 
 from .vault import VaultEngine, FDO, VALID_DOMAINS, VALID_STATUSES
 from .search import SearchEngine
+
+# Canonical domain enum for MCP tool schemas — derived from vault.py source of truth
+_DOMAIN_ENUM = sorted(VALID_DOMAINS)
 from .skills import SkillsEngine
 from .tasks import TaskEngine
 from .board import BoardEngine
@@ -185,7 +192,7 @@ TOOLS: list[Tool] = [
                 "domain": {
                     "type": "string",
                     "description": "Filter by domain",
-                    "enum": ["physics", "ai-systems", "tools", "personal", "modelling", "computing"],
+                    "enum": _DOMAIN_ENUM,
                 },
             },
         },
@@ -245,7 +252,7 @@ TOOLS: list[Tool] = [
             "properties": {
                 "id": {"type": "string", "description": "Unique kebab-case ID"},
                 "title": {"type": "string", "description": "Human-readable title"},
-                "domain": {"type": "string", "enum": ["physics", "ai-systems", "tools", "personal", "modelling", "computing"]},
+                "domain": {"type": "string", "enum": _DOMAIN_ENUM},
                 "status": {"type": "string", "enum": ["seed", "developing", "stable"], "default": "seed"},
                 "confidence": {"type": "number", "description": "0.0 to 1.0"},
                 "related": {
@@ -334,7 +341,7 @@ TOOLS: list[Tool] = [
                 "domain": {
                     "type": "string",
                     "description": "Filter to a specific domain (optional)",
-                    "enum": ["physics", "ai-systems", "tools", "personal", "modelling", "computing"],
+                    "enum": _DOMAIN_ENUM,
                 },
             },
         },
@@ -896,6 +903,66 @@ TOOLS: list[Tool] = [
             },
         },
     ),
+    # ── Notes tools ──────────────────────────────────────────────────────────
+    Tool(
+        name="kronos_note_append",
+        description=(
+            "Append a timestamped note entry to the current month's rolling note log. "
+            "Notes are quick, specific captures (fixes, workarounds, gotchas). "
+            "Creates the monthly file if it doesn't exist. Returns the entry anchor."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short title for the note entry"},
+                "body": {"type": "string", "description": "Note content (markdown)"},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Searchable tags for this entry",
+                },
+                "related": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Related FDO IDs (optional)",
+                },
+                "source_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths referenced (repo/path format, optional)",
+                },
+            },
+            "required": ["title", "body", "tags"],
+        },
+    ),
+    Tool(
+        name="kronos_notes_recent",
+        description=(
+            "Get recent note entries from rolling logs. Returns entries from the "
+            "last N days (default 30), optionally filtered by tags. Used by the "
+            "memory node to surface recent knowledge."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "How many days back to search (default: 30)",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by tags (OR logic)",
+                },
+                "max_entries": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum entries to return (default: 10)",
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -903,8 +970,9 @@ TOOLS: list[Tool] = [
 
 TOOL_GROUPS = {
     "vault:read":   ["kronos_search", "kronos_get", "kronos_list", "kronos_graph",
-                      "kronos_tags", "kronos_deep_dive", "kronos_validate"],
-    "vault:write":  ["kronos_create", "kronos_update"],
+                      "kronos_tags", "kronos_deep_dive", "kronos_validate",
+                      "kronos_notes_recent"],
+    "vault:write":  ["kronos_create", "kronos_update", "kronos_note_append"],
     "memory:read":  ["kronos_memory_read", "kronos_memory_sections"],
     "memory:write": ["kronos_memory_update"],
     "source:read":  ["kronos_navigate", "kronos_read_source", "kronos_search_source"],
@@ -1487,6 +1555,197 @@ def handle_update(args: dict) -> str:
     return _json({"updated": fdo_id, "path": path, "fields_changed": list(fields.keys())})
 
 
+# ── Notes handlers ──────────────────────────────────────────────────────────
+
+
+def handle_note_append(args: dict) -> str:
+    """Append a timestamped note entry to the current month's rolling log."""
+    title = args["title"]
+    body = args["body"]
+    tags = args.get("tags", [])
+    related = args.get("related", [])
+    source_paths = args.get("source_paths", [])
+
+    now = datetime.now()
+    month_str = now.strftime("%Y-%m")
+    notes_dir = Path(vault.vault_path) / "notes"
+    month_file = notes_dir / f"notes-{month_str}.md"
+    anchor = f"note-{now.strftime('%Y%m%d-%H%M%S')}"
+
+    # Create monthly file with FDO frontmatter if it doesn't exist
+    if not month_file.exists():
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        month_name = now.strftime("%B %Y")
+        today_str = now.strftime("%Y-%m-%d")
+        header = (
+            f"---\n"
+            f"id: notes-{month_str}\n"
+            f"title: \"Notes \\u2014 {month_name}\"\n"
+            f"domain: notes\n"
+            f"created: '{today_str}'\n"
+            f"updated: '{today_str}'\n"
+            f"status: developing\n"
+            f"confidence: 0.9\n"
+            f"confidence_basis: Rolling log of quick notes and fixes\n"
+            f"tags: [notes, rolling-log, {month_str}]\n"
+            f"related: []\n"
+            f"source_repos: []\n"
+            f"---\n\n"
+            f"# Notes \\u2014 {month_name}\n\n"
+        )
+        month_file.write_text(header, encoding="utf-8")
+
+    # Build the entry block
+    entry_lines = [
+        f"## {title}",
+        f"<!-- anchor: {anchor} -->",
+        f"**Date**: {now.strftime('%Y-%m-%d %H:%M')}",
+        f"**Tags**: {', '.join(tags)}",
+    ]
+    if related:
+        entry_lines.append(f"**Related**: {', '.join(f'[[{r}]]' for r in related)}")
+    if source_paths:
+        entry_lines.append(f"**Sources**: {', '.join(source_paths)}")
+    entry_lines.append("")
+    entry_lines.append(body)
+    entry_lines.append("")
+    entry_lines.append("---")
+    entry_lines.append("")
+
+    entry_text = "\n".join(entry_lines)
+
+    # Read existing content and update the 'updated' date in frontmatter
+    content = month_file.read_text(encoding="utf-8")
+    today_str = now.strftime("%Y-%m-%d")
+    content = re.sub(
+        r"updated: '[^']*'",
+        f"updated: '{today_str}'",
+        content,
+        count=1,
+    )
+    content += entry_text
+    month_file.write_text(content, encoding="utf-8")
+
+    # Re-index so search picks up new content
+    fdo = vault._parse_file(month_file)
+    if fdo:
+        vault.index[fdo.id] = fdo
+        search_engine.index_fdo(fdo)
+
+    return _json({
+        "appended": anchor,
+        "file": str(month_file),
+        "month": month_str,
+        "title": title,
+    })
+
+
+def _parse_note_entries(file_path: Path) -> list[dict]:
+    """Parse individual note entries from a rolling log file."""
+    if not file_path.exists():
+        return []
+
+    content = file_path.read_text(encoding="utf-8")
+
+    # Strip YAML frontmatter
+    if content.startswith("---"):
+        end = content.find("---", 3)
+        if end != -1:
+            content = content[end + 3:].strip()
+
+    # Split on ## headings (note entries)
+    entries = []
+    parts = re.split(r"^## ", content, flags=re.MULTILINE)
+
+    for part in parts[1:]:  # skip preamble before first ##
+        lines = part.strip().split("\n")
+        if not lines:
+            continue
+
+        title = lines[0].strip()
+        entry: dict[str, Any] = {"title": title}
+
+        # Parse metadata lines
+        body_lines: list[str] = []
+        in_body = False
+
+        for line in lines[1:]:
+            stripped = line.strip()
+            if stripped.startswith("<!-- anchor:"):
+                match = re.search(r"anchor:\s*([\w-]+)", stripped)
+                if match:
+                    entry["anchor"] = match.group(1)
+            elif stripped.startswith("**Date**:") and not in_body:
+                entry["date"] = stripped.replace("**Date**:", "").strip()
+            elif stripped.startswith("**Tags**:") and not in_body:
+                tag_str = stripped.replace("**Tags**:", "").strip()
+                entry["tags"] = [t.strip() for t in tag_str.split(",") if t.strip()]
+            elif stripped.startswith("**Related**:") and not in_body:
+                pass  # skip for now
+            elif stripped.startswith("**Sources**:") and not in_body:
+                pass  # skip for now
+            elif stripped == "---":
+                break  # entry separator
+            else:
+                if stripped or in_body:
+                    in_body = True
+                    body_lines.append(line)
+
+        entry["body"] = "\n".join(body_lines).strip()
+        entries.append(entry)
+
+    return entries
+
+
+def handle_notes_recent(args: dict) -> str:
+    """Get recent note entries from rolling logs."""
+    days = args.get("days", 30)
+    filter_tags = args.get("tags", [])
+    max_entries = args.get("max_entries", 10)
+
+    notes_dir = Path(vault.vault_path) / "notes"
+    if not notes_dir.exists():
+        return _json({"entries": [], "total": 0})
+
+    # Determine which monthly files to read (current + previous months)
+    now = datetime.now()
+    months_to_check: list[str] = []
+    for i in range(min((days // 28) + 2, 6)):  # at most 6 months back
+        month_offset = now.month - i
+        year_offset = now.year
+        while month_offset <= 0:
+            month_offset += 12
+            year_offset -= 1
+        months_to_check.append(f"{year_offset:04d}-{month_offset:02d}")
+
+    # Parse entries from all relevant monthly files
+    all_entries: list[dict] = []
+    cutoff = now.strftime("%Y-%m-%d")
+    from datetime import timedelta
+    cutoff_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    for month_str in months_to_check:
+        month_file = notes_dir / f"notes-{month_str}.md"
+        entries = _parse_note_entries(month_file)
+        for entry in entries:
+            entry["month"] = month_str
+            # Filter by date
+            entry_date = entry.get("date", "")[:10]  # "2026-03-01 14:30" → "2026-03-01"
+            if entry_date and entry_date >= cutoff_date:
+                # Filter by tags (OR logic)
+                if filter_tags:
+                    entry_tags = set(entry.get("tags", []))
+                    if not entry_tags.intersection(filter_tags):
+                        continue
+                all_entries.append(entry)
+
+    # Sort by date descending (most recent first)
+    all_entries.sort(key=lambda e: e.get("date", ""), reverse=True)
+    all_entries = all_entries[:max_entries]
+
+    return _json({"entries": all_entries, "total": len(all_entries)})
+
+
 def handle_deep_dive(args: dict) -> str:
     vault._ensure_index()
     query = args["query"]
@@ -1897,6 +2156,9 @@ HANDLERS = {
     "kronos_calendar_add": handle_calendar_add,
     "kronos_calendar_update": handle_calendar_update,
     "kronos_calendar_sync": handle_calendar_sync,
+    # Notes tools
+    "kronos_note_append": handle_note_append,
+    "kronos_notes_recent": handle_notes_recent,
 }
 
 
