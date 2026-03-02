@@ -48,7 +48,7 @@ if command -v cygpath &>/dev/null; then
 fi
 IMAGE_NAME="grim"
 IRONCLAW_IMAGE_NAME="ironclaw"
-KEEP_IMAGES="${GRIM_KEEP:-3}"
+KEEP_IMAGES="${GRIM_KEEP:-1}"
 
 # Compose file paths (quoted separately to handle spaces in paths)
 COMPOSE_FILE="$GRIM_DIR/docker-compose.yml"
@@ -134,6 +134,41 @@ _clean_old_images() {
             docker rmi "$img_name:$old_tag" 2>/dev/null || true
         fi
     done <<< "$all_tags"
+}
+
+_clean_stale_images() {
+    # Lightweight cleanup that runs after every `up` — removes images not used
+    # by any running container + dangling layers. Safe and fast.
+    local removed=0
+
+    # 1. Clean old tagged versions of our images
+    for img in "$IMAGE_NAME" "$IRONCLAW_IMAGE_NAME" "grim-ironclaw" "grim-ai-bridge"; do
+        local tags
+        tags=$(docker images "$img" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r || true)
+        [[ -z "$tags" ]] && continue
+        local count=0
+        while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            count=$((count + 1))
+            if [[ $count -gt $KEEP_IMAGES ]]; then
+                docker rmi "$img:$tag" 2>/dev/null && removed=$((removed + 1)) || true
+            fi
+        done <<< "$tags"
+    done
+
+    # 2. Remove dangling (untagged) images
+    local dangling
+    dangling=$(docker images -f "dangling=true" -q 2>/dev/null)
+    if [[ -n "$dangling" ]]; then
+        local dcount
+        dcount=$(echo "$dangling" | wc -l | tr -d ' ')
+        echo "$dangling" | xargs docker rmi -f 2>/dev/null || true
+        removed=$((removed + dcount))
+    fi
+
+    if [[ $removed -gt 0 ]]; then
+        _ok "Cleaned $removed stale image(s)"
+    fi
 }
 
 cmd_test() {
@@ -247,6 +282,9 @@ cmd_up() {
         _warn "GRIM started but health status: $health (may still be starting)"
         _warn "Check: docker logs grim"
     fi
+
+    # Auto-clean stale images after successful start
+    _clean_stale_images
 }
 
 cmd_down() {
