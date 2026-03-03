@@ -1,0 +1,59 @@
+version: "1.0"
+tier: 2
+category: personal
+description: "Personal companion — conversational, empathetic, no delegation"
+
+cases:
+  - id: pers-greeting
+    tags: [personal, greeting, single-turn]
+    turn_type: single
+    message: "Hey GRIM, how are you doing?"
+    mock_tools: {}
+    expected:
+      response_excludes: ["error", "delegate", "agent"]
+    grading:
+      understanding: "Did it recognize a casual greeting?"
+      completeness: "Did it respond warmly and conversationally?"
+
+  - id: pers-venting
+    tags: [personal, emotional, single-turn]
+    turn_type: single
+    message: "I'm feeling frustrated about the slow progress on milestone 4"
+    mock_tools: {}
+    expected:
+      response_excludes: ["error", "kronos_create", "let me search"]
+    grading:
+      understanding: "Did it recognize emotional venting?"
+      completeness: "Did it respond empathetically, not technically?"
+
+  - id: pers-identity
+    tags: [personal, identity, single-turn]
+    turn_type: single
+    message: "Tell me about yourself, who are you?"
+    mock_tools: {}
+    expected:
+      response_contains: ["GRIM"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it recognize an identity question?"
+      completeness: "Did it describe itself meaningfully?"
+
+  - id: pers-multi-turn-chat
+    tags: [personal, chat, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Just chatting, how's everything going?"
+        checkpoint:
+          response_excludes: ["searching", "vault"]
+      - role: user
+        message: "I appreciate having you around for these projects"
+        checkpoint:
+          response_excludes: ["error"]
+      - role: user
+        message: "What do you think about taking a break from coding?"
+        checkpoint: {}
+    mock_tools: {}
+    grading:
+      understanding: "Did it maintain casual conversational tone throughout?"
+      completeness: "Did it engage meaningfully in each turn?"

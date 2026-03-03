@@ -1587,6 +1587,304 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Evaluation endpoints
+# ---------------------------------------------------------------------------
+
+_eval_runs: dict[str, dict] = {}  # run_id → {status, results, ws_clients, error}
+
+
+class EvalRunRequest(BaseModel):
+    tier: int | str = "all"
+    categories: list[str] | None = None
+
+
+class EvalCaseAppendRequest(BaseModel):
+    case: dict
+
+
+@app.post("/api/eval/run")
+async def api_eval_start(req: EvalRunRequest):
+    """Start an eval run as a background task."""
+    from eval.config import EvalConfig
+    from eval.engine.runner import EvalRunner
+
+    run_id = str(uuid.uuid4())[:8]
+    _eval_runs[run_id] = {
+        "status": "running",
+        "results": None,
+        "ws_clients": [],
+        "error": None,
+    }
+
+    async def _broadcast(event: dict):
+        for ws_ref in list(_eval_runs.get(run_id, {}).get("ws_clients", [])):
+            try:
+                await ws_ref.send_json(event)
+            except Exception:
+                pass
+
+    def _progress(event: dict):
+        # Schedule broadcast on the event loop (callback runs sync)
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(_broadcast(event))
+        except Exception:
+            pass
+
+    async def _run():
+        try:
+            runner = EvalRunner(EvalConfig(), progress_callback=_progress)
+            result = await runner.run(tier=req.tier, categories=req.categories)
+            _eval_runs[run_id]["results"] = result.model_dump()
+            _eval_runs[run_id]["status"] = "completed"
+            await _broadcast({"type": "complete", "run_id": run_id})
+        except Exception as exc:
+            logger.exception("Eval run %s failed", run_id)
+            _eval_runs[run_id]["status"] = "failed"
+            _eval_runs[run_id]["error"] = str(exc)
+            await _broadcast({"type": "error", "run_id": run_id, "message": str(exc)})
+
+    asyncio.create_task(_run())
+    return JSONResponse({"run_id": run_id, "status": "running"})
+
+
+@app.get("/api/eval/run/{run_id}")
+async def api_eval_status(run_id: str):
+    """Poll eval run status."""
+    entry = _eval_runs.get(run_id)
+    if not entry:
+        return JSONResponse({"error": "Unknown run_id"}, status_code=404)
+    return JSONResponse({
+        "run_id": run_id,
+        "status": entry["status"],
+        "error": entry.get("error"),
+        "results": entry.get("results"),
+    })
+
+
+@app.get("/api/eval/runs")
+async def api_eval_runs():
+    """List all saved eval runs (from disk)."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    runs = []
+    if config.results_dir.exists():
+        for f in sorted(config.results_dir.glob("*.json"), reverse=True):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                # Extract per-suite scores for history chart
+                suite_scores: dict[str, float] = {}
+                for s in data.get("suites", []):
+                    cat = s.get("category", "")
+                    if cat:
+                        suite_scores[cat] = s.get("score", 0)
+                runs.append({
+                    "run_id": data.get("run_id", ""),
+                    "timestamp": data.get("timestamp", ""),
+                    "status": data.get("status", ""),
+                    "tier": data.get("tier", ""),
+                    "total_cases": data.get("total_cases", 0),
+                    "passed_cases": data.get("passed_cases", 0),
+                    "overall_score": data.get("overall_score", 0),
+                    "git_sha": data.get("git_sha", ""),
+                    "duration_ms": data.get("duration_ms", 0),
+                    "suite_scores": suite_scores,
+                    "file": f.name,
+                })
+            except Exception:
+                pass
+    return JSONResponse(runs)
+
+
+@app.get("/api/eval/results/{run_id}")
+async def api_eval_results(run_id: str):
+    """Get full results for a saved run."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    if config.results_dir.exists():
+        for f in config.results_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                if data.get("run_id", "").startswith(run_id):
+                    return JSONResponse(data)
+            except Exception:
+                pass
+    # Also check in-memory runs
+    entry = _eval_runs.get(run_id)
+    if entry and entry.get("results"):
+        return JSONResponse(entry["results"])
+    return JSONResponse({"error": "Run not found"}, status_code=404)
+
+
+@app.get("/api/eval/compare")
+async def api_eval_compare(base: str, target: str):
+    """Compare two eval runs for regressions."""
+    from eval.config import EvalConfig
+    from eval.engine.comparator import compare_runs
+    from eval.schema import EvalRun
+
+    config = EvalConfig()
+    base_data = target_data = None
+
+    if config.results_dir.exists():
+        for f in config.results_dir.glob("*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                rid = data.get("run_id", "")
+                if rid.startswith(base):
+                    base_data = data
+                if rid.startswith(target):
+                    target_data = data
+            except Exception:
+                pass
+
+    if not base_data or not target_data:
+        return JSONResponse({"error": "One or both runs not found"}, status_code=404)
+
+    base_run = EvalRun(**base_data)
+    target_run = EvalRun(**target_data)
+    base_run.compute_stats()
+    target_run.compute_stats()
+    result = compare_runs(base_run, target_run)
+    return JSONResponse(result.model_dump())
+
+
+@app.get("/api/eval/datasets")
+async def api_eval_datasets():
+    """List all eval datasets with case counts."""
+    from eval.config import EvalConfig
+    from eval.engine.runner import EvalRunner
+
+    runner = EvalRunner(EvalConfig())
+    return JSONResponse(runner.list_datasets())
+
+
+@app.get("/api/eval/datasets/{tier}/{category}")
+async def api_eval_dataset(tier: int, category: str):
+    """Get a full dataset as JSON."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    tier_dir = config.datasets_dir / f"tier{tier}"
+    path = tier_dir / f"{category}_cases.yaml"
+    if not path.exists():
+        return JSONResponse({"error": "Dataset not found"}, status_code=404)
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return JSONResponse(data)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/eval/datasets/{tier}/{category}/cases")
+async def api_eval_append_case(tier: int, category: str, req: EvalCaseAppendRequest):
+    """Append a single test case to a dataset."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    tier_dir = config.datasets_dir / f"tier{tier}"
+    path = tier_dir / f"{category}_cases.yaml"
+    if not path.exists():
+        return JSONResponse({"error": "Dataset not found"}, status_code=404)
+
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        cases = data.get("cases", [])
+
+        # Check for duplicate ID
+        new_id = req.case.get("id", "")
+        if any(c.get("id") == new_id for c in cases):
+            return JSONResponse({"error": f"Case ID '{new_id}' already exists"}, status_code=409)
+
+        cases.append(req.case)
+        data["cases"] = cases
+        path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        return JSONResponse({"ok": True, "total_cases": len(cases)})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.put("/api/eval/datasets/{tier}/{category}/cases/{case_id}")
+async def api_eval_update_case(tier: int, category: str, case_id: str, req: EvalCaseAppendRequest):
+    """Update an existing test case in a dataset."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    tier_dir = config.datasets_dir / f"tier{tier}"
+    path = tier_dir / f"{category}_cases.yaml"
+    if not path.exists():
+        return JSONResponse({"error": "Dataset not found"}, status_code=404)
+
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        cases = data.get("cases", [])
+
+        idx = next((i for i, c in enumerate(cases) if c.get("id") == case_id), None)
+        if idx is None:
+            return JSONResponse({"error": f"Case '{case_id}' not found"}, status_code=404)
+
+        cases[idx] = req.case
+        data["cases"] = cases
+        path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        return JSONResponse({"ok": True, "case_id": case_id})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.delete("/api/eval/datasets/{tier}/{category}/cases/{case_id}")
+async def api_eval_delete_case(tier: int, category: str, case_id: str):
+    """Delete a test case from a dataset."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    tier_dir = config.datasets_dir / f"tier{tier}"
+    path = tier_dir / f"{category}_cases.yaml"
+    if not path.exists():
+        return JSONResponse({"error": "Dataset not found"}, status_code=404)
+
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        cases = data.get("cases", [])
+
+        original_len = len(cases)
+        cases = [c for c in cases if c.get("id") != case_id]
+        if len(cases) == original_len:
+            return JSONResponse({"error": f"Case '{case_id}' not found"}, status_code=404)
+
+        data["cases"] = cases
+        path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False), encoding="utf-8")
+        return JSONResponse({"ok": True, "total_cases": len(cases)})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.websocket("/ws/eval/{run_id}")
+async def ws_eval_progress(ws: WebSocket, run_id: str):
+    """Stream eval progress events for a running eval."""
+    await ws.accept()
+    entry = _eval_runs.get(run_id)
+    if not entry:
+        await ws.send_json({"type": "error", "message": "Unknown run_id"})
+        await ws.close()
+        return
+
+    entry.setdefault("ws_clients", []).append(ws)
+    logger.info("Eval WS connected: %s", run_id)
+    try:
+        while True:
+            await ws.receive_text()  # keep-alive
+    except WebSocketDisconnect:
+        entry.get("ws_clients", []).remove(ws) if ws in entry.get("ws_clients", []) else None
+        logger.info("Eval WS disconnected: %s", run_id)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

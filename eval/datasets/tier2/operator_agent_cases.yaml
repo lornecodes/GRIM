@@ -1,0 +1,52 @@
+version: "1.0"
+tier: 2
+category: operator_agent
+description: "Operator agent — read-only system awareness, git status, file reads"
+
+cases:
+  - id: op-git-status
+    tags: [operator, git, single-turn]
+    turn_type: single
+    message: "What's the current git status?"
+    mock_tools:
+      kronos_search: {"results": []}
+    expected:
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it recognize a git status request?"
+      execution: "Did it use appropriate read-only tools?"
+
+  - id: op-list-files
+    tags: [operator, files, single-turn]
+    turn_type: single
+    message: "List the files in the core/agents directory"
+    mock_tools:
+      kronos_search: {"results": []}
+    expected:
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand a file listing request?"
+      execution: "Did it use read-only file tools?"
+
+  - id: op-check-status
+    tags: [operator, infrastructure, single-turn]
+    turn_type: single
+    message: "Check the status of the GRIM services"
+    mock_tools:
+      kronos_search: {"results": []}
+    expected:
+      response_excludes: ["error", "claw_write", "claw_shell"]
+    grading:
+      understanding: "Did it recognize an infrastructure check?"
+      execution: "Did it stay within read-only boundaries?"
+
+  - id: op-sync-vault
+    tags: [operator, vault, single-turn]
+    turn_type: single
+    message: "Sync the vault after the recent changes"
+    mock_tools:
+      kronos_search: {"results": []}
+    expected:
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand a vault sync request?"

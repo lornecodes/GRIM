@@ -1,0 +1,80 @@
+name: eval-gate
+version: "1.0"
+description: >
+  Run the GRIM evaluation suite as a quality gate. Executes Tier 1 structural
+  tests (routing, skill matching, tool groups, keyword routing) and optionally
+  Tier 2 LLM-graded tests. Reports pass/fail with regression detection against
+  the previous baseline. Designed to be called as a pre-release gate or
+  standalone quality check.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - shell:execute
+  - filesystem:read
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes when user wants to run eval or check quality
+    reads: [triggers, quality_gates]
+  ironclaw-agent:
+    role: execution
+    description: Executes eval runner and reports results
+    reads: [protocol.md, safety, quality_gates]
+
+inputs:
+  tier:
+    type: enum
+    values: [1, 2, all]
+    required: false
+    default: 1
+    description: >
+      1: Tier 1 only (fast, deterministic). 2: Tier 2 only (LLM-graded).
+      all: both tiers.
+  categories:
+    type: list
+    required: false
+    default: null
+    description: Specific categories to run (e.g., routing, skill_matching). Null runs all.
+  compare:
+    type: boolean
+    required: false
+    default: true
+    description: Compare against the most recent baseline run for regression detection.
+  fail_on_regression:
+    type: boolean
+    required: false
+    default: true
+    description: Return failure if regressions are detected.
+
+outputs:
+  passed: boolean
+  overall_score: float
+  pass_rate: string
+  total_cases: integer
+  regressions: list
+  improvements: list
+  run_id: string
+  error: string
+
+triggers:
+  - explicit: "User says run eval, eval gate, check quality, run tests against eval"
+  - proactive: "Before shipping, suggest running eval gate"
+  - keywords:
+      strong: ["eval gate", "eval-gate", "run eval", "evaluation gate", "quality gate", "run the eval"]
+      weak: ["eval", "evaluation", "quality check", "regression check"]
+  - suppress: "User explicitly says skip eval or no eval"
+
+safety:
+  - "Never modify eval datasets or results during a gate check"
+  - "Report all regressions clearly — never hide failures"
+  - "Tier 2 requires LLM API access — warn if not available"
+  - "Do not block ship-it if user explicitly overrides eval gate"
+
+quality_gates:
+  - "Gate 1: Tier 1 score >= 95% (structural correctness)"
+  - "Gate 2: No critical regressions (score drop > 30%)"
+  - "Gate 3: No major regressions (score drop > 15%) unless acknowledged"
+  - "Gate 4: If Tier 2 included, overall score >= 70%"

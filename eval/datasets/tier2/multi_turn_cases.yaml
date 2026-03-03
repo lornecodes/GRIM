@@ -1,0 +1,98 @@
+version: "1.0"
+tier: 2
+category: multi_turn
+description: "Cross-agent multi-turn conversations spanning multiple capabilities"
+
+cases:
+  - id: mt-research-then-capture
+    tags: [multi-turn, research, memory]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What do we know about recursive entropy bounds?"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "That's a new concept — capture it as an FDO"
+        checkpoint:
+          tools_called: [kronos_create]
+          response_contains: ["created"]
+    mock_tools:
+      kronos_search: {"results": []}
+      kronos_create: {"success": true, "id": "recursive-entropy-bounds"}
+    grading:
+      understanding: "Did it handle the mode switch from research to memory?"
+      execution: "Did it search first, then create when asked?"
+      verification: "Did it confirm the FDO creation?"
+
+  - id: mt-plan-then-execute
+    tags: [multi-turn, planning, ironclaw]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Let's plan the eval framework implementation"
+        checkpoint:
+          response_contains: ["phase", "component"]
+      - role: user
+        message: "Good plan. Now write the config.py file"
+        checkpoint:
+          tools_called: [claw_write_file]
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File created"}
+    grading:
+      understanding: "Did it transition from planning to execution mode?"
+      planning: "Did the initial plan make sense?"
+      execution: "Did it write the file when instructed?"
+
+  - id: mt-investigate-fix-verify
+    tags: [multi-turn, research, ironclaw, memory]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "There's a bug in the routing — look at the code for the router"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "I see the issue. Fix the match_keywords function to handle empty strings"
+        checkpoint:
+          tools_called: [claw_write_file]
+      - role: user
+        message: "Now run the tests to verify"
+        checkpoint:
+          tools_called: [claw_shell]
+      - role: user
+        message: "Tests pass. Update the vault to note this fix"
+        checkpoint:
+          tools_called: [kronos_update]
+    mock_tools:
+      kronos_search: {"results": [{"id": "grim-architecture"}]}
+      claw_read_file: {"success": true, "output": "def match_keywords(msg):..."}
+      claw_write_file: {"success": true, "output": "File updated"}
+      claw_shell: {"success": true, "output": "All tests passed"}
+      kronos_update: {"success": true}
+    grading:
+      understanding: "Did it follow the investigate→fix→verify→document workflow?"
+      execution: "Did it use appropriate tools at each stage?"
+      verification: "Did it confirm each step succeeded?"
+
+  - id: mt-casual-to-work
+    tags: [multi-turn, personal, research]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Hey GRIM, how's it going?"
+        checkpoint:
+          response_excludes: ["searching", "vault"]
+      - role: user
+        message: "Actually, what's the status of the eval framework project?"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Thanks, that's helpful"
+        checkpoint:
+          response_excludes: ["error"]
+    mock_tools:
+      kronos_search: {"results": [{"id": "feat-grim-eval"}]}
+    grading:
+      understanding: "Did it handle the personal→work transition naturally?"
+      execution: "Did it search the vault when the topic shifted?"

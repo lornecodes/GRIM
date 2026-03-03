@@ -1,0 +1,121 @@
+version: "1.0"
+tier: 2
+category: memory_agent
+description: "Memory agent — vault operations, FDO CRUD, task management"
+
+cases:
+  - id: mem-create-fdo
+    tags: [memory, create, single-turn]
+    turn_type: single
+    message: "Create an FDO for the concept of recursive entropy bounds"
+    mock_tools:
+      kronos_search: {"results": []}
+      kronos_create: {"success": true, "id": "recursive-entropy-bounds"}
+    expected:
+      tools_called: [kronos_search, kronos_create]
+      response_contains: ["created", "recursive-entropy-bounds"]
+      response_excludes: ["error", "failed"]
+    grading:
+      understanding: "Did the agent correctly interpret what FDO to create?"
+      execution: "Did it call kronos_search then kronos_create?"
+      completeness: "Was the FDO well-formed with title, domain, tags?"
+      verification: "Did it confirm success?"
+
+  - id: mem-search-vault
+    tags: [memory, search, single-turn]
+    turn_type: single
+    message: "Search the vault for everything related to Poincaré activation"
+    mock_tools:
+      kronos_search: {"results": [{"id": "poincare-activation", "title": "Poincaré Activation"}]}
+      kronos_get: {"id": "poincare-activation", "body": "Phase 3 of reality engine"}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["Poincaré"]
+    grading:
+      understanding: "Did it understand this as a search request?"
+      execution: "Did it use kronos_search?"
+      completeness: "Did it present results clearly?"
+
+  - id: mem-update-fdo
+    tags: [memory, update, single-turn]
+    turn_type: single
+    message: "Update the grim-architecture FDO to mark Phase 3 as complete"
+    mock_tools:
+      kronos_search: {"results": [{"id": "grim-architecture", "title": "GRIM Architecture"}]}
+      kronos_get: {"id": "grim-architecture", "body": "Phase 2 complete"}
+      kronos_update: {"success": true}
+    expected:
+      tools_called: [kronos_search, kronos_update]
+      response_contains: ["updated"]
+    grading:
+      understanding: "Did it identify the correct FDO to update?"
+      execution: "Did it search, read, then update?"
+      completeness: "Did the update include the Phase 3 status change?"
+
+  - id: mem-create-task
+    tags: [memory, task, single-turn]
+    turn_type: single
+    message: "Create a story for implementing the eval dashboard UI"
+    mock_tools:
+      kronos_task_create: {"success": true, "story_id": "story-eval-001"}
+    expected:
+      tools_called: [kronos_task_create]
+      response_contains: ["story", "created"]
+    grading:
+      understanding: "Did it understand this as a task creation request?"
+      execution: "Did it call kronos_task_create with correct fields?"
+      verification: "Did it confirm the story was created?"
+
+  - id: mem-move-story
+    tags: [memory, task, board, single-turn]
+    turn_type: single
+    message: "Move story-eval-001 to in progress"
+    mock_tools:
+      kronos_task_move: {"success": true}
+    expected:
+      tools_called: [kronos_task_move]
+      response_contains: ["moved", "in_progress"]
+    grading:
+      execution: "Did it call kronos_task_move with correct story and column?"
+      verification: "Did it confirm the move?"
+
+  - id: mem-vault-sync-multi
+    tags: [memory, vault-sync, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "I just reorganized the experiment files in dawn-field-theory"
+        checkpoint:
+          response_contains: ["which", "what"]
+      - role: user
+        message: "Moved exp_42 from milestone3 to milestone4 and renamed it"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Yes, go ahead and update the vault"
+        checkpoint:
+          tools_called: [kronos_update]
+          response_contains: ["updated"]
+    mock_tools:
+      kronos_search: {"results": [{"id": "exp-42", "title": "Experiment 42"}]}
+      kronos_get: {"id": "exp-42", "body": "Located in milestone3"}
+      kronos_update: {"success": true}
+    grading:
+      understanding: "Did it gather enough info before acting?"
+      planning: "Did it identify what needs updating?"
+      execution: "Did it call correct tools?"
+      verification: "Did it confirm changes?"
+
+  - id: mem-relate-fdos
+    tags: [memory, relate, single-turn]
+    turn_type: single
+    message: "Connect the PAC framework FDO to the entropy bounds FDO"
+    mock_tools:
+      kronos_search: {"results": [{"id": "pac-comprehensive"}, {"id": "entropy-bounds"}]}
+      kronos_update: {"success": true}
+    expected:
+      tools_called: [kronos_search, kronos_update]
+      response_contains: ["connected", "related"]
+    grading:
+      understanding: "Did it understand this as a relationship creation?"
+      execution: "Did it find both FDOs and update their related fields?"

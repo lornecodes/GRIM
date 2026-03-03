@@ -1,0 +1,6 @@
+columns:
+  new: []
+  active: []
+  in_progress: []
+  resolved: []
+  closed: []

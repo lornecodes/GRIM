@@ -1,0 +1,81 @@
+version: "1.0"
+tier: 2
+category: companion
+description: "Companion/thinker mode — knowledge retrieval and reasoning"
+
+cases:
+  - id: comp-physics-question
+    tags: [companion, physics, single-turn]
+    turn_type: single
+    message: "What is the PAC framework in Dawn Field Theory?"
+    mock_tools:
+      kronos_search: {"results": [{"id": "pac-comprehensive", "title": "PAC Framework", "summary": "Recursive organizational principle"}]}
+      kronos_get: {"id": "pac-comprehensive", "body": "PAC defines recursive structure"}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["PAC", "recursive"]
+      response_excludes: ["error", "unknown"]
+    grading:
+      understanding: "Did the companion understand this is a knowledge query?"
+      execution: "Did it use kronos_search to find relevant FDOs?"
+      completeness: "Did it provide a substantive answer about PAC?"
+      verification: "Did it cite vault sources?"
+
+  - id: comp-general-knowledge
+    tags: [companion, general, single-turn]
+    turn_type: single
+    message: "How does entropy relate to information theory?"
+    mock_tools:
+      kronos_search: {"results": []}
+    expected:
+      response_excludes: ["error", "I can't"]
+    grading:
+      understanding: "Did it correctly interpret a general knowledge question?"
+      completeness: "Did it provide a reasonable explanation?"
+
+  - id: comp-vault-recall
+    tags: [companion, vault, single-turn]
+    turn_type: single
+    message: "What experiments have we run for milestone 3?"
+    mock_tools:
+      kronos_search: {"results": [{"id": "milestone-3", "title": "Milestone 3 Experiments"}]}
+      kronos_get: {"id": "milestone-3", "body": "10 experiments completed"}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["experiment", "milestone"]
+    grading:
+      understanding: "Did it recognize this as a vault recall request?"
+      execution: "Did it search the vault?"
+      completeness: "Did it summarize the relevant information?"
+
+  - id: comp-reasoning
+    tags: [companion, reasoning, single-turn]
+    turn_type: single
+    message: "What are the implications of PAC violation for SEC compliance?"
+    mock_tools:
+      kronos_search: {"results": [{"id": "pac-comprehensive", "title": "PAC"}, {"id": "sec-compliance", "title": "SEC"}]}
+    expected:
+      tools_called: [kronos_search]
+    grading:
+      understanding: "Did it understand this requires cross-concept reasoning?"
+      completeness: "Did it synthesize PAC and SEC concepts?"
+
+  - id: comp-multi-turn-followup
+    tags: [companion, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What is the current state of the GRIM project?"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "What about the test coverage?"
+        checkpoint:
+          response_contains: ["test"]
+      - role: user
+        message: "How does that compare to last month?"
+        checkpoint: {}
+    grading:
+      understanding: "Did it maintain context across turns?"
+      execution: "Did it search for relevant information?"
+      verification: "Did it provide coherent follow-up answers?"

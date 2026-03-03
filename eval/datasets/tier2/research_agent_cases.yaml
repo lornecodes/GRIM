@@ -1,0 +1,71 @@
+version: "1.0"
+tier: 2
+category: research_agent
+description: "Research agent — deep analysis, document ingestion, synthesis"
+
+cases:
+  - id: res-deep-ingest
+    tags: [research, ingest, single-turn]
+    turn_type: single
+    message: "Ingest this paper on quantum error correction into the vault"
+    mock_tools:
+      kronos_search: {"results": []}
+      kronos_get: {"id": "quantum-ec", "body": "Not found"}
+    expected:
+      tools_called: [kronos_search]
+    grading:
+      understanding: "Did it recognize a deep-ingest task?"
+      planning: "Did it plan the ingestion phases?"
+      execution: "Did it search for existing FDOs first?"
+
+  - id: res-analyze-concept
+    tags: [research, analysis, single-turn]
+    turn_type: single
+    message: "Analyze the relationship between PAC regulation and SEC compliance in our experiments"
+    mock_tools:
+      kronos_search: {"results": [{"id": "pac-comprehensive"}, {"id": "sec-compliance"}]}
+      kronos_get: {"id": "pac-comprehensive", "body": "PAC regulation defines recursive bounds"}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["PAC", "SEC"]
+    grading:
+      understanding: "Did it understand the cross-concept analysis request?"
+      execution: "Did it retrieve relevant FDOs?"
+      completeness: "Did it synthesize insights from both concepts?"
+
+  - id: res-summarize-findings
+    tags: [research, synthesis, single-turn]
+    turn_type: single
+    message: "Summarize all findings from milestone 3 experiments"
+    mock_tools:
+      kronos_search: {"results": [{"id": "m3-exp-1"}, {"id": "m3-exp-2"}, {"id": "m3-exp-3"}]}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["milestone", "experiment"]
+    grading:
+      understanding: "Did it recognize a synthesis task?"
+      completeness: "Did it cover multiple experiments?"
+
+  - id: res-multi-turn-investigation
+    tags: [research, investigation, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Investigate why experiment 42 results diverge from predictions"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Compare with experiment 38 which had similar parameters"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "What's your hypothesis for the divergence?"
+        checkpoint:
+          response_contains: ["hypothesis"]
+    mock_tools:
+      kronos_search: {"results": [{"id": "exp-42"}, {"id": "exp-38"}]}
+      kronos_get: {"body": "Experiment data"}
+    grading:
+      understanding: "Did it follow the investigation thread across turns?"
+      planning: "Did it compare experiments systematically?"
+      completeness: "Did it form a coherent hypothesis?"

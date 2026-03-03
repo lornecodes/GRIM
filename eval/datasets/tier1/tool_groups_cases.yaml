@@ -1,0 +1,173 @@
+version: "1.0"
+tier: 1
+category: tool_groups
+description: "Agent tool group verification — correct tools present, forbidden tools absent"
+
+cases:
+  # ══════════════════════════════════════════════════════════
+  # Memory Agent — vault write + task management tools
+  # ══════════════════════════════════════════════════════════
+  - id: tools-memory-has-write
+    tags: [tools, memory]
+    message: "memory"
+    expected:
+      tools_present:
+        - kronos_create
+        - kronos_update
+        - kronos_search
+        - kronos_task_create
+        - kronos_task_update
+        - kronos_task_move
+
+  - id: tools-memory-no-shell
+    tags: [tools, memory, boundary]
+    message: "memory"
+    expected:
+      tools_absent:
+        - run_shell
+        - claw_shell
+        - claw_write_file
+
+  # ══════════════════════════════════════════════════════════
+  # Research Agent — read-only tools
+  # ══════════════════════════════════════════════════════════
+  - id: tools-research-has-read
+    tags: [tools, research]
+    message: "research"
+    expected:
+      tools_present:
+        - kronos_search
+        - kronos_get
+
+  - id: tools-research-no-write
+    tags: [tools, research, boundary]
+    message: "research"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+        - run_shell
+        - claw_shell
+
+  # ══════════════════════════════════════════════════════════
+  # Codebase Agent — navigation tools
+  # ══════════════════════════════════════════════════════════
+  - id: tools-codebase-has-nav
+    tags: [tools, codebase]
+    message: "codebase"
+    expected:
+      tools_present:
+        - kronos_search
+        - kronos_navigate
+        - kronos_deep_dive
+
+  - id: tools-codebase-no-write
+    tags: [tools, codebase, boundary]
+    message: "codebase"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+        - run_shell
+        - claw_shell
+
+  # ══════════════════════════════════════════════════════════
+  # Operator Agent — git reads + file reads
+  # ══════════════════════════════════════════════════════════
+  - id: tools-operator-has-read
+    tags: [tools, operator]
+    message: "operator"
+    expected:
+      tools_present:
+        - kronos_search
+
+  - id: tools-operator-no-write
+    tags: [tools, operator, boundary]
+    message: "operator"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+        - claw_shell
+        - claw_write_file
+
+  # ══════════════════════════════════════════════════════════
+  # Coder Agent — file + shell tools
+  # ══════════════════════════════════════════════════════════
+  - id: tools-coder-has-write
+    tags: [tools, coder]
+    message: "coder"
+    expected:
+      tools_present:
+        - read_file
+        - write_file
+        - run_shell
+
+  - id: tools-coder-no-vault-write
+    tags: [tools, coder, boundary]
+    message: "coder"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+
+  # ══════════════════════════════════════════════════════════
+  # IronClaw Agent — sandboxed claw_* tools
+  # ══════════════════════════════════════════════════════════
+  - id: tools-ironclaw-has-claw
+    tags: [tools, ironclaw]
+    message: "ironclaw"
+    expected:
+      tools_present:
+        - claw_read_file
+        - claw_write_file
+        - claw_shell
+
+  - id: tools-ironclaw-no-direct
+    tags: [tools, ironclaw, boundary]
+    message: "ironclaw"
+    expected:
+      tools_absent:
+        - run_shell
+        - write_file
+        - kronos_create
+
+  # ══════════════════════════════════════════════════════════
+  # Audit Agent — staging read-only
+  # ══════════════════════════════════════════════════════════
+  - id: tools-audit-no-write
+    tags: [tools, audit, boundary]
+    message: "audit"
+    expected:
+      tools_absent:
+        - claw_write_file
+        - claw_shell
+        - run_shell
+        - kronos_create
+
+  # ══════════════════════════════════════════════════════════
+  # Cross-agent: only memory has vault writes
+  # ══════════════════════════════════════════════════════════
+  - id: tools-only-memory-creates
+    tags: [tools, boundary, cross_agent]
+    message: "research"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+
+  - id: tools-coder-no-vault
+    tags: [tools, boundary, cross_agent]
+    message: "coder"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update
+
+  - id: tools-operator-no-vault
+    tags: [tools, boundary, cross_agent]
+    message: "operator"
+    expected:
+      tools_absent:
+        - kronos_create
+        - kronos_update

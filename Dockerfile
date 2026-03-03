@@ -45,6 +45,7 @@ COPY server/ server/
 COPY config/ config/
 COPY identity/ identity/
 COPY skills/ skills/
+COPY eval/ eval/
 COPY tests/ tests/
 
 # ── Next.js static build ──────────────────────────────────

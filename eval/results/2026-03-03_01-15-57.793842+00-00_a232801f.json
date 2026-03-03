@@ -1,0 +1,4669 @@
+{
+  "run_id": "a232801f",
+  "timestamp": "2026-03-03T01:15:57.793842+00:00",
+  "git_sha": "50a0750",
+  "tier": "1",
+  "status": "completed",
+  "suites": [
+    {
+      "tier": 1,
+      "category": "keyword_routing",
+      "cases": [
+        {
+          "case_id": "kw-memory-capture",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-remember",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-save",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-promote",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-relate",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-vault",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-create-fdo",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-create-story",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory",
+            "task"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-create-task",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory",
+            "task"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-move-active",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory",
+            "task"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-archive",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory",
+            "task"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-memory-calendar",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "memory",
+            "calendar"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-research-analyze",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-research-ingest",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-research-summarize",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-research-investigate",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-research-literature",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-direct",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-write-code",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-implement",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-shell",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-git-push",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-deploy",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-run-command",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-refactor",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-debug",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-curl",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-security-scan",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-ironclaw-sandbox",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-operate-git-status",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "operate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-operate-git-log",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "operate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-operate-list-files",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "operate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-operate-read-file",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "operate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-audit-staging",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "audit"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "audit",
+              "actual": "audit",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-audit-check",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "audit"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "audit",
+              "actual": "audit",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-codebase-repo",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-codebase-code",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-codebase-architecture",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-codebase-navigate",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-codebase-meta",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-none-question",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": null,
+              "actual": null,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-none-opinion",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": null,
+              "actual": null,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "kw-none-casual",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "keyword",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "keyword_match",
+              "expected": null,
+              "actual": null,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-run-command",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-execute-shell",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-check-network",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-test-server",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-show-file",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-no-match-question",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": null,
+              "actual": null,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "ai-no-match-explain",
+          "tier": 1,
+          "category": "keyword_routing",
+          "tags": [
+            "action_intent",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "action_intent",
+              "expected": null,
+              "actual": null,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        }
+      ],
+      "total": 50,
+      "passed": 50,
+      "failed": 0,
+      "score": 1.0,
+      "duration_ms": 0
+    },
+    {
+      "tier": 1,
+      "category": "routing",
+      "cases": [
+        {
+          "case_id": "gr-personal-greeting-hey",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-greeting-hello",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-greeting-morning",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-howsitgoing",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-feeling-stressed",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-feeling-excited",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-venting",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-chatting",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-whoareyou",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-appreciate",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "personal"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "personal",
+              "actual": "personal",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-override-experiment",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "override"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-override-vault",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "override"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-override-code",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "override"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-personal-override-task",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "override"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-lets-plan",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-break-down",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-sprint",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-scope",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-groom",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-create-stories",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-prioritize",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-promote-drafts",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-planning-load-board",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-default",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "default"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-capture",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "delegation"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-write-code",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "delegation"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-git-status",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "delegation"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-analyze",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "delegation"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-action-intent",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "action_intent"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-research-ambiguous",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "default"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-skill-hint-memory",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-skill-hint-planning",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "planning",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "planning",
+              "actual": "planning",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "gr-skill-hint-ironclaw",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "graph_router",
+            "research",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-companion-question",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "companion"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            },
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-companion-explain",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "companion"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            },
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-companion-general",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "companion"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            },
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-companion-opinion",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "companion"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            },
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-companion-recall",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "companion"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            },
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-memory-hint",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "memory",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-ironclaw-hint",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "ironclaw",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-research-hint",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "research",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-codebase-hint",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "codebase",
+            "skill_hint"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-memory-kw-capture",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "memory",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-memory-kw-create-task",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "memory",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-ironclaw-kw-shell",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "ironclaw",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-ironclaw-kw-deploy",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "ironclaw",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-research-kw-analyze",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "research",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-operate-kw-gitstatus",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "operate",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-audit-kw-review",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "audit",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "audit",
+              "actual": "audit",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-delegate-codebase-kw-repo",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "delegate",
+            "codebase",
+            "keyword"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "codebase",
+              "actual": "codebase",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-continuity-now",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "continuity"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-continuity-also",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "continuity"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-continuity-try",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "continuity"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-continuity-no-signal",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "continuity",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "companion",
+              "actual": "companion",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-action-intent-run-command",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-action-intent-test-tool",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "action_intent",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "ironclaw",
+              "actual": "ironclaw",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "rt-action-intent-show-file",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "router",
+            "action_intent",
+            "operate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "mode",
+              "expected": "delegate",
+              "actual": "delegate",
+              "passed": true
+            },
+            {
+              "name": "delegation_type",
+              "expected": "operate",
+              "actual": "operate",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "edge-empty-message-graph",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "edge_case"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "edge-short-message",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "edge_case"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "edge-long-message",
+          "tier": 1,
+          "category": "routing",
+          "tags": [
+            "edge_case"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "graph_target",
+              "expected": "research",
+              "actual": "research",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        }
+      ],
+      "total": 60,
+      "passed": 60,
+      "failed": 0,
+      "score": 1.0,
+      "duration_ms": 0
+    },
+    {
+      "tier": 1,
+      "category": "skill_matching",
+      "cases": [
+        {
+          "case_id": "skill-kronos-capture",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-capture"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_kronos-capture",
+              "expected": "kronos-capture",
+              "actual": [
+                "kronos-capture"
+              ],
+              "passed": true
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-promote",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-promote"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_kronos-promote",
+              "expected": "kronos-promote",
+              "actual": [
+                "kronos-promote"
+              ],
+              "passed": true
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-recall",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-recall"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_kronos-recall",
+              "expected": "kronos-recall",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-relate",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-relate"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_kronos-relate",
+              "expected": "kronos-relate",
+              "actual": [
+                "kronos-relate"
+              ],
+              "passed": true
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-reflect",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-reflect"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_kronos-reflect",
+              "expected": "kronos-reflect",
+              "actual": [
+                "kronos-reflect"
+              ],
+              "passed": true
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": "memory",
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-bp",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-bp"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_kronos-bp",
+              "expected": "kronos-bp",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-note",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-note"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_kronos-note",
+              "expected": "kronos-note",
+              "actual": [
+                "kronos-note"
+              ],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-kronos-journal",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "kronos-journal"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_kronos-journal",
+              "expected": "kronos-journal",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-memory-read",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "memory-read"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_memory-read",
+              "expected": "memory-read",
+              "actual": [
+                "memory-read"
+              ],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-memory-update",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "memory-update"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "matches_memory-update",
+              "expected": "memory-update",
+              "actual": [
+                "memory-read",
+                "memory-update"
+              ],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-code-execution",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "code-execution"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_code-execution",
+              "expected": "code-execution",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-file-operations",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "file-operations"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_file-operations",
+              "expected": "file-operations",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-shell-execution",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "shell-execution"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_shell-execution",
+              "expected": "shell-execution",
+              "actual": [
+                "project-lifecycle"
+              ],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": "memory",
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-git-operations",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "git-operations"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_git-operations",
+              "expected": "git-operations",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "operate",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-task-manage",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "task-manage"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_task-manage",
+              "expected": "task-manage",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-sprint-plan",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "sprint-plan"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_sprint-plan",
+              "expected": "sprint-plan",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-calendar-manage",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "calendar-manage"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_calendar-manage",
+              "expected": "calendar-manage",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-deep-ingest",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "deep-ingest"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_deep-ingest",
+              "expected": "deep-ingest",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "research",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-repo-navigate",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "repo-navigate"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_repo-navigate",
+              "expected": "repo-navigate",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "codebase",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-source-navigate",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "source-navigate"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_source-navigate",
+              "expected": "source-navigate",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "codebase",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-fdo-source-validate",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "fdo-source-validate"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_fdo-source-validate",
+              "expected": "fdo-source-validate",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "codebase",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-vault-sync",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "vault-sync"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_vault-sync",
+              "expected": "vault-sync",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "memory",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-experiment-validate",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "experiment-validate"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_experiment-validate",
+              "expected": "experiment-validate",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-experiment-scaffold",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "experiment-scaffold"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_experiment-scaffold",
+              "expected": "experiment-scaffold",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-docker-release",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "docker-release"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_docker-release",
+              "expected": "docker-release",
+              "actual": [
+                "project-lifecycle"
+              ],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": "memory",
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-ship-it",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "ship-it"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_ship-it",
+              "expected": "ship-it",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-ironclaw-review",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "ironclaw-review"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_ironclaw-review",
+              "expected": "ironclaw-review",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "audit",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-capability-routing",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "capability-routing"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_capability-routing",
+              "expected": "capability-routing",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-model-routing",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "model-routing"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_model-routing",
+              "expected": "model-routing",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-staging-organize",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "staging-organize"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_staging-organize",
+              "expected": "staging-organize",
+              "actual": [
+                "kronos-promote"
+              ],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": "memory",
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-staging-cleanup",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "staging-cleanup"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_staging-cleanup",
+              "expected": "staging-cleanup",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-project-lifecycle",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "project-lifecycle"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_project-lifecycle",
+              "expected": "project-lifecycle",
+              "actual": [],
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-cliproxyapi",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "cliproxyapi"
+          ],
+          "passed": false,
+          "score": 0.0,
+          "checks": [
+            {
+              "name": "matches_cliproxyapi",
+              "expected": "cliproxyapi",
+              "actual": [],
+              "passed": false
+            },
+            {
+              "name": "delegation_hint",
+              "expected": "ironclaw",
+              "actual": null,
+              "passed": false
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-none-general-question",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "no_match",
+              "expected": [],
+              "actual": [],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-none-greeting",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "no_match",
+              "expected": [],
+              "actual": [],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-none-opinion",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "no_match",
+              "expected": [],
+              "actual": [],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "skill-none-vague",
+          "tier": 1,
+          "category": "skill_matching",
+          "tags": [
+            "skill",
+            "negative"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "no_match",
+              "expected": [],
+              "actual": [],
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        }
+      ],
+      "total": 37,
+      "passed": 11,
+      "failed": 26,
+      "score": 0.2972972972972973,
+      "duration_ms": 0
+    },
+    {
+      "tier": 1,
+      "category": "tool_groups",
+      "cases": [
+        {
+          "case_id": "tools-memory-has-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "memory"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_kronos_create",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_update",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_search",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_task_create",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_task_update",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_task_move",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 2811,
+          "error": null
+        },
+        {
+          "case_id": "tools-memory-no-shell",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "memory",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_run_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_write_file",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 93,
+          "error": null
+        },
+        {
+          "case_id": "tools-research-has-read",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "research"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_kronos_search",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_get",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 16,
+          "error": null
+        },
+        {
+          "case_id": "tools-research-no-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "research",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_run_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 14,
+          "error": null
+        },
+        {
+          "case_id": "tools-codebase-has-nav",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "codebase"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_kronos_search",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_navigate",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_kronos_deep_dive",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 31,
+          "error": null
+        },
+        {
+          "case_id": "tools-codebase-no-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "codebase",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_run_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 14,
+          "error": null
+        },
+        {
+          "case_id": "tools-operator-has-read",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "operator"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_kronos_search",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 16,
+          "error": null
+        },
+        {
+          "case_id": "tools-operator-no-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "operator",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_write_file",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "tools-coder-has-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "coder"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_read_file",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_write_file",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_run_shell",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 14,
+          "error": null
+        },
+        {
+          "case_id": "tools-coder-no-vault-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "coder",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 15,
+          "error": null
+        },
+        {
+          "case_id": "tools-ironclaw-has-claw",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "ironclaw"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "has_claw_read_file",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_claw_write_file",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            },
+            {
+              "name": "has_claw_shell",
+              "expected": true,
+              "actual": true,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 16,
+          "error": null
+        },
+        {
+          "case_id": "tools-ironclaw-no-direct",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "ironclaw",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_run_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_write_file",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 14,
+          "error": null
+        },
+        {
+          "case_id": "tools-audit-no-write",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "audit",
+            "boundary"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_claw_write_file",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_claw_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_run_shell",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 15,
+          "error": null
+        },
+        {
+          "case_id": "tools-only-memory-creates",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "boundary",
+            "cross_agent"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 0,
+          "error": null
+        },
+        {
+          "case_id": "tools-coder-no-vault",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "boundary",
+            "cross_agent"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 16,
+          "error": null
+        },
+        {
+          "case_id": "tools-operator-no-vault",
+          "tier": 1,
+          "category": "tool_groups",
+          "tags": [
+            "tools",
+            "boundary",
+            "cross_agent"
+          ],
+          "passed": true,
+          "score": 1.0,
+          "checks": [
+            {
+              "name": "missing_kronos_create",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            },
+            {
+              "name": "missing_kronos_update",
+              "expected": false,
+              "actual": false,
+              "passed": true
+            }
+          ],
+          "dimensions": [],
+          "tool_trace": [],
+          "response_text": "",
+          "judge_output": null,
+          "duration_ms": 14,
+          "error": null
+        }
+      ],
+      "total": 16,
+      "passed": 16,
+      "failed": 0,
+      "score": 1.0,
+      "duration_ms": 3099
+    }
+  ],
+  "overall_score": 0.8404907975460123,
+  "pass_rate": 0.8404907975460123,
+  "total_cases": 163,
+  "total_passed": 137,
+  "duration_ms": 3099,
+  "config_snapshot": {
+    "judge_model": "claude-sonnet-4-6",
+    "tier2_mode": "isolated",
+    "use_judge": false
+  }
+}

@@ -1,0 +1,258 @@
+version: "1.0"
+tier: 1
+category: skill_matching
+description: "Skill trigger accuracy — one case per skill minimum plus negatives"
+
+cases:
+  # ══════════════════════════════════════════════════════════
+  # Kronos vault skills — using actual trigger phrases
+  # ══════════════════════════════════════════════════════════
+  - id: skill-kronos-capture
+    tags: [skill, kronos-capture]
+    message: "capture this concept about entropy bounds"
+    expected:
+      matched_skills: [kronos-capture]
+      delegation_hint: memory
+
+  - id: skill-kronos-promote
+    tags: [skill, kronos-promote]
+    message: "promote and organize the inbox items"
+    expected:
+      matched_skills: [kronos-promote]
+      delegation_hint: memory
+
+  - id: skill-kronos-recall
+    tags: [skill, kronos-recall]
+    message: "what do i know about... PAC regulation bounds"
+    expected:
+      matched_skills: [kronos-recall]
+
+  - id: skill-kronos-relate
+    tags: [skill, kronos-relate]
+    message: "link and connect these two FDOs together"
+    expected:
+      matched_skills: [kronos-relate]
+      delegation_hint: memory
+
+  - id: skill-kronos-reflect
+    tags: [skill, kronos-reflect]
+    message: "review vault and triage inbox for stale items"
+    expected:
+      matched_skills: [kronos-reflect]
+      delegation_hint: memory
+
+  - id: skill-kronos-bp
+    tags: [skill, kronos-bp]
+    message: "make this a best practice for experiment structure"
+    expected:
+      matched_skills: [kronos-bp]
+
+  - id: skill-kronos-note
+    tags: [skill, kronos-note]
+    message: "quick note about the workaround for the timeout bug"
+    expected:
+      matched_skills: [kronos-note]
+
+  - id: skill-kronos-journal
+    tags: [skill, kronos-journal]
+    message: "journal this — record this learning about the cache"
+    expected:
+      matched_skills: [kronos-journal]
+
+  # ══════════════════════════════════════════════════════════
+  # Memory skills
+  # ══════════════════════════════════════════════════════════
+  - id: skill-memory-read
+    tags: [skill, memory-read]
+    message: "what do you remember about current objectives"
+    expected:
+      matched_skills: [memory-read]
+
+  - id: skill-memory-update
+    tags: [skill, memory-update]
+    message: "remember this and save to memory for future reference"
+    expected:
+      matched_skills: [memory-update]
+
+  # ══════════════════════════════════════════════════════════
+  # Code/execution skills — using skill names in command context
+  # ══════════════════════════════════════════════════════════
+  - id: skill-code-execution
+    tags: [skill, code-execution]
+    message: "please code-execution to write a function that calculates entropy"
+    expected:
+      matched_skills: [code-execution]
+
+  - id: skill-file-operations
+    tags: [skill, file-operations]
+    message: "please file-operations to create a new config module"
+    expected:
+      matched_skills: [file-operations]
+
+  - id: skill-git-operations
+    tags: [skill, git-operations]
+    message: "please git-operations to check status and commit"
+    expected:
+      matched_skills: [git-operations]
+
+  # ══════════════════════════════════════════════════════════
+  # Task/planning skills — using skill names in command context
+  # ══════════════════════════════════════════════════════════
+  - id: skill-task-manage
+    tags: [skill, task-manage]
+    message: "please task-manage to create a story for the parser"
+    expected:
+      matched_skills: [task-manage]
+
+  - id: skill-sprint-plan
+    tags: [skill, sprint-plan]
+    message: "please sprint-plan for next week with the backlog"
+    expected:
+      matched_skills: [sprint-plan]
+
+  - id: skill-calendar-manage
+    tags: [skill, calendar-manage]
+    message: "please calendar-manage to add a meeting for friday"
+    expected:
+      matched_skills: [calendar-manage]
+
+  # ══════════════════════════════════════════════════════════
+  # Navigation/analysis skills
+  # ══════════════════════════════════════════════════════════
+  - id: skill-deep-ingest
+    tags: [skill, deep-ingest]
+    message: "please deep-ingest this paper into the vault"
+    expected:
+      matched_skills: [deep-ingest]
+
+  - id: skill-repo-navigate
+    tags: [skill, repo-navigate]
+    message: "please repo-navigate the repository structure"
+    expected:
+      matched_skills: [repo-navigate]
+
+  - id: skill-source-navigate
+    tags: [skill, source-navigate]
+    message: "find the code for the router and show me the source"
+    expected:
+      matched_skills: [source-navigate]
+
+  - id: skill-fdo-source-validate
+    tags: [skill, fdo-source-validate]
+    message: "please fdo-source-validate all source paths"
+    expected:
+      matched_skills: [fdo-source-validate]
+
+  # ══════════════════════════════════════════════════════════
+  # Vault sync and validation
+  # ══════════════════════════════════════════════════════════
+  - id: skill-vault-sync
+    tags: [skill, vault-sync]
+    message: "please vault-sync after the code changes"
+    expected:
+      matched_skills: [vault-sync]
+
+  - id: skill-experiment-validate
+    tags: [skill, experiment-validate]
+    message: "please experiment-validate the structure"
+    expected:
+      matched_skills: [experiment-validate]
+
+  - id: skill-experiment-scaffold
+    tags: [skill, experiment-scaffold]
+    message: "please experiment-scaffold a new experiment"
+    expected:
+      matched_skills: [experiment-scaffold]
+
+  # ══════════════════════════════════════════════════════════
+  # Infrastructure/deployment skills
+  # ══════════════════════════════════════════════════════════
+  - id: skill-docker-release
+    tags: [skill, docker-release]
+    message: "please docker-release build and deploy"
+    expected:
+      matched_skills: [docker-release]
+
+  - id: skill-ship-it
+    tags: [skill, ship-it]
+    message: "ship-it — code changed and verified in production."
+    expected:
+      matched_skills: [ship-it]
+
+  - id: skill-ironclaw-review
+    tags: [skill, ironclaw-review]
+    message: "review staging and audit output for errors"
+    expected:
+      matched_skills: [ironclaw-review]
+
+  # ══════════════════════════════════════════════════════════
+  # Routing/model skills
+  # ══════════════════════════════════════════════════════════
+  - id: skill-capability-routing
+    tags: [skill, capability-routing]
+    message: "how does routing work and what agents are available"
+    expected:
+      matched_skills: [capability-routing]
+
+  - id: skill-model-routing
+    tags: [skill, model-routing]
+    message: "please model-routing to select the best model"
+    expected:
+      matched_skills: [model-routing]
+
+  # ══════════════════════════════════════════════════════════
+  # Staging skills
+  # ══════════════════════════════════════════════════════════
+  - id: skill-staging-organize
+    tags: [skill, staging-organize]
+    message: "organize staging and move accepted files"
+    expected:
+      matched_skills: [staging-organize]
+
+  - id: skill-staging-cleanup
+    tags: [skill, staging-cleanup]
+    message: "clean staging and cleanup old jobs"
+    expected:
+      matched_skills: [staging-cleanup]
+
+  # ══════════════════════════════════════════════════════════
+  # Project/lifecycle
+  # ══════════════════════════════════════════════════════════
+  - id: skill-project-lifecycle
+    tags: [skill, project-lifecycle]
+    message: "please project-lifecycle to create a new project"
+    expected:
+      matched_skills: [project-lifecycle]
+
+  - id: skill-cliproxyapi
+    tags: [skill, cliproxyapi]
+    message: "please cliproxyapi to set up the oauth flow"
+    expected:
+      matched_skills: [cliproxyapi]
+
+  # ══════════════════════════════════════════════════════════
+  # Negative cases — should NOT match
+  # ══════════════════════════════════════════════════════════
+  - id: skill-none-general-question
+    tags: [skill, negative]
+    message: "tell me about the golden ratio"
+    expected:
+      matched_skills: []
+
+  - id: skill-none-greeting
+    tags: [skill, negative]
+    message: "hello, how are you?"
+    expected:
+      matched_skills: []
+
+  - id: skill-none-opinion
+    tags: [skill, negative]
+    message: "what is your opinion on dark energy?"
+    expected:
+      matched_skills: []
+
+  - id: skill-none-vague
+    tags: [skill, negative]
+    message: "hmm interesting point"
+    expected:
+      matched_skills: []

@@ -1,0 +1,60 @@
+version: "1.0"
+tier: 2
+category: codebase_agent
+description: "Codebase agent — read-only repo navigation, code structure, source tracing"
+
+cases:
+  - id: cb-repo-structure
+    tags: [codebase, navigation, single-turn]
+    turn_type: single
+    message: "Show me the structure of the GRIM repository"
+    mock_tools:
+      kronos_navigate: {"description": "GRIM root", "files": ["core/", "server/", "ui/"]}
+    expected:
+      tools_called: [kronos_navigate]
+      response_contains: ["core", "server"]
+    grading:
+      understanding: "Did it recognize a navigation request?"
+      execution: "Did it use kronos_navigate?"
+      completeness: "Did it present the structure clearly?"
+
+  - id: cb-find-module
+    tags: [codebase, search, single-turn]
+    turn_type: single
+    message: "Where is the code for the graph router?"
+    mock_tools:
+      kronos_search: {"results": [{"id": "grim-langgraph", "title": "LangGraph Architecture"}]}
+      kronos_deep_dive: {"sources": [{"path": "core/nodes/graph_router.py"}]}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["graph_router", "router"]
+    grading:
+      understanding: "Did it understand a code location query?"
+      execution: "Did it search and trace to source?"
+
+  - id: cb-explain-architecture
+    tags: [codebase, architecture, single-turn]
+    turn_type: single
+    message: "Explain the architecture of the agent dispatch system"
+    mock_tools:
+      kronos_search: {"results": [{"id": "grim-architecture"}]}
+      kronos_get: {"body": "Agent dispatch routes to 7 agents"}
+    expected:
+      tools_called: [kronos_search]
+      response_contains: ["agent", "dispatch"]
+    grading:
+      understanding: "Did it recognize an architecture explanation request?"
+      completeness: "Did it explain the dispatch system?"
+
+  - id: cb-trace-source
+    tags: [codebase, source, single-turn]
+    turn_type: single
+    message: "Trace the source code for the PAC regulation module in fracton"
+    mock_tools:
+      kronos_deep_dive: {"sources": [{"repo": "fracton", "path": "core/pac_regulation.py"}]}
+    expected:
+      tools_called: [kronos_deep_dive]
+      response_contains: ["pac_regulation", "fracton"]
+    grading:
+      execution: "Did it use kronos_deep_dive for source tracing?"
+      completeness: "Did it find and present the source path?"

@@ -1,0 +1,329 @@
+version: "1.0"
+tier: 1
+category: keyword_routing
+description: "Delegation keyword and action-intent pattern coverage"
+
+cases:
+  # ══════════════════════════════════════════════════════════
+  # Memory delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-memory-capture
+    tags: [keyword, memory]
+    message: "capture this concept"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-remember
+    tags: [keyword, memory]
+    message: "remember this for later"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-save
+    tags: [keyword, memory]
+    message: "save this insight"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-promote
+    tags: [keyword, memory]
+    message: "promote this to a full FDO"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-relate
+    tags: [keyword, memory]
+    message: "relate these two concepts"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-vault
+    tags: [keyword, memory]
+    message: "add to vault please"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-create-fdo
+    tags: [keyword, memory]
+    message: "create an fdo for this"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-create-story
+    tags: [keyword, memory, task]
+    message: "create a story for the auth feature"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-create-task
+    tags: [keyword, memory, task]
+    message: "create a task for fixing the login bug"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-move-active
+    tags: [keyword, memory, task]
+    message: "move to active"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-archive
+    tags: [keyword, memory, task]
+    message: "archive closed stories"
+    expected:
+      keyword_match: memory
+
+  - id: kw-memory-calendar
+    tags: [keyword, memory, calendar]
+    message: "add calendar event for friday"
+    expected:
+      keyword_match: memory
+
+  # ══════════════════════════════════════════════════════════
+  # Research delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-research-analyze
+    tags: [keyword, research]
+    message: "analyze this data"
+    expected:
+      keyword_match: research
+
+  - id: kw-research-ingest
+    tags: [keyword, research]
+    message: "ingest this paper"
+    expected:
+      keyword_match: research
+
+  - id: kw-research-summarize
+    tags: [keyword, research]
+    message: "summarize this paper on quantum mechanics"
+    expected:
+      keyword_match: research
+
+  - id: kw-research-investigate
+    tags: [keyword, research]
+    message: "investigate why the results diverge"
+    expected:
+      keyword_match: research
+
+  - id: kw-research-literature
+    tags: [keyword, research]
+    message: "what does the literature say about this"
+    expected:
+      keyword_match: research
+
+  # ══════════════════════════════════════════════════════════
+  # IronClaw delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-ironclaw-direct
+    tags: [keyword, ironclaw]
+    message: "use ironclaw to run this"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-write-code
+    tags: [keyword, ironclaw]
+    message: "write code for the parser"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-implement
+    tags: [keyword, ironclaw]
+    message: "implement the new endpoint"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-shell
+    tags: [keyword, ironclaw]
+    message: "open a shell session"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-git-push
+    tags: [keyword, ironclaw]
+    message: "git push to origin"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-deploy
+    tags: [keyword, ironclaw]
+    message: "deploy the latest version"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-run-command
+    tags: [keyword, ironclaw]
+    message: "run command to check disk space"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-refactor
+    tags: [keyword, ironclaw]
+    message: "refactor the authentication module"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-debug
+    tags: [keyword, ironclaw]
+    message: "debug this function"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-curl
+    tags: [keyword, ironclaw]
+    message: "curl the health endpoint"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-security-scan
+    tags: [keyword, ironclaw]
+    message: "security scan the codebase"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-sandbox
+    tags: [keyword, ironclaw]
+    message: "run sandboxed execution"
+    expected:
+      keyword_match: ironclaw
+
+  # ══════════════════════════════════════════════════════════
+  # Operate delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-operate-git-status
+    tags: [keyword, operate]
+    message: "git status"
+    expected:
+      keyword_match: operate
+
+  - id: kw-operate-git-log
+    tags: [keyword, operate]
+    message: "git log --oneline"
+    expected:
+      keyword_match: operate
+
+  - id: kw-operate-list-files
+    tags: [keyword, operate]
+    message: "list files in the src directory"
+    expected:
+      keyword_match: operate
+
+  - id: kw-operate-read-file
+    tags: [keyword, operate]
+    message: "read the file at config.py"
+    expected:
+      keyword_match: operate
+
+  # ══════════════════════════════════════════════════════════
+  # Audit delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-audit-staging
+    tags: [keyword, audit]
+    message: "review staging output"
+    expected:
+      keyword_match: audit
+
+  - id: kw-audit-check
+    tags: [keyword, audit]
+    message: "audit the files in staging"
+    expected:
+      keyword_match: audit
+
+  # ══════════════════════════════════════════════════════════
+  # Codebase delegation keywords
+  # ══════════════════════════════════════════════════════════
+  - id: kw-codebase-repo
+    tags: [keyword, codebase]
+    message: "show me the repo structure"
+    expected:
+      keyword_match: codebase
+
+  - id: kw-codebase-code
+    tags: [keyword, codebase]
+    message: "look at the code for the router"
+    expected:
+      keyword_match: codebase
+
+  - id: kw-codebase-architecture
+    tags: [keyword, codebase]
+    message: "explain the architecture of the system"
+    expected:
+      keyword_match: codebase
+
+  - id: kw-codebase-navigate
+    tags: [keyword, codebase]
+    message: "navigate the repo to find the config"
+    expected:
+      keyword_match: codebase
+
+  - id: kw-codebase-meta
+    tags: [keyword, codebase]
+    message: "check the meta.yaml in the experiments dir"
+    expected:
+      keyword_match: codebase
+
+  # ══════════════════════════════════════════════════════════
+  # No match (should return null)
+  # ══════════════════════════════════════════════════════════
+  - id: kw-none-question
+    tags: [keyword, negative]
+    message: "what is the golden ratio?"
+    expected:
+      keyword_match: "null"
+
+  - id: kw-none-opinion
+    tags: [keyword, negative]
+    message: "what do you think about quantum computing?"
+    expected:
+      keyword_match: "null"
+
+  - id: kw-none-casual
+    tags: [keyword, negative]
+    message: "interesting observation"
+    expected:
+      keyword_match: "null"
+
+  # ══════════════════════════════════════════════════════════
+  # Action-intent patterns
+  # ══════════════════════════════════════════════════════════
+  - id: ai-run-command
+    tags: [action_intent, ironclaw]
+    message: "run a command to check the server"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-execute-shell
+    tags: [action_intent, ironclaw]
+    message: "execute this in the terminal"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-check-network
+    tags: [action_intent, ironclaw]
+    message: "check the network connection"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-test-server
+    tags: [action_intent, ironclaw]
+    message: "test the server health"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-show-file
+    tags: [action_intent, ironclaw]
+    message: "show me the file in the directory"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-no-match-question
+    tags: [action_intent, negative]
+    message: "what is the meaning of life?"
+    expected:
+      action_intent: "null"
+
+  - id: ai-no-match-explain
+    tags: [action_intent, negative]
+    message: "explain how recursion works"
+    expected:
+      action_intent: "null"

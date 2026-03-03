@@ -1,0 +1,94 @@
+version: "1.0"
+tier: 2
+category: ironclaw_agent
+description: "IronClaw agent — sandboxed code execution, shell, file operations"
+
+cases:
+  - id: ic-write-function
+    tags: [ironclaw, code, single-turn]
+    turn_type: single
+    message: "Write a Python function that calculates the Fibonacci sequence"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: fibonacci.py"}
+      claw_shell: {"success": true, "output": "Tests passed"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["fibonacci", "written"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand the coding task?"
+      execution: "Did it use claw_write_file to create the file?"
+      completeness: "Was the function correct and complete?"
+
+  - id: ic-run-tests
+    tags: [ironclaw, shell, single-turn]
+    turn_type: single
+    message: "Run the pytest suite for the GRIM project"
+    mock_tools:
+      claw_shell: {"success": true, "output": "156 passed, 0 failed"}
+    expected:
+      tools_called: [claw_shell]
+      response_contains: ["passed"]
+    grading:
+      execution: "Did it use claw_shell to run pytest?"
+      verification: "Did it report the test results?"
+
+  - id: ic-git-push
+    tags: [ironclaw, git, single-turn]
+    turn_type: single
+    message: "Commit the changes with message 'fix: eval framework' and push"
+    mock_tools:
+      claw_shell: {"success": true, "output": "Pushed to origin/main"}
+    expected:
+      tools_called: [claw_shell]
+      response_contains: ["pushed", "committed"]
+    grading:
+      execution: "Did it run git commit and git push?"
+      verification: "Did it confirm the push succeeded?"
+
+  - id: ic-security-scan
+    tags: [ironclaw, security, single-turn]
+    turn_type: single
+    message: "Scan the codebase for security vulnerabilities"
+    mock_tools:
+      claw_scan_skill: {"findings_count": 0, "risk_score": 5, "recommendation": "Low risk"}
+    expected:
+      tools_called: [claw_scan_skill]
+      response_contains: ["scan", "risk"]
+    grading:
+      execution: "Did it use claw_scan_skill?"
+      completeness: "Did it report findings and risk score?"
+
+  - id: ic-read-and-modify
+    tags: [ironclaw, code, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Read the config.py file and tell me what it does"
+        checkpoint:
+          tools_called: [claw_read_file]
+      - role: user
+        message: "Add a new field called 'eval_enabled' with default True"
+        checkpoint:
+          tools_called: [claw_write_file]
+          response_contains: ["eval_enabled"]
+    mock_tools:
+      claw_read_file: {"success": true, "output": "class Config:\n    debug = False"}
+      claw_write_file: {"success": true, "output": "File updated"}
+    grading:
+      understanding: "Did it understand the read-then-modify workflow?"
+      execution: "Did it read first, then write?"
+      completeness: "Did the modification include eval_enabled?"
+
+  - id: ic-deploy-workflow
+    tags: [ironclaw, deploy, single-turn]
+    turn_type: single
+    message: "Build and deploy the Docker image"
+    mock_tools:
+      claw_shell: {"success": true, "output": "Image built and pushed"}
+    expected:
+      tools_called: [claw_shell]
+      response_contains: ["docker", "deployed"]
+    grading:
+      execution: "Did it run docker build and push commands?"
+      verification: "Did it confirm successful deployment?"

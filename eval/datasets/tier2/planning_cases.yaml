@@ -1,0 +1,70 @@
+version: "1.0"
+tier: 2
+category: planning
+description: "Planning companion — task breakdown, sprint planning, board management"
+
+cases:
+  - id: plan-break-down-feature
+    tags: [planning, breakdown, single-turn]
+    turn_type: single
+    message: "Break down the eval framework feature into stories"
+    mock_tools:
+      kronos_search: {"results": [{"id": "feat-grim-eval", "title": "Eval Framework"}]}
+      kronos_task_create: {"success": true, "story_id": "story-eval-001"}
+    expected:
+      response_contains: ["stories", "eval"]
+    grading:
+      understanding: "Did it understand the feature breakdown request?"
+      planning: "Did it identify reasonable stories?"
+      completeness: "Did it cover the main areas of the feature?"
+
+  - id: plan-sprint-planning
+    tags: [planning, sprint, single-turn]
+    turn_type: single
+    message: "Plan the sprint for next week based on the backlog"
+    mock_tools:
+      kronos_board_view: {"columns": {"new": [], "active": [], "in_progress": []}}
+      kronos_backlog_view: {"stories": [{"id": "story-001", "title": "Story 1", "priority": "high"}]}
+    expected:
+      response_contains: ["sprint", "backlog"]
+    grading:
+      understanding: "Did it understand sprint planning context?"
+      planning: "Did it prioritize stories appropriately?"
+      completeness: "Did it produce a coherent sprint plan?"
+
+  - id: plan-prioritize-work
+    tags: [planning, prioritize, single-turn]
+    turn_type: single
+    message: "What should I work on next?"
+    mock_tools:
+      kronos_board_view: {"columns": {"in_progress": [{"id": "story-001", "title": "Eval engine"}]}}
+      kronos_backlog_view: {"stories": [{"id": "story-002", "priority": "critical"}]}
+    expected:
+      response_contains: ["work on", "priority"]
+    grading:
+      understanding: "Did it check current board state and backlog?"
+      planning: "Did it recommend based on priority?"
+
+  - id: plan-multi-turn-scoping
+    tags: [planning, scoping, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Let's scope out the UI dashboard work"
+        checkpoint:
+          response_contains: ["components", "page"]
+      - role: user
+        message: "Yes, include the history chart and dataset editor"
+        checkpoint:
+          response_contains: ["chart", "editor"]
+      - role: user
+        message: "Create the stories for these"
+        checkpoint:
+          tools_called: [kronos_task_create]
+    mock_tools:
+      kronos_search: {"results": []}
+      kronos_task_create: {"success": true}
+    grading:
+      understanding: "Did it scope the work progressively?"
+      planning: "Did it propose reasonable components?"
+      execution: "Did it create stories when asked?"

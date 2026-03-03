@@ -1,0 +1,441 @@
+version: "1.0"
+tier: 1
+category: routing
+description: "Graph-level and research-level routing decisions"
+
+cases:
+  # ══════════════════════════════════════════════════════════
+  # Graph Router — Personal signals
+  # ══════════════════════════════════════════════════════════
+  - id: gr-personal-greeting-hey
+    tags: [graph_router, personal]
+    message: "hey grim, how are you doing today?"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-greeting-hello
+    tags: [graph_router, personal]
+    message: "hello grim"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-greeting-morning
+    tags: [graph_router, personal]
+    message: "good morning"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-howsitgoing
+    tags: [graph_router, personal]
+    message: "how's it going"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-feeling-stressed
+    tags: [graph_router, personal]
+    message: "i'm stressed about the deadline"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-feeling-excited
+    tags: [graph_router, personal]
+    message: "i'm excited about the new results"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-venting
+    tags: [graph_router, personal]
+    message: "just venting about work"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-chatting
+    tags: [graph_router, personal]
+    message: "just chatting, nothing specific"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-whoareyou
+    tags: [graph_router, personal]
+    message: "tell me about yourself"
+    expected:
+      graph_target: personal
+
+  - id: gr-personal-appreciate
+    tags: [graph_router, personal]
+    message: "i appreciate you being here"
+    expected:
+      graph_target: personal
+
+  # ── Personal signals overridden by research content ──
+
+  - id: gr-personal-override-experiment
+    tags: [graph_router, research, override]
+    message: "how are you doing with the experiment analysis"
+    expected:
+      graph_target: research
+
+  - id: gr-personal-override-vault
+    tags: [graph_router, research, override]
+    message: "hey grim, search the vault for PAC experiments"
+    expected:
+      graph_target: research
+
+  - id: gr-personal-override-code
+    tags: [graph_router, research, override]
+    message: "i'm excited to implement the new feature"
+    expected:
+      graph_target: research
+
+  - id: gr-personal-override-task
+    tags: [graph_router, research, override]
+    message: "i'm feeling good about the task progress"
+    expected:
+      graph_target: research
+
+  # ══════════════════════════════════════════════════════════
+  # Graph Router — Planning signals
+  # ══════════════════════════════════════════════════════════
+  - id: gr-planning-lets-plan
+    tags: [graph_router, planning]
+    message: "let's plan the implementation"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-break-down
+    tags: [graph_router, planning]
+    message: "break this down into tasks"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-sprint
+    tags: [graph_router, planning]
+    message: "plan the sprint for next week"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-scope
+    tags: [graph_router, planning]
+    message: "scope this work out"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-groom
+    tags: [graph_router, planning]
+    message: "groom the backlog"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-create-stories
+    tags: [graph_router, planning]
+    message: "create stories for the auth feature"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-prioritize
+    tags: [graph_router, planning]
+    message: "what should i work on next"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-promote-drafts
+    tags: [graph_router, planning]
+    message: "show drafts for review"
+    expected:
+      graph_target: planning
+
+  - id: gr-planning-load-board
+    tags: [graph_router, planning]
+    message: "load up the board with the new stories"
+    expected:
+      graph_target: planning
+
+  # ══════════════════════════════════════════════════════════
+  # Graph Router — Research (default + delegation keywords)
+  # ══════════════════════════════════════════════════════════
+  - id: gr-research-default
+    tags: [graph_router, research, default]
+    message: "what is the relationship between PAC and SEC in DFT?"
+    expected:
+      graph_target: research
+
+  - id: gr-research-capture
+    tags: [graph_router, research, delegation]
+    message: "capture this concept about entropy"
+    expected:
+      graph_target: research
+
+  - id: gr-research-write-code
+    tags: [graph_router, research, delegation]
+    message: "write code for the new feature"
+    expected:
+      graph_target: research
+
+  - id: gr-research-git-status
+    tags: [graph_router, research, delegation]
+    message: "git status"
+    expected:
+      graph_target: research
+
+  - id: gr-research-analyze
+    tags: [graph_router, research, delegation]
+    message: "analyze this paper on entropy bounds"
+    expected:
+      graph_target: research
+
+  - id: gr-research-action-intent
+    tags: [graph_router, research, action_intent]
+    message: "run a command to check the server status"
+    expected:
+      graph_target: research
+
+  - id: gr-research-ambiguous
+    tags: [graph_router, research, default]
+    message: "tell me something interesting"
+    expected:
+      graph_target: research
+
+  # ── Skill hint overrides ──
+
+  - id: gr-skill-hint-memory
+    tags: [graph_router, research, skill_hint]
+    message: "save this to the vault"
+    state_overrides:
+      skill_delegation_hint: memory
+    expected:
+      graph_target: research
+
+  - id: gr-skill-hint-planning
+    tags: [graph_router, planning, skill_hint]
+    message: "help me plan"
+    state_overrides:
+      skill_delegation_hint: planning
+    expected:
+      graph_target: planning
+
+  - id: gr-skill-hint-ironclaw
+    tags: [graph_router, research, skill_hint]
+    message: "deploy this"
+    state_overrides:
+      skill_delegation_hint: ironclaw
+    expected:
+      graph_target: research
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Companion mode (no delegation)
+  # ══════════════════════════════════════════════════════════
+  - id: rt-companion-question
+    tags: [router, companion]
+    message: "what is the relationship between PAC and SEC?"
+    expected:
+      graph_target: research
+      mode: companion
+
+  - id: rt-companion-explain
+    tags: [router, companion]
+    message: "explain how the Möbius topology works"
+    expected:
+      graph_target: research
+      mode: companion
+
+  - id: rt-companion-general
+    tags: [router, companion]
+    message: "tell me about the golden ratio"
+    expected:
+      graph_target: research
+      mode: companion
+
+  - id: rt-companion-opinion
+    tags: [router, companion]
+    message: "what do you think about string theory?"
+    expected:
+      graph_target: research
+      mode: companion
+
+  - id: rt-companion-recall
+    tags: [router, companion]
+    message: "what do we know about Poincaré activation?"
+    expected:
+      graph_target: research
+      mode: companion
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Delegation via skill hint
+  # ══════════════════════════════════════════════════════════
+  - id: rt-delegate-memory-hint
+    tags: [router, delegate, memory, skill_hint]
+    message: "capture this concept"
+    state_overrides:
+      skill_delegation_hint: memory
+    expected:
+      mode: delegate
+      delegation_type: memory
+
+  - id: rt-delegate-ironclaw-hint
+    tags: [router, delegate, ironclaw, skill_hint]
+    message: "write the code"
+    state_overrides:
+      skill_delegation_hint: ironclaw
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-delegate-research-hint
+    tags: [router, delegate, research, skill_hint]
+    message: "ingest this document"
+    state_overrides:
+      skill_delegation_hint: research
+    expected:
+      mode: delegate
+      delegation_type: research
+
+  - id: rt-delegate-codebase-hint
+    tags: [router, delegate, codebase, skill_hint]
+    message: "navigate the repo"
+    state_overrides:
+      skill_delegation_hint: codebase
+    expected:
+      mode: delegate
+      delegation_type: codebase
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Delegation via keywords
+  # ══════════════════════════════════════════════════════════
+  - id: rt-delegate-memory-kw-capture
+    tags: [router, delegate, memory, keyword]
+    message: "capture this concept about entropy gradients"
+    expected:
+      mode: delegate
+      delegation_type: memory
+
+  - id: rt-delegate-memory-kw-create-task
+    tags: [router, delegate, memory, keyword]
+    message: "create a task for the auth feature"
+    expected:
+      mode: delegate
+      delegation_type: memory
+
+  - id: rt-delegate-ironclaw-kw-shell
+    tags: [router, delegate, ironclaw, keyword]
+    message: "open a powershell session"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-delegate-ironclaw-kw-deploy
+    tags: [router, delegate, ironclaw, keyword]
+    message: "deploy the latest build"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-delegate-research-kw-analyze
+    tags: [router, delegate, research, keyword]
+    message: "analyze this paper on quantum computing"
+    expected:
+      mode: delegate
+      delegation_type: research
+
+  - id: rt-delegate-operate-kw-gitstatus
+    tags: [router, delegate, operate, keyword]
+    message: "git status"
+    expected:
+      mode: delegate
+      delegation_type: operate
+
+  - id: rt-delegate-audit-kw-review
+    tags: [router, delegate, audit, keyword]
+    message: "review staging output"
+    expected:
+      mode: delegate
+      delegation_type: audit
+
+  - id: rt-delegate-codebase-kw-repo
+    tags: [router, delegate, codebase, keyword]
+    message: "show me the repo structure"
+    expected:
+      mode: delegate
+      delegation_type: codebase
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Continuity (follow-up signals)
+  # ══════════════════════════════════════════════════════════
+  - id: rt-continuity-now
+    tags: [router, continuity]
+    message: "now do the same for the other file"
+    state_overrides:
+      last_delegation_type: ironclaw
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-continuity-also
+    tags: [router, continuity]
+    message: "also add a test for that"
+    state_overrides:
+      last_delegation_type: ironclaw
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-continuity-try
+    tags: [router, continuity]
+    message: "try running it again"
+    state_overrides:
+      last_delegation_type: memory
+    expected:
+      mode: delegate
+      delegation_type: memory
+
+  - id: rt-continuity-no-signal
+    tags: [router, continuity, negative]
+    message: "what is entropy?"
+    state_overrides:
+      last_delegation_type: ironclaw
+    expected:
+      mode: companion
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Action-intent patterns
+  # ══════════════════════════════════════════════════════════
+  - id: rt-action-intent-run-command
+    tags: [router, action_intent, ironclaw]
+    message: "run a command to check the server"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-action-intent-test-tool
+    tags: [router, action_intent, ironclaw]
+    message: "test the network connection"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-action-intent-show-file
+    tags: [router, action_intent, operate]
+    message: "show me the file contents in the directory"
+    expected:
+      mode: delegate
+      delegation_type: operate
+
+  # ══════════════════════════════════════════════════════════
+  # Edge cases
+  # ══════════════════════════════════════════════════════════
+  - id: edge-empty-message-graph
+    tags: [edge_case]
+    message: ""
+    expected:
+      graph_target: research
+
+  - id: edge-short-message
+    tags: [edge_case]
+    message: "hi"
+    expected:
+      graph_target: research
+
+  - id: edge-long-message
+    tags: [edge_case]
+    message: "I have been thinking about the implications of recursive entropy bounds on the PAC framework and wondering whether the SEC compliance conditions need to be updated to reflect the new constraints we discovered in milestone 3 experiments"
+    expected:
+      graph_target: research
