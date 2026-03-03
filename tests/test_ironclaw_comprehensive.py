@@ -630,6 +630,131 @@ class TestLangChainToolWrappers:
         finally:
             tool_context.ironclaw_bridge = None
 
+    # --- Staging path enforcement tests ---
+
+    @pytest.mark.asyncio
+    async def test_staging_enforced_relative_path(self):
+        """Relative path gets prefixed with staging path."""
+        from core.tools.ironclaw_tools import claw_write_file
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_write_file.ainvoke({"path": "myfile.py", "content": "x"})
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["path"] == "/workspace/staging/abc123/output/myfile.py"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
+    @pytest.mark.asyncio
+    async def test_staging_enforced_absolute_path(self):
+        """Absolute paths are rebased into staging — not passed through."""
+        from core.tools.ironclaw_tools import claw_write_file
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_write_file.ainvoke({
+                "path": "/workspace/myproject/server.py",
+                "content": "x",
+            })
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["path"] == "/workspace/staging/abc123/output/workspace/myproject/server.py"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
+    @pytest.mark.asyncio
+    async def test_staging_enforced_nested_path(self):
+        """Nested relative path gets prefixed correctly."""
+        from core.tools.ironclaw_tools import claw_write_file
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_write_file.ainvoke({
+                "path": "reality_engine_sim/constants.py",
+                "content": "PHI = 1.618",
+            })
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["path"] == "/workspace/staging/abc123/output/reality_engine_sim/constants.py"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
+    @pytest.mark.asyncio
+    async def test_staging_already_correct_path(self):
+        """Path already inside staging is left alone."""
+        from core.tools.ironclaw_tools import claw_write_file
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_write_file.ainvoke({
+                "path": "/workspace/staging/abc123/output/file.py",
+                "content": "x",
+            })
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["path"] == "/workspace/staging/abc123/output/file.py"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
+    @pytest.mark.asyncio
+    async def test_staging_not_active_no_rebase(self):
+        """When staging_path is None, paths pass through unchanged."""
+        from core.tools.ironclaw_tools import claw_write_file
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = None
+        try:
+            await claw_write_file.ainvoke({
+                "path": "/some/absolute/path.py",
+                "content": "x",
+            })
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["path"] == "/some/absolute/path.py"
+        finally:
+            tool_context.ironclaw_bridge = None
+
+    @pytest.mark.asyncio
+    async def test_staging_shell_cwd_enforced(self):
+        """claw_shell uses staging path as cwd when staging is active."""
+        from core.tools.ironclaw_tools import claw_shell
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_shell.ainvoke({"command": "ls -la"})
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["cwd"] == "/workspace/staging/abc123/output/"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
+    @pytest.mark.asyncio
+    async def test_staging_shell_explicit_cwd_preserved(self):
+        """When shell caller sets explicit cwd, it's not overridden."""
+        from core.tools.ironclaw_tools import claw_shell
+        from core.tools.context import tool_context
+        mock_bridge = self._mock_bridge()
+        tool_context.ironclaw_bridge = mock_bridge
+        tool_context.staging_path = "/workspace/staging/abc123/output/"
+        try:
+            await claw_shell.ainvoke({"command": "ls", "cwd": "/custom/path"})
+            call_args = mock_bridge.execute_tool.call_args
+            assert call_args[0][1]["cwd"] == "/custom/path"
+        finally:
+            tool_context.ironclaw_bridge = None
+            tool_context.staging_path = None
+
     @pytest.mark.asyncio
     async def test_claw_list_agents(self):
         from core.tools.ironclaw_tools import claw_list_agents

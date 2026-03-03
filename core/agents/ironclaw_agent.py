@@ -95,9 +95,11 @@ def make_ironclaw_agent(config: GrimConfig):
             staging_path = f"/workspace/staging/{job_id}/output/"
             context["staging_path"] = staging_path
             context["staging_instructions"] = (
-                "Write ALL output files to the staging path above. "
-                "Do NOT write to any other location. Files written here "
-                "will be reviewed by the audit agent before acceptance."
+                "MANDATORY: Write ALL output files to the staging path above. "
+                "Do NOT write to any other location — all paths are automatically "
+                "redirected to staging regardless. Use RELATIVE paths like "
+                "'myproject/main.py' (not absolute paths like '/workspace/myproject/main.py'). "
+                "Files written here will be reviewed by the audit agent before acceptance."
             )
             # Enforce at tool layer: relative paths auto-prefixed with staging dir
             from core.tools.context import tool_context

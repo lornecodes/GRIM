@@ -101,14 +101,17 @@ async def claw_write_file(
     """
     bridge = _get_bridge()
 
-    # Enforce staging path: if a staging job is active and the LLM provides
-    # a relative path, prefix it with the staging output directory so files
-    # land in the shared volume (not the container's WORKDIR).
+    # Enforce staging path: when a staging job is active, ALL writes MUST
+    # go to the staging output directory. This is mandatory — the LLM may
+    # invent absolute paths (e.g., /workspace/myproject/file.py) that would
+    # bypass staging and land in IronClaw's container filesystem instead of
+    # the shared Docker volume. We rebase every path into staging.
     staging_path = tool_context.staging_path
     if staging_path and not path.startswith(staging_path):
-        if not path.startswith("/"):
-            path = f"{staging_path}{path}"
-            logger.debug("claw_write_file: prefixed path with staging → %s", path)
+        # Strip leading slashes and rebase into staging
+        rebased = path.lstrip("/")
+        path = f"{staging_path}{rebased}"
+        logger.info("claw_write_file: rebased path into staging → %s", path)
 
     result = await bridge.execute_tool("file_write", {
         "path": path,
@@ -132,6 +135,14 @@ async def claw_shell(
         cwd: Working directory (default: workspace root).
     """
     bridge = _get_bridge()
+
+    # When staging is active, force cwd to the staging output directory
+    # so that shell commands (mkdir, redirects, etc.) write there too.
+    staging_path = tool_context.staging_path
+    if staging_path and cwd == ".":
+        cwd = staging_path
+        logger.info("claw_shell: using staging path as cwd → %s", cwd)
+
     result = await bridge.execute_tool("shell", {
         "command": command,
         "cwd": cwd,
