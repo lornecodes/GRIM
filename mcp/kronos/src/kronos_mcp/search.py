@@ -740,7 +740,11 @@ class SearchEngine:
 
     def _ensure_semantic(self, blocking: bool = True):
         """Lazily build semantic index on first semantic search request.
-        
+
+        The lock is held only briefly to check/set flags. The heavy model load
+        and embedding happens OUTSIDE the lock so other search requests can
+        proceed with keyword-only results instead of blocking for 60s+.
+
         Args:
             blocking: If False, return immediately if another thread is loading.
                       The background pre-load uses blocking=True.
@@ -751,31 +755,41 @@ class SearchEngine:
         if not self._semantic.available:
             return False
 
+        # Brief lock to check/set loading flag
         acquired = self._semantic_lock.acquire(blocking=blocking)
         if not acquired:
-            # Another thread is building — skip semantic for this request
             logger.warning("Semantic index still loading — skipping semantic for this request")
             return False
         try:
-            if self._semantic_indexed:  # Double-check after acquiring lock
+            if self._semantic_indexed:
                 return True
+            if self._semantic_loading:
+                # Another thread is building — skip semantic for this request
+                logger.warning("Semantic index still loading — skipping semantic for this request")
+                return False
             self._semantic_loading = True
+        finally:
+            self._semantic_lock.release()
+
+        # Heavy work outside lock — only one thread gets here due to flag
+        try:
             logger.info("Building semantic index (first semantic search)...")
             t0 = time.time()
             to_embed: dict[str, str] = {}
             for fdo in self._vault.index.values():
                 to_embed[fdo.id] = self._fdo_embed_text(fdo)
             self._semantic.update_batch(to_embed)
-            self._semantic_indexed = True
-            self._semantic_loading = False
+
+            with self._semantic_lock:
+                self._semantic_indexed = True
+                self._semantic_loading = False
             logger.info(f"Semantic index built in {time.time() - t0:.1f}s — {self._semantic.indexed_count} embeddings")
             return True
         except Exception as e:
-            self._semantic_loading = False
+            with self._semantic_lock:
+                self._semantic_loading = False
             logger.warning(f"Semantic index build failed: {e}")
             return False
-        finally:
-            self._semantic_lock.release()
 
     def _full_index(self, all_paths: list[str]):
         """Full index build: BM25 + graph (fast). Semantic deferred."""

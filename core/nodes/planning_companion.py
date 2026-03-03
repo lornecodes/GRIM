@@ -38,17 +38,6 @@ MAX_TOOL_STEPS = 8  # Planning needs more steps: search vault, check board, crea
 PLANNING_TOOLS = [*TASK_ALL_TOOLS, *COMPANION_TOOLS]
 
 # UI roster metadata for the planning companion node
-NODE_METADATA = {
-    "id": "planning_companion",
-    "name": "Planning",
-    "role": "planner",
-    "description": "Task breakdown, sprint planning, board management, scoping",
-    "tools": [t.name for t in PLANNING_TOOLS],
-    "color": "#a78bfa",
-    "tier": "grim",
-    "toggleable": False,
-}
-
 PLANNING_MODE_PREAMBLE = """\
 ## Mode: Planning Companion
 
@@ -117,6 +106,26 @@ Once work items are approved and promoted, the next step is code-level planning
 execution. This handoff to the Codebase Agent is not yet built but is the
 bridge to IronClaw execution (Phase 3 architecture).
 """
+
+# UI roster metadata for the planning companion node
+NODE_METADATA = {
+    "id": "planning_companion",
+    "name": "Planning",
+    "role": "planner",
+    "description": "Task breakdown, sprint planning, board management, scoping",
+    "tools": [t.name for t in PLANNING_TOOLS],
+    "tools_detail": [
+        {"name": t.name, "description": (t.description or "").split("\n")[0]}
+        for t in PLANNING_TOOLS
+    ],
+    "color": "#a78bfa",
+    "tier": "grim",
+    "toggleable": False,
+    "protocol_priority": ["sprint-plan", "task-manage", "calendar-manage"],
+    "default_protocol": PLANNING_MODE_PREAMBLE,
+    "temperature": 0.7,
+    "max_tool_steps": MAX_TOOL_STEPS,
+}
 
 
 def make_planning_companion_node(

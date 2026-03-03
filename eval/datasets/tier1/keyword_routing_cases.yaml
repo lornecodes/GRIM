@@ -263,6 +263,45 @@ cases:
       keyword_match: codebase
 
   # ══════════════════════════════════════════════════════════
+  # IronClaw — regression tests (v0.0.5.5 routing fix)
+  # ══════════════════════════════════════════════════════════
+  - id: kw-ironclaw-build-me-webserver
+    tags: [keyword, ironclaw, regression]
+    message: "have ironclaw build me a simple webserver in python"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-build-me-script
+    tags: [keyword, ironclaw, regression]
+    message: "build me a python script for data processing"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-code-me
+    tags: [keyword, ironclaw, regression]
+    message: "code me a simple webserver"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-have-do-that
+    tags: [keyword, ironclaw, regression]
+    message: "have ironclaw do that"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-run-pytest
+    tags: [keyword, ironclaw, regression]
+    message: "run pytest on the tests"
+    expected:
+      keyword_match: ironclaw
+
+  - id: kw-ironclaw-implement-rest
+    tags: [keyword, ironclaw, regression]
+    message: "implement a REST API endpoint"
+    expected:
+      keyword_match: ironclaw
+
+  # ══════════════════════════════════════════════════════════
   # No match (should return null)
   # ══════════════════════════════════════════════════════════
   - id: kw-none-question
@@ -327,3 +366,28 @@ cases:
     message: "explain how recursion works"
     expected:
       action_intent: "null"
+
+  # ── Tool-pipeline action intents (v0.0.5.7) ──
+  - id: ai-run-file-permissions
+    tags: [action_intent, ironclaw]
+    message: "run a command to check the file permissions"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-execute-bash-deploy
+    tags: [action_intent, ironclaw]
+    message: "execute the bash command for the deploy"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-test-dns-lookup
+    tags: [action_intent, ironclaw]
+    message: "test the dns lookup for our domain"
+    expected:
+      action_intent: ironclaw
+
+  - id: ai-check-process-running
+    tags: [action_intent, ironclaw]
+    message: "check whether the process is alive"
+    expected:
+      action_intent: ironclaw

@@ -12,9 +12,11 @@ For the staging pipeline (Phase 4), integrate also handles:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage
 
+from core.nodes.dispatch import _update_manifest
 from core.state import AuditVerdict, GrimState, StagingArtifact
 
 logger = logging.getLogger(__name__)
@@ -60,8 +62,29 @@ async def integrate_node(state: GrimState) -> dict:
         "last_delegation_type": agent_result.agent,  # persist for continuity
     }
 
-    # Clear staging state after integration
+    # Update manifest on disk, then clear staging state
     if job_id:
+        now = datetime.now(timezone.utc).isoformat()
+        if verdict and verdict.passed:
+            _update_manifest(job_id, {
+                "status": "completed",
+                "completed_at": now,
+                "audit_passed": True,
+            })
+        elif verdict and not verdict.passed:
+            _update_manifest(job_id, {
+                "status": "failed",
+                "completed_at": now,
+                "audit_passed": False,
+                "issues": verdict.issues,
+            })
+        else:
+            # No audit (empty artifacts or non-ironclaw) — still mark completed
+            _update_manifest(job_id, {
+                "status": "completed",
+                "completed_at": now,
+            })
+
         result.update({
             "staging_job_id": None,
             "staging_artifacts": [],

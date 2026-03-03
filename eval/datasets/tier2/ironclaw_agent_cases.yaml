@@ -92,3 +92,212 @@ cases:
     grading:
       execution: "Did it run docker build and push commands?"
       verification: "Did it confirm successful deployment?"
+
+  # ══════════════════════════════════════════════════════════
+  # Code generation and verification (v0.0.5.5)
+  # ══════════════════════════════════════════════════════════
+  - id: ic-gen-webserver
+    tags: [ironclaw, code, codegen, single-turn]
+    turn_type: single
+    message: "Write a simple Python HTTP webserver that serves on port 8000 and returns 'Hello World' on GET /"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: webserver.py"}
+      claw_shell: {"success": true, "output": "Server started, GET / returned 200 OK: Hello World"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["webserver", "8000"]
+      response_excludes: ["error", "failed"]
+    grading:
+      understanding: "Did it understand the webserver requirements (port 8000, GET /, Hello World)?"
+      execution: "Did it write a Python file with actual webserver code?"
+      completeness: "Does the code include proper HTTP handling, port binding, and the correct response?"
+      verification: "Did it attempt to verify the server works (run it, curl it, or explain how to test)?"
+
+  - id: ic-gen-cli-tool
+    tags: [ironclaw, code, codegen, single-turn]
+    turn_type: single
+    message: "Write a Python CLI tool with argparse that takes a --name flag and prints 'Hello, {name}!'"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: greet.py"}
+      claw_shell: {"success": true, "output": "Hello, World!"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["argparse", "name"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand the CLI requirements (argparse, --name flag, greeting output)?"
+      execution: "Did it write a complete Python script with argparse?"
+      completeness: "Does the code handle the --name flag and format the greeting correctly?"
+      verification: "Did it run or explain how to test the CLI tool?"
+
+  - id: ic-gen-test-suite
+    tags: [ironclaw, code, codegen, single-turn]
+    turn_type: single
+    message: "Write pytest tests for a calculator module with add, subtract, multiply, divide functions"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: test_calculator.py"}
+      claw_shell: {"success": true, "output": "8 passed, 0 failed"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["test", "calculator"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand the test requirements (4 operations, pytest format)?"
+      execution: "Did it write a proper pytest test file?"
+      completeness: "Does it test all 4 operations with meaningful assertions, including edge cases like division by zero?"
+      verification: "Did it attempt to run the tests?"
+
+  - id: ic-gen-data-processor
+    tags: [ironclaw, code, codegen, single-turn]
+    turn_type: single
+    message: "Write a Python script that reads a CSV file, filters rows where 'score' > 80, and writes the result to a new CSV"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: filter_csv.py"}
+      claw_shell: {"success": true, "output": "Filtered 15 rows, wrote output.csv"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["csv", "filter"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand the data processing requirements (read CSV, filter by score > 80, write new CSV)?"
+      execution: "Did it write a working Python script with csv/pandas handling?"
+      completeness: "Does the code handle file I/O, filtering logic, and output correctly?"
+
+  - id: ic-gen-and-verify
+    tags: [ironclaw, code, codegen, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Write a Python function that checks if a string is a palindrome"
+        checkpoint:
+          tools_called: [claw_write_file]
+          response_contains: ["palindrome"]
+      - role: user
+        message: "Now write tests for it and run them"
+        checkpoint:
+          tools_called: [claw_write_file, claw_shell]
+          response_contains: ["test", "passed"]
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written"}
+      claw_shell: {"success": true, "output": "5 passed, 0 failed"}
+    grading:
+      understanding: "Did it understand both the implementation and testing requests?"
+      execution: "Did it write the palindrome function first, then tests, then run them?"
+      completeness: "Is the palindrome function correct? Do tests cover edge cases (empty string, single char, spaces)?"
+      verification: "Did it actually run the tests and report results?"
+
+  # ══════════════════════════════════════════════════════════
+  # Tool execution pipeline (v0.0.5.7)
+  # ══════════════════════════════════════════════════════════
+  - id: ic-tool-write-and-verify
+    tags: [ironclaw, tools, staging, single-turn]
+    turn_type: single
+    message: "Write a hello.py file to the staging directory and verify it exists"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: hello.py (42 bytes)"}
+      claw_read_file: {"success": true, "output": "print('hello world')"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["hello.py", "written"]
+      response_excludes: ["placeholder", "error"]
+    grading:
+      execution: "Did it use claw_write_file to create the file?"
+      verification: "Did it confirm the file was written successfully, not just return a placeholder?"
+
+  - id: ic-tool-shell-build
+    tags: [ironclaw, tools, staging, single-turn]
+    turn_type: single
+    message: "Install flask and run the webserver in the background"
+    mock_tools:
+      claw_shell: {"success": true, "output": "Successfully installed Flask-3.0\nServer started on port 5000"}
+    expected:
+      tools_called: [claw_shell]
+      response_contains: ["flask", "installed"]
+      response_excludes: ["placeholder"]
+    grading:
+      execution: "Did it use claw_shell to pip install and start the server?"
+      completeness: "Did it handle both installation and server startup?"
+
+  - id: ic-tool-error-handling
+    tags: [ironclaw, tools, error, single-turn]
+    turn_type: single
+    message: "Read the file /etc/shadow"
+    mock_tools:
+      claw_read_file: {"success": false, "output": "", "error": "Path denied by policy: /etc/shadow"}
+    expected:
+      tools_called: [claw_read_file]
+      response_contains: ["denied", "cannot"]
+    grading:
+      execution: "Did it attempt to read the file?"
+      error_handling: "Did it handle the denial gracefully and explain why?"
+
+  - id: ic-gen-api-endpoint
+    tags: [ironclaw, code, codegen, single-turn]
+    turn_type: single
+    message: "Write a FastAPI app with a POST /items endpoint that accepts a JSON body with 'name' and 'price' fields and returns the item with an auto-generated 'id'"
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written: main.py"}
+      claw_shell: {"success": true, "output": "INFO:     Uvicorn running on http://0.0.0.0:8000"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["fastapi", "items"]
+      response_excludes: ["error"]
+    grading:
+      understanding: "Did it understand the API requirements (FastAPI, POST /items, name+price body, auto-generated id)?"
+      execution: "Did it write a complete FastAPI application with proper Pydantic models?"
+      completeness: "Does the code include proper request/response models, ID generation, and the POST endpoint?"
+      verification: "Did it explain how to run and test the API?"
+
+  # ══════════════════════════════════════════════════════════
+  # Read-then-summarize and multi-file staging (v0.0.5.7)
+  # ══════════════════════════════════════════════════════════
+  - id: ic-read-summarize
+    tags: [ironclaw, code, analysis, single-turn]
+    turn_type: single
+    message: "Read the main.py file and give me a summary of its structure — classes, functions, imports"
+    mock_tools:
+      claw_read_file: {"success": true, "output": "import os\nimport sys\n\nclass Config:\n    debug = False\n\ndef main():\n    pass\n\nif __name__ == '__main__':\n    main()"}
+    expected:
+      tools_called: [claw_read_file]
+      response_contains: ["Config", "main"]
+    grading:
+      execution: "Did it use claw_read_file to retrieve the file?"
+      understanding: "Did it identify the classes, functions, and imports?"
+      completeness: "Did it provide a structured summary (not just dump the code)?"
+
+  - id: ic-multi-file-project
+    tags: [ironclaw, code, codegen, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Create a Python project with a models.py defining a User dataclass with name and email, and a main.py that creates a User and prints it"
+        checkpoint:
+          tools_called: [claw_write_file]
+          response_contains: ["models.py", "main.py"]
+      - role: user
+        message: "Now run main.py to verify it works"
+        checkpoint:
+          tools_called: [claw_shell]
+          response_contains: ["User"]
+    mock_tools:
+      claw_write_file: {"success": true, "output": "File written"}
+      claw_shell: {"success": true, "output": "User(name='Alice', email='alice@example.com')"}
+    grading:
+      understanding: "Did it understand the multi-file project structure?"
+      execution: "Did it create both files with correct cross-imports?"
+      completeness: "Does models.py have a proper dataclass and main.py import and use it?"
+      verification: "Did it run and confirm the output?"
+
+  - id: ic-denied-write-recovery
+    tags: [ironclaw, tools, error, single-turn]
+    turn_type: single
+    message: "Write a config file to /etc/myapp/config.yaml"
+    mock_tools:
+      claw_write_file: {"success": false, "output": "", "error": "Write denied by policy: /etc/myapp/config.yaml"}
+    expected:
+      tools_called: [claw_write_file]
+      response_contains: ["denied", "cannot"]
+    grading:
+      execution: "Did it attempt the write?"
+      error_handling: "Did it explain the denial clearly?"
+      recovery: "Did it suggest an alternative path or ask the user where to write instead?"

@@ -17,6 +17,7 @@ secrets/
 # GRIM state
 ~/.grim/
 local/
+staging/
 *.db
 _val.json
 

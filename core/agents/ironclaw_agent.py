@@ -92,24 +92,33 @@ def make_ironclaw_agent(config: GrimConfig):
         # Staging pipeline (Phase 4): direct output to shared staging volume
         job_id = state.get("staging_job_id")
         if job_id:
-            context["staging_path"] = f"/workspace/staging/{job_id}/output/"
+            staging_path = f"/workspace/staging/{job_id}/output/"
+            context["staging_path"] = staging_path
             context["staging_instructions"] = (
                 "Write ALL output files to the staging path above. "
                 "Do NOT write to any other location. Files written here "
                 "will be reviewed by the audit agent before acceptance."
             )
+            # Enforce at tool layer: relative paths auto-prefixed with staging dir
+            from core.tools.context import tool_context
+            tool_context.staging_path = staging_path
 
         # Feedback from previous audit failure (re-dispatch cycle)
         audit_feedback = state.get("audit_feedback")
         if audit_feedback:
             task = f"{task}\n\n{audit_feedback}"
 
-        result = await agent.execute(
-            task=task,
-            skill_protocol=protocol,
-            context=context,
-            event_queue=event_queue,
-        )
+        try:
+            result = await agent.execute(
+                task=task,
+                skill_protocol=protocol,
+                context=context,
+                event_queue=event_queue,
+            )
+        finally:
+            # Clear staging path so it doesn't leak to subsequent calls
+            from core.tools.context import tool_context
+            tool_context.staging_path = None
 
         # Emit IronClaw dispatch end
         agent._emit(event_queue, {

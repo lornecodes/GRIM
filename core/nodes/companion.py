@@ -42,9 +42,17 @@ NODE_METADATA = {
     "role": "thinker",
     "description": "Primary conversational agent — reasoning, identity, natural language",
     "tools": [t.name for t in _ALL_COMPANION_TOOLS],
+    "tools_detail": [
+        {"name": t.name, "description": (t.description or "").split("\n")[0]}
+        for t in _ALL_COMPANION_TOOLS
+    ],
     "color": "#7c6fef",
     "tier": "grim",
     "toggleable": False,
+    "protocol_priority": [],
+    "default_protocol": "",
+    "temperature": 0.7,
+    "max_tool_steps": MAX_TOOL_STEPS,
 }
 
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { ChatMessage } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,6 +8,7 @@ import { MetaBadge } from "./MetaBadge";
 import { TraceLog } from "./TraceLog";
 import { GrimSprite } from "./GrimSprite";
 import { AgentLogBlock } from "./AgentLogBlock";
+import { GrimTypingSprite } from "./GrimTypingSprite";
 
 interface MessageProps {
   message: ChatMessage;
@@ -23,19 +25,78 @@ const NODE_COLORS: Record<string, string> = {
   evolve: "#06b6d4",
 };
 
+/** Nodes whose step bubbles are collapsed by default (background system work). */
+const COLLAPSED_NODES = new Set(["evolve", "memory", "identity", "compress"]);
+
+/** Short labels for collapsed system step bubbles. */
+const COLLAPSED_LABELS: Record<string, string> = {
+  evolve: "memory synced",
+  memory: "knowledge loaded",
+  identity: "identity loaded",
+  compress: "context compressed",
+};
+
 function ThinkingIndicator({ label = "thinking" }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 py-1">
-      <div className="flex gap-1">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="w-1.5 h-1.5 rounded-full bg-grim-accent animate-pulse-dot"
-            style={{ animationDelay: `${i * 0.15}s` }}
-          />
-        ))}
-      </div>
+      <GrimTypingSprite size="xs" />
       <span className="text-xs text-grim-text-dim">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Collapsible system step bubble — shows a one-line summary with expand toggle.
+ * Used for evolve, memory, identity, compress nodes so they don't overwhelm the chat.
+ */
+function CollapsibleStep({
+  message,
+  accentColor,
+}: {
+  message: ChatMessage;
+  accentColor: string | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const label = COLLAPSED_LABELS[message.node || ""] || message.node;
+  const hasContent = !!message.content;
+
+  return (
+    <div className="animate-fade-in self-start pl-[42px] max-w-[85%]">
+      <button
+        onClick={() => hasContent && setExpanded(!expanded)}
+        className="flex items-center gap-2 px-3 py-1 rounded text-[11px] bg-grim-grim-bg/40 border border-grim-border/30 hover:border-grim-border/60 transition-colors w-full text-left"
+        style={{ borderLeftWidth: 2, borderLeftColor: accentColor }}
+      >
+        <span
+          className="uppercase tracking-wider font-medium"
+          style={{ color: accentColor }}
+        >
+          {message.node}
+        </span>
+        <span className="text-grim-text-dim">{label}</span>
+        {message.streaming && (
+          <div className="ml-1">
+            <GrimTypingSprite size="xs" />
+          </div>
+        )}
+        {hasContent && !message.streaming && (
+          <span className="text-grim-text-dim ml-auto text-[10px]">
+            {expanded ? "▾" : "▸"}
+          </span>
+        )}
+      </button>
+      {expanded && hasContent && (
+        <div
+          className="px-3 py-2 mt-0.5 rounded text-[11px] leading-relaxed bg-grim-grim-bg/30 border border-grim-border/20 max-h-[200px] overflow-y-auto"
+          style={{ borderLeftWidth: 2, borderLeftColor: accentColor }}
+        >
+          <div className="grim-prose text-grim-text-dim">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -57,6 +118,11 @@ export function Message({ message }: MessageProps) {
         node={message.node}
       />
     );
+  }
+
+  // Collapsible system steps — show one-line summary, expand on click
+  if (isStep && message.node && COLLAPSED_NODES.has(message.node)) {
+    return <CollapsibleStep message={message} accentColor={accentColor} />;
   }
 
   // Step bubble: compact, left-accented, no avatar (other nodes)

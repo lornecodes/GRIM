@@ -18,8 +18,10 @@ permissions:
   filesystem:
     read:
       - "./**"
+      - "/workspace/staging/**"
     write:
       - "./**"
+      - "/workspace/staging/**"
     deny:
       - "/etc/shadow"
       - "/etc/passwd"

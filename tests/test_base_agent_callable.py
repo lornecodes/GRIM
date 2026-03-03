@@ -2,18 +2,20 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from core.agents.base import BaseAgent
 from core.state import FieldState, FDOSummary
 
 
 class TestExtractTask:
-    """Test BaseAgent._extract_task."""
+    """Test BaseAgent._extract_task with conversation context."""
 
-    def test_extracts_from_human_message(self):
+    def test_extracts_from_single_message(self):
+        """Single message — no context preamble, just the task."""
         state = {"messages": [HumanMessage(content="do something")]}
-        assert BaseAgent._extract_task(state) == "do something"
+        result = BaseAgent._extract_task(state)
+        assert result == "do something"
 
     def test_empty_messages(self):
         assert BaseAgent._extract_task({"messages": []}) == ""
@@ -21,22 +23,107 @@ class TestExtractTask:
     def test_missing_messages_key(self):
         assert BaseAgent._extract_task({}) == ""
 
-    def test_uses_last_message(self):
+    def test_single_message_no_context(self):
+        """Only one message — should NOT include context block."""
+        state = {"messages": [HumanMessage(content="only one")]}
+        result = BaseAgent._extract_task(state)
+        assert result == "only one"
+        assert "CONVERSATION CONTEXT" not in result
+
+    def test_multi_message_includes_context(self):
+        """Multiple messages — should include context block."""
         state = {"messages": [
-            HumanMessage(content="first"),
-            HumanMessage(content="second"),
+            HumanMessage(content="code me a simple webserver"),
+            AIMessage(content="Sure, here's a simple Python webserver..."),
+            HumanMessage(content="can you have ironclaw do that?"),
         ]}
-        assert BaseAgent._extract_task(state) == "second"
+        result = BaseAgent._extract_task(state)
+        assert "CONVERSATION CONTEXT" in result
+        assert "CURRENT REQUEST" in result
+        assert "can you have ironclaw do that?" in result
+        assert "simple webserver" in result
+
+    def test_context_includes_prior_messages(self):
+        """Context should include messages before the last one."""
+        state = {"messages": [
+            HumanMessage(content="first request"),
+            AIMessage(content="first response"),
+            HumanMessage(content="do that again"),
+        ]}
+        result = BaseAgent._extract_task(state)
+        assert "[human]: first request" in result
+        assert "[ai]: first response" in result
+        assert "[CURRENT REQUEST]\ndo that again" in result
+
+    def test_context_limited_to_6_messages(self):
+        """Context window is capped at 6 prior messages (3 exchanges)."""
+        messages = []
+        for i in range(10):
+            messages.append(HumanMessage(content=f"user msg {i}"))
+            messages.append(AIMessage(content=f"ai msg {i}"))
+        messages.append(HumanMessage(content="final request"))
+
+        state = {"messages": messages}
+        result = BaseAgent._extract_task(state)
+
+        # Should NOT include very old messages
+        assert "user msg 0" not in result
+        # Should include recent messages (within last 6 before final)
+        assert "CONVERSATION CONTEXT" in result
+        assert "final request" in result
+
+    def test_long_messages_truncated_in_context(self):
+        """Long messages in context should be truncated at 300 chars."""
+        long_content = "x" * 500
+        state = {"messages": [
+            HumanMessage(content=long_content),
+            HumanMessage(content="short task"),
+        ]}
+        result = BaseAgent._extract_task(state)
+        # The context should truncate at 300 + "..."
+        assert "x" * 300 + "..." in result
+        assert "x" * 400 not in result
 
     def test_non_message_object(self):
         """Should handle objects without .content by using str()."""
         state = {"messages": ["plain string"]}
         result = BaseAgent._extract_task(state)
-        assert result == "plain string"
+        assert "plain string" in result
 
-    def test_single_message(self):
-        state = {"messages": [HumanMessage(content="only one")]}
-        assert BaseAgent._extract_task(state) == "only one"
+    def test_anaphoric_reference_preserved(self):
+        """The core use case: 'do that' should carry context about what 'that' is."""
+        state = {"messages": [
+            HumanMessage(content="write a fibonacci function in Python"),
+            AIMessage(content="Here's a fibonacci implementation..."),
+            HumanMessage(content="now test that"),
+        ]}
+        result = BaseAgent._extract_task(state)
+        assert "fibonacci" in result
+        assert "now test that" in result
+
+    def test_two_messages_includes_context(self):
+        """Even just 2 messages should include context from the first."""
+        state = {"messages": [
+            HumanMessage(content="build a REST API"),
+            HumanMessage(content="use FastAPI"),
+        ]}
+        result = BaseAgent._extract_task(state)
+        assert "REST API" in result
+        assert "use FastAPI" in result
+
+    def test_multiblock_content_handled(self):
+        """Messages with list content (cache_control blocks) are handled."""
+        msg = HumanMessage(content=[
+            {"type": "text", "text": "system instructions here"},
+            {"type": "text", "text": "more instructions"},
+        ])
+        state = {"messages": [
+            msg,
+            HumanMessage(content="do the thing"),
+        ]}
+        result = BaseAgent._extract_task(state)
+        assert "system instructions" in result
+        assert "do the thing" in result
 
 
 class TestFindProtocol:

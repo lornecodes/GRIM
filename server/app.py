@@ -96,6 +96,7 @@ _checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifet
 _ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
+_active_ws_sessions: set[str] = set()  # live WebSocket session IDs (for Graph Studio)
 
 
 def _grim_root() -> Path:
@@ -1333,6 +1334,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
         {"type": "error", "content": "..."}                   — error
     """
     await ws.accept()
+    _active_ws_sessions.add(session_id)
     logger.info("WS connected: %s", session_id)
 
     graph_config = {"configurable": {"thread_id": f"grim-web-{session_id}"}}
@@ -1584,6 +1586,68 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         logger.info("WS disconnected: %s", session_id)
+    finally:
+        _active_ws_sessions.discard(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Graph Studio endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/graph/topology")
+async def graph_topology():
+    """Serialize the GRIM LangGraph topology for the Graph Studio UI.
+
+    Merges static infrastructure node metadata with live agent-registry
+    metadata (companion nodes + discovered agents).  Returns nodes with
+    layout positions and enabled state, plus all edges.
+    """
+    from core.graph_topology import INFRA_NODE_METADATA, STATIC_EDGES, NODE_POSITIONS
+
+    disabled = set(_config.agents_disabled) if _config else set()
+    nodes: dict[str, dict] = {}
+
+    # 1. Infrastructure nodes (always present)
+    for node_id, meta in INFRA_NODE_METADATA.items():
+        pos = NODE_POSITIONS.get(node_id, (0, 0))
+        nodes[node_id] = {**meta, "enabled": True, "col": pos[0], "row": pos[1]}
+
+    # 2. Companion + agent nodes from the dynamic roster
+    model_name = _config.model if _config else "claude-sonnet-4-6"
+    if _agent_metadata:
+        for meta in _agent_metadata:
+            node_id = meta["id"]
+            pos = NODE_POSITIONS.get(node_id)
+            if pos is None:
+                continue  # skip agents not in the graph topology (e.g. sub-agents)
+            node_type = "companion" if node_id.endswith("_companion") or node_id == "companion" else "agent"
+            node = {
+                **meta,
+                "node_type": node_type,
+                "enabled": node_id not in disabled,
+                "col": pos[0],
+                "row": pos[1],
+            }
+            # Ensure companion nodes get model info (agents get it from metadata())
+            if "model" not in node:
+                node["model"] = model_name
+            nodes[node_id] = node
+
+    return JSONResponse({
+        "nodes": nodes,
+        "edges": STATIC_EDGES,
+        "node_count": len(nodes),
+        "edge_count": len(STATIC_EDGES),
+    })
+
+
+@app.get("/api/graph/sessions")
+async def graph_sessions():
+    """Active WebSocket session count for Graph Studio status bar."""
+    return JSONResponse({
+        "active": len(_active_ws_sessions),
+        "session_ids": sorted(_active_ws_sessions),
+    })
 
 
 # ---------------------------------------------------------------------------

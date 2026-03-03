@@ -99,8 +99,10 @@ class KronosCache:
             import redis as redis_lib
             client = redis_lib.Redis.from_url(
                 url,
-                socket_connect_timeout=2,
-                socket_timeout=2,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                health_check_interval=30,
+                retry_on_timeout=True,
                 decode_responses=True,
             )
             client.ping()
@@ -218,6 +220,15 @@ class KronosCache:
             keys_to_delete = list(self._redis.scan_iter(pattern, count=200))
             if keys_to_delete:
                 self._redis.delete(*keys_to_delete)
+
+    def health_check(self) -> bool:
+        """Ping Redis. Returns False if unavailable or disabled."""
+        if not self._enabled:
+            return False
+        try:
+            return self._redis.ping()
+        except Exception:
+            return False
 
     def flush_all(self) -> int:
         """Flush all kronos:* keys. Returns count deleted."""

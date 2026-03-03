@@ -24,6 +24,7 @@ class ToolContext:
     mcp_session: Any = None
     ironclaw_bridge: Any = None
     workspace_root: Path | None = None
+    staging_path: str | None = None
 
     def configure(self, **kwargs) -> None:
         """Set multiple fields at once. Only sets non-None values."""

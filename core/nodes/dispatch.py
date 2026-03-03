@@ -40,6 +40,13 @@ def _create_staging_job(task: str) -> tuple[str, Path]:
     output_dir = job_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Make writable by IronClaw container (runs as uid 999, not root)
+    try:
+        job_dir.chmod(0o1777)
+        output_dir.chmod(0o1777)
+    except OSError:
+        logger.warning("Could not chmod staging dirs for job %s", job_id)
+
     # Write manifest
     manifest = {
         "job_id": job_id,
@@ -52,6 +59,27 @@ def _create_staging_job(task: str) -> tuple[str, Path]:
 
     logger.info("Staging job created: %s at %s", job_id, job_dir)
     return job_id, output_dir
+
+
+def _update_manifest(job_id: str, updates: dict) -> None:
+    """Update fields in an existing staging manifest.
+
+    Merges `updates` into the manifest JSON on disk. Safe to call even if
+    the manifest doesn't exist (e.g. non-IronClaw paths) — logs and returns.
+    """
+    manifest_path = STAGING_BASE / job_id / "manifest.json"
+    if not manifest_path.exists():
+        logger.warning("Manifest not found for job %s — cannot update", job_id)
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(updates)
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
+        logger.debug("Manifest updated for job %s: %s", job_id, list(updates.keys()))
+    except Exception:
+        logger.exception("Failed to update manifest for job %s", job_id)
 
 
 def _scan_staging_artifacts(job_id: str) -> list[StagingArtifact]:
@@ -144,8 +172,11 @@ def make_dispatch_node(agents: dict):
             update = {"agent_result": result}
             update.update(staging_update)
 
-            # After IronClaw execution: scan for staged artifacts
+            # After IronClaw execution: mark agent done and scan for staged artifacts
             if delegation_type == "ironclaw" and "staging_job_id" in staging_update:
+                _update_manifest(staging_update["staging_job_id"], {
+                    "status": "agent_done",
+                })
                 artifacts = _scan_staging_artifacts(staging_update["staging_job_id"])
                 update["staging_artifacts"] = artifacts
 

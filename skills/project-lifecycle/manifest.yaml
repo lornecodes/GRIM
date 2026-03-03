@@ -49,13 +49,20 @@ outputs:
   updated_fdos: list
 
 triggers:
-  - explicit: "User asks to start a project, write a design, or record a decision"
-  - proactive: "A significant implementation is completed — suggest ADR capture"
-  - pre-build: "Before starting a new feature — suggest design spec"
-  - post-build: "After completing a feature — suggest ADR and roadmap update"
-  - keywords:
-      strong: ["ADR", "design spec", "project roadmap", "kickoff", "record decision"]
-      weak: ["project", "design", "decision", "why did we", "what was decided"]
+  keywords:
+    - "ADR"
+    - "design spec"
+    - "project roadmap"
+    - "kickoff project"
+    - "record decision"
+    - "project lifecycle"
+    - "create a project"
+    - "start a project"
+  intents:
+    - "create-project"
+    - "write-design-spec"
+    - "record-adr"
+    - "update-roadmap"
 
 phases:
   1_assess: "Determine which lifecycle action is needed"

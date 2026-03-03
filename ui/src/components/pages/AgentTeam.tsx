@@ -1,10 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { IconAgents } from "@/components/icons/NavIcons";
 import { useGrimStore } from "@/store";
 import { useActiveAgents, type ActiveAgent } from "@/hooks/useActiveAgents";
 import type { TraceEvent } from "@/lib/types";
+import { GrimTypingSprite } from "@/components/GrimTypingSprite";
+
+// Lazy-load Graph Studio (heavy — contains ForceGraph2D canvas)
+const GraphStudio = lazy(() =>
+  import("@/components/graph/GraphStudio").then((m) => ({
+    default: m.GraphStudio,
+  }))
+);
+
+const AGENT_TABS = [
+  { id: "team", label: "Team" },
+  { id: "graph", label: "Graph Studio" },
+] as const;
+
+type AgentTabId = (typeof AGENT_TABS)[number]["id"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,6 +89,7 @@ export function AgentTeam() {
   const setIronclawStatus = useGrimStore((s) => s.setIronclawStatus);
   const isStreaming = useGrimStore((s) => s.isStreaming);
 
+  const [activeTab, setActiveTab] = useState<AgentTabId>("team");
   const activeAgents = useActiveAgents(10);
   const grimAgents = activeAgents.filter((a) => a.tier === "grim");
   const clawAgents = activeAgents.filter((a) => a.tier === "ironclaw");
@@ -135,7 +151,7 @@ export function AgentTeam() {
   const connected = ironclawStatus === "connected";
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-8">
+    <div className="max-w-5xl mx-auto space-y-4 pb-8">
       {/* Header */}
       <div className="flex items-center gap-3">
         <IconAgents size={32} className="text-grim-accent" />
@@ -151,6 +167,39 @@ export function AgentTeam() {
           </span>
         )}
       </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-grim-border">
+        {AGENT_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-xs font-medium transition-colors ${
+              activeTab === tab.id
+                ? "border-b-2 border-grim-accent text-grim-accent"
+                : "text-grim-text-dim hover:text-grim-text"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Graph Studio tab */}
+      {activeTab === "graph" && (
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-96 text-xs text-grim-text-dim">
+              Loading Graph Studio...
+            </div>
+          }
+        >
+          <GraphStudio />
+        </Suspense>
+      )}
+
+      {/* Team tab — existing content */}
+      {activeTab === "team" && <>
 
       {/* GRIM Agents */}
       {grimAgents.length > 0 && (
@@ -283,6 +332,8 @@ export function AgentTeam() {
           )}
         </div>
       )}
+
+      </>}
     </div>
   );
 }
@@ -365,9 +416,9 @@ function ActiveAgentCard({ agent }: { agent: ActiveAgent }) {
           ))}
 
         {agent.traces.length === 0 && (
-          <div className="text-[10px] text-grim-text-dim">
-            <span className="text-grim-accent select-none">$ </span>
-            <span className="animate-pulse">_</span>
+          <div className="flex items-center gap-2 p-2">
+            <GrimTypingSprite size="sm" />
+            <span className="text-[10px] text-grim-text-dim animate-pulse">working...</span>
           </div>
         )}
       </div>

@@ -184,9 +184,15 @@ class IronClawBridge:
                 wall_time_ms=usage_data.get("wall_time_ms", 0),
             )
 
+            output = data.get("output", "")
+            # If the tool failed with an empty output, surface the error field
+            # from the Rust ToolResult (e.g. "Write path not in allow list: ...")
+            if not data.get("success", False) and not output:
+                output = data.get("error", "")
+
             return ToolResult(
                 success=data.get("success", False),
-                output=data.get("output", ""),
+                output=output,
                 execution_id=data.get("execution_id", resp.headers.get("x-request-id", "")),
                 duration_ms=data.get("duration_ms", 0),
                 exit_code=data.get("exit_code"),

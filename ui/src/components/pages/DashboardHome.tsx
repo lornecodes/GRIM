@@ -13,6 +13,7 @@ import { formatCount } from "@/lib/format";
 import { useGrimStore } from "@/store";
 import { KnowledgeGraph, DOMAIN_COLORS } from "@/components/ui/KnowledgeGraph";
 import type { GraphData, VaultStats } from "@/hooks/useVaultExplorer";
+import { GrimTypingSprite } from "@/components/GrimTypingSprite";
 
 // ---------------------------------------------------------------------------
 // Trace category colors (matches TraceEntry.tsx)
@@ -339,9 +340,9 @@ function ActiveAgentsTile() {
                     </div>
                   )}
                   {agent.traces.length === 0 && (
-                    <div className="text-[10px] text-grim-text-dim">
-                      <span className="text-grim-accent">$ </span>
-                      <span className="animate-pulse">_</span>
+                    <div className="flex items-center gap-2 py-1 px-1">
+                      <GrimTypingSprite size="xs" />
+                      <span className="text-[9px] text-grim-text-dim">working...</span>
                     </div>
                   )}
                 </div>

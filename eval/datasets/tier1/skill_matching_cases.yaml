@@ -256,3 +256,56 @@ cases:
     message: "hmm interesting point"
     expected:
       matched_skills: []
+
+  # ══════════════════════════════════════════════════════════
+  # Regression: false-positive skill matches (v0.0.5.5 fix)
+  # project-lifecycle must NOT match "build" in code/deployment context
+  # shell-execution must NOT match broad single-word commands
+  # ══════════════════════════════════════════════════════════
+  - id: skill-neg-build-webserver
+    tags: [skill, negative, regression]
+    message: "have ironclaw build me a simple webserver in python"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-build-script
+    tags: [skill, negative, regression]
+    message: "build me a python script"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-deploy-docker
+    tags: [skill, negative, regression]
+    message: "deploy the docker image"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-test-suite
+    tags: [skill, negative, regression]
+    message: "test the server health"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-build-api
+    tags: [skill, negative, regression]
+    message: "build a REST API with authentication"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-code-me
+    tags: [skill, negative, regression]
+    message: "code me a simple calculator"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-write-code
+    tags: [skill, negative, regression]
+    message: "write code for the new feature"
+    expected:
+      matched_skills: []
+
+  - id: skill-neg-run-pytest
+    tags: [skill, negative, regression]
+    message: "run pytest on the test suite"
+    expected:
+      matched_skills: []

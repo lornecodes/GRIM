@@ -19,6 +19,7 @@ use uuid::Uuid;
 use super::config::Config;
 use super::cost::{CostTracker, ProviderUsage};
 use super::tool::ToolRegistry;
+use super::tools::{FileReadTool, FileWriteTool, ShellTool};
 use super::types::{Message, MessageRole, SecurityContext, ToolCall};
 use crate::antitheft::AntiStealer;
 use crate::dlp::DlpEngine;
@@ -151,26 +152,55 @@ impl Engine {
     fn build_tool_registry(config: &Config) -> Result<ToolRegistry> {
         let mut registry = ToolRegistry::new();
 
+        // file_read — always registered unless explicitly disabled
         if config
             .permissions
             .tools
             .get("file_read")
             .map_or(true, |t| t.enabled)
         {
+            let tool = FileReadTool::new(config.permissions.filesystem.clone());
+            registry.register(Box::new(tool))?;
             info!("Registered tool: file_read");
         }
 
+        // file_write — always registered unless explicitly disabled
+        if config
+            .permissions
+            .tools
+            .get("file_write")
+            .map_or(true, |t| t.enabled)
+        {
+            let tool = FileWriteTool::new(config.permissions.filesystem.clone());
+            registry.register(Box::new(tool))?;
+            info!("Registered tool: file_write");
+        }
+
+        // shell — only if allow_shell is true
         if config.permissions.system.allow_shell {
-            info!("Shell tool enabled -- commands will pass through Command Guardian");
+            let sandbox: Arc<dyn crate::sandbox::SandboxBackend> =
+                Arc::new(crate::sandbox::NativeSandbox);
+            let tool = ShellTool::new(sandbox);
+            registry.register(Box::new(tool))?;
+            info!("Registered tool: shell (commands pass through Command Guardian)");
         } else {
             info!("Shell tool disabled by security policy");
         }
 
-        let _ = &registry;
+        info!(
+            "Tool registry built: {} tool(s) registered",
+            registry.list().len()
+        );
+
         Ok(registry)
     }
 
     // ----- Public API ------------------------------------------------------
+
+    /// Reference to the tool registry.
+    pub fn tool_registry(&self) -> &ToolRegistry {
+        &self.tool_registry
+    }
 
     /// The current session ID.
     pub fn session_id(&self) -> String {

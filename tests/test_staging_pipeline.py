@@ -514,5 +514,203 @@ class TestRouterAuditKeywords(unittest.TestCase):
         self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Manifest update lifecycle
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestManifestUpdate(unittest.TestCase):
+    """Test _update_manifest helper function for status transitions."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        import core.nodes.dispatch as d
+        self._orig_base = d.STAGING_BASE
+        d.STAGING_BASE = Path(self.tmpdir)
+
+    def tearDown(self):
+        import core.nodes.dispatch as d
+        d.STAGING_BASE = self._orig_base
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _create_job(self, task="test task"):
+        from core.nodes.dispatch import _create_staging_job
+        return _create_staging_job(task)
+
+    def test_update_manifest_basic(self):
+        """_update_manifest updates fields in the manifest JSON."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job()
+        _update_manifest(job_id, {"status": "agent_done"})
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "agent_done")
+
+    def test_update_manifest_preserves_existing_fields(self):
+        """Update should merge, not replace, the manifest."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job("my task")
+        _update_manifest(job_id, {"status": "agent_done"})
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "agent_done")
+        self.assertEqual(manifest["job_id"], job_id)
+        self.assertIn("my task", manifest["task"])
+
+    def test_update_manifest_completed(self):
+        """Manifest transitions to completed with timestamp."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job()
+        _update_manifest(job_id, {
+            "status": "completed",
+            "completed_at": "2026-03-03T00:00:00Z",
+            "audit_passed": True,
+        })
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+        self.assertEqual(manifest["completed_at"], "2026-03-03T00:00:00Z")
+        self.assertTrue(manifest["audit_passed"])
+
+    def test_update_manifest_failed(self):
+        """Manifest transitions to failed with issues."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job()
+        _update_manifest(job_id, {
+            "status": "failed",
+            "completed_at": "2026-03-03T00:00:00Z",
+            "audit_passed": False,
+            "issues": ["hardcoded key", "missing tests"],
+        })
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "failed")
+        self.assertFalse(manifest["audit_passed"])
+        self.assertEqual(len(manifest["issues"]), 2)
+
+    def test_update_manifest_nonexistent_job(self):
+        """Updating a nonexistent manifest should not raise."""
+        from core.nodes.dispatch import _update_manifest
+        # Should just log a warning, not crash
+        _update_manifest("nonexistent_job_id_12345", {"status": "done"})
+
+    def test_update_manifest_multiple_updates(self):
+        """Multiple updates accumulate correctly."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job()
+
+        _update_manifest(job_id, {"status": "agent_done"})
+        _update_manifest(job_id, {"status": "completed", "completed_at": "T1"})
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+        self.assertEqual(manifest["completed_at"], "T1")
+        # Original fields preserved
+        self.assertEqual(manifest["job_id"], job_id)
+
+    def test_manifest_lifecycle_full(self):
+        """Full lifecycle: in_progress -> agent_done -> completed."""
+        from core.nodes.dispatch import _update_manifest
+        job_id, _ = self._create_job()
+
+        # Initial state: in_progress (set by _create_staging_job)
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "in_progress")
+
+        # Agent completes
+        _update_manifest(job_id, {"status": "agent_done"})
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "agent_done")
+
+        # Audit passes, integration completes
+        _update_manifest(job_id, {
+            "status": "completed",
+            "completed_at": "2026-03-03T12:00:00Z",
+            "audit_passed": True,
+        })
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+        self.assertTrue(manifest["audit_passed"])
+
+
+class TestIntegrateManifestUpdate(unittest.TestCase):
+    """Test that integrate_node updates manifest status on disk."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        import core.nodes.dispatch as d
+        self._orig_base = d.STAGING_BASE
+        d.STAGING_BASE = Path(self.tmpdir)
+
+    def tearDown(self):
+        import core.nodes.dispatch as d
+        d.STAGING_BASE = self._orig_base
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_integrate_sets_completed_on_audit_pass(self):
+        """integrate_node should set manifest status to completed."""
+        from core.nodes.dispatch import _create_staging_job
+        from core.nodes.integrate import integrate_node
+
+        job_id, _ = _create_staging_job("test")
+        state = {
+            "agent_result": AgentResult(agent="ironclaw", success=True, summary="Done"),
+            "audit_verdict": AuditVerdict(passed=True, summary="OK"),
+            "staging_job_id": job_id,
+            "staging_artifacts": [StagingArtifact("f.py", 100, "file", "ironclaw")],
+            "review_count": 0,
+        }
+        run_async(integrate_node(state))
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+        self.assertIn("completed_at", manifest)
+        self.assertTrue(manifest.get("audit_passed"))
+
+    def test_integrate_sets_failed_on_audit_fail(self):
+        """integrate_node should set manifest status to failed."""
+        from core.nodes.dispatch import _create_staging_job
+        from core.nodes.integrate import integrate_node
+
+        job_id, _ = _create_staging_job("test")
+        state = {
+            "agent_result": AgentResult(agent="ironclaw", success=True, summary="Done"),
+            "audit_verdict": AuditVerdict(
+                passed=False, issues=["bad code"], summary="Fail"
+            ),
+            "staging_job_id": job_id,
+            "staging_artifacts": [],
+            "review_count": 3,
+        }
+        run_async(integrate_node(state))
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "failed")
+        self.assertIn("completed_at", manifest)
+        self.assertFalse(manifest.get("audit_passed"))
+        self.assertIn("bad code", manifest.get("issues", []))
+
+    def test_integrate_completed_no_verdict(self):
+        """integrate_node sets completed when no audit verdict (non-audited)."""
+        from core.nodes.dispatch import _create_staging_job
+        from core.nodes.integrate import integrate_node
+
+        job_id, _ = _create_staging_job("test")
+        state = {
+            "agent_result": AgentResult(agent="ironclaw", success=True, summary="Done"),
+            "audit_verdict": None,
+            "staging_job_id": job_id,
+            "staging_artifacts": [],
+            "review_count": 0,
+        }
+        run_async(integrate_node(state))
+
+        manifest = json.loads((Path(self.tmpdir) / job_id / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+        self.assertIn("completed_at", manifest)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -1044,15 +1045,20 @@ def _read_memory_file() -> str:
         return ""
 
 
+_memory_lock = threading.Lock()
+
+
 def _write_memory_file(content: str) -> None:
-    """Write content to memory.md in the vault."""
+    """Write content to memory.md in the vault. Thread-safe via _memory_lock."""
+    from .fileutil import atomic_write
     p = _memory_path()
-    try:
-        p.write_text(content, encoding="utf-8")
-        logger.info("Updated memory.md (%d chars)", len(content))
-    except Exception:
-        logger.exception("Failed to write memory.md")
-        raise
+    with _memory_lock:
+        try:
+            atomic_write(p, content)
+            logger.info("Updated memory.md (%d chars)", len(content))
+        except Exception:
+            logger.exception("Failed to write memory.md")
+            raise
 
 
 def _parse_memory_sections(content: str) -> dict[str, str]:
@@ -1588,9 +1594,22 @@ def handle_update(args: dict) -> str:
 
 # ── Notes handlers ──────────────────────────────────────────────────────────
 
+_notes_locks: dict[str, threading.Lock] = {}
+_notes_locks_guard = threading.Lock()
+
+
+def _get_notes_lock(month_str: str) -> threading.Lock:
+    """Get or create a per-month lock for note append operations."""
+    with _notes_locks_guard:
+        if month_str not in _notes_locks:
+            _notes_locks[month_str] = threading.Lock()
+        return _notes_locks[month_str]
+
 
 def handle_note_append(args: dict) -> str:
     """Append a timestamped note entry to the current month's rolling log."""
+    from .fileutil import atomic_write
+
     title = args["title"]
     body = args["body"]
     tags = args.get("tags", [])
@@ -1603,30 +1622,7 @@ def handle_note_append(args: dict) -> str:
     month_file = notes_dir / f"notes-{month_str}.md"
     anchor = f"note-{now.strftime('%Y%m%d-%H%M%S')}"
 
-    # Create monthly file with FDO frontmatter if it doesn't exist
-    if not month_file.exists():
-        notes_dir.mkdir(parents=True, exist_ok=True)
-        month_name = now.strftime("%B %Y")
-        today_str = now.strftime("%Y-%m-%d")
-        header = (
-            f"---\n"
-            f"id: notes-{month_str}\n"
-            f"title: \"Notes \\u2014 {month_name}\"\n"
-            f"domain: notes\n"
-            f"created: '{today_str}'\n"
-            f"updated: '{today_str}'\n"
-            f"status: developing\n"
-            f"confidence: 0.9\n"
-            f"confidence_basis: Rolling log of quick notes and fixes\n"
-            f"tags: [notes, rolling-log, {month_str}]\n"
-            f"related: []\n"
-            f"source_repos: []\n"
-            f"---\n\n"
-            f"# Notes \\u2014 {month_name}\n\n"
-        )
-        month_file.write_text(header, encoding="utf-8")
-
-    # Build the entry block
+    # Build the entry block (can be done outside lock)
     entry_lines = [
         f"## {title}",
         f"<!-- anchor: {anchor} -->",
@@ -1645,19 +1641,45 @@ def handle_note_append(args: dict) -> str:
 
     entry_text = "\n".join(entry_lines)
 
-    # Read existing content and update the 'updated' date in frontmatter
-    content = month_file.read_text(encoding="utf-8")
-    today_str = now.strftime("%Y-%m-%d")
-    content = re.sub(
-        r"updated: '[^']*'",
-        f"updated: '{today_str}'",
-        content,
-        count=1,
-    )
-    content += entry_text
-    month_file.write_text(content, encoding="utf-8")
+    # Per-month lock protects the read-modify-write cycle
+    lock = _get_notes_lock(month_str)
+    with lock:
+        # Create monthly file with FDO frontmatter if it doesn't exist
+        if not month_file.exists():
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            month_name = now.strftime("%B %Y")
+            today_str = now.strftime("%Y-%m-%d")
+            header = (
+                f"---\n"
+                f"id: notes-{month_str}\n"
+                f"title: \"Notes \\u2014 {month_name}\"\n"
+                f"domain: notes\n"
+                f"created: '{today_str}'\n"
+                f"updated: '{today_str}'\n"
+                f"status: developing\n"
+                f"confidence: 0.9\n"
+                f"confidence_basis: Rolling log of quick notes and fixes\n"
+                f"tags: [notes, rolling-log, {month_str}]\n"
+                f"related: []\n"
+                f"source_repos: []\n"
+                f"---\n\n"
+                f"# Notes \\u2014 {month_name}\n\n"
+            )
+            atomic_write(month_file, header)
 
-    # Re-index so search picks up new content
+        # Read existing content and update the 'updated' date in frontmatter
+        content = month_file.read_text(encoding="utf-8")
+        today_str = now.strftime("%Y-%m-%d")
+        content = re.sub(
+            r"updated: '[^']*'",
+            f"updated: '{today_str}'",
+            content,
+            count=1,
+        )
+        content += entry_text
+        atomic_write(month_file, content)
+
+    # Re-index so search picks up new content (outside lock)
     fdo = vault._parse_file(month_file)
     if fdo:
         vault.index[fdo.id] = fdo
@@ -2083,27 +2105,10 @@ def handle_task_move(args: dict) -> str:
 
 def handle_task_archive(args: dict) -> str:
     result = task_engine.archive_closed(feat_id=args.get("feat_id"))
-    # Remove archived stories from the board
-    archived_ids = []
+    # Remove archived stories from the board using BoardEngine's lock-safe method
     if result.get("archived", 0) > 0:
-        board = board_engine._load_board()
-        changed = False
-        for col, ids in board["columns"].items():
-            before = len(ids)
-            # Check which IDs no longer exist as active stories
-            surviving = []
-            for sid in ids:
-                item = task_engine.get_item(sid)
-                if item:
-                    surviving.append(sid)
-                else:
-                    archived_ids.append(sid)
-            if len(surviving) != before:
-                board["columns"][col] = surviving
-                changed = True
-        if changed:
-            board_engine._save_board(board)
-        result["removed_from_board"] = archived_ids
+        removed = board_engine.cleanup_archived()
+        result["removed_from_board"] = removed
     return _json(result)
 
 
@@ -2205,6 +2210,28 @@ HANDLERS = {
     "kronos_notes_recent": handle_notes_recent,
 }
 
+# Per-tool timeout tiers (seconds). Fast reads get short timeouts,
+# search/semantic tools get longer ones to avoid premature cancellation.
+TOOL_TIMEOUTS: dict[str, float] = {
+    # Fast reads (10s)
+    "kronos_get": 10, "kronos_list": 10, "kronos_tags": 10,
+    "kronos_memory_read": 10, "kronos_memory_sections": 10,
+    "kronos_tool_groups": 10, "kronos_skills": 10, "kronos_skill_load": 10,
+    "kronos_task_get": 10, "kronos_task_list": 10,
+    "kronos_board_view": 10, "kronos_backlog_view": 10, "kronos_calendar_view": 10,
+    # Writes (15s)
+    "kronos_create": 15, "kronos_update": 15, "kronos_memory_update": 15,
+    "kronos_task_create": 15, "kronos_task_update": 15, "kronos_task_move": 15,
+    "kronos_task_archive": 15, "kronos_calendar_add": 15,
+    "kronos_calendar_update": 15, "kronos_calendar_sync": 15, "kronos_note_append": 15,
+    # Search / index-heavy (45s)
+    "kronos_search": 45, "kronos_graph": 45, "kronos_validate": 45,
+    "kronos_deep_dive": 45, "kronos_search_source": 30,
+    # Other (15s)
+    "kronos_navigate": 15, "kronos_read_source": 15, "kronos_notes_recent": 15,
+}
+DEFAULT_TIMEOUT: float = 30.0
+
 
 # ── MCP wiring ───────────────────────────────────────────────────────────────
 
@@ -2231,13 +2258,15 @@ async def call_tool(
 
     # ── Execute handler ───────────────────────────────────────────────────────
     try:
+        timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
         result = await asyncio.wait_for(
             asyncio.to_thread(handler, arguments),
-            timeout=30.0,  # 30s hard timeout — prevents indefinite hangs
+            timeout=timeout,
         )
     except asyncio.TimeoutError:
-        logger.error(f"Tool {name} timed out after 30s")
-        return [TextContent(type="text", text=_json({"error": f"{name} timed out after 30s"}))]
+        timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
+        logger.error(f"Tool {name} timed out after {timeout}s")
+        return [TextContent(type="text", text=_json({"error": f"{name} timed out after {timeout}s"}))]
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}", exc_info=True)
         return [TextContent(type="text", text=_json({"error": str(e)}))]

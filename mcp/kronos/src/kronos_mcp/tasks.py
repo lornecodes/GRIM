@@ -83,7 +83,8 @@ class TaskEngine:
         """Write updated frontmatter + body back to feature FDO file."""
         fm["updated"] = str(date.today())
         fm_yaml = yaml.dump(fm, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        path.write_text(f"---\n{fm_yaml}---\n\n{body}", encoding="utf-8")
+        from .fileutil import atomic_write
+        atomic_write(path, f"---\n{fm_yaml}---\n\n{body}")
 
     def _get_stories(self, fm: dict) -> list[dict]:
         """Extract stories list from frontmatter."""

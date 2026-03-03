@@ -100,6 +100,16 @@ async def claw_write_file(
         content: File content to write.
     """
     bridge = _get_bridge()
+
+    # Enforce staging path: if a staging job is active and the LLM provides
+    # a relative path, prefix it with the staging output directory so files
+    # land in the shared volume (not the container's WORKDIR).
+    staging_path = tool_context.staging_path
+    if staging_path and not path.startswith(staging_path):
+        if not path.startswith("/"):
+            path = f"{staging_path}{path}"
+            logger.debug("claw_write_file: prefixed path with staging → %s", path)
+
     result = await bridge.execute_tool("file_write", {
         "path": path,
         "content": content,

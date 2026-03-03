@@ -46,11 +46,9 @@ class CalendarEngine:
             return {"entries": []}
 
     def _save_yaml(self, path: Path, data: dict) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        from .fileutil import atomic_write
+        content = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        atomic_write(path, content)
 
     # ── Schedule Sync ────────────────────────────────────────────────────
 

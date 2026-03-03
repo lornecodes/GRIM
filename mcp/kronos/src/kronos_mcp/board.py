@@ -63,13 +63,11 @@ class BoardEngine:
             return self._default_board()
 
     def _save_board(self, data: dict) -> None:
-        """Write board.yaml."""
+        """Write board.yaml atomically."""
+        from .fileutil import atomic_write
         data["last_synced"] = datetime.now().isoformat(timespec="seconds")
-        self.board_path.parent.mkdir(parents=True, exist_ok=True)
-        self.board_path.write_text(
-            yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        content = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        atomic_write(self.board_path, content)
 
     def _default_board(self) -> dict:
         return {"columns": {col: [] for col in COLUMNS}, "last_synced": None}
@@ -126,10 +124,15 @@ class BoardEngine:
         return {"removed": story_id, "was_in": removed_from}
 
     def move_story(self, story_id: str, column: str) -> dict:
-        """Move a story between board columns. Updates story status."""
+        """Move a story between board columns. Updates story status.
+
+        IMPORTANT: Never hold self._lock while calling task_engine methods
+        to avoid deadlock (board lock → task lock ordering conflict).
+        """
         if column not in COLUMNS:
             return {"error": f"Invalid column: {column}", "valid": COLUMNS}
 
+        # Phase 1: Board mutation under lock
         with self._lock:
             board = self._load_board()
 
@@ -141,26 +144,71 @@ class BoardEngine:
                     current_col = col
                     break
 
-            if current_col is None:
-                # Not on board yet — check draft guard before adding
-                story = self.task_engine.get_item(story_id)
-                if story and story.get("status") == "draft":
-                    return {
-                        "error": f"Cannot place draft story on board. Promote to 'new' first: "
-                        f"kronos_task_update(item_id='{story_id}', fields={{\"status\": \"new\"}})"
-                    }
+            if current_col is not None:
+                # Already on board — move it
                 board["columns"][column].append(story_id)
                 self._save_board(board)
-                self.task_engine.update_item(story_id, {"status": COLUMN_STATUS[column]})
-                return {"moved": story_id, "from": None, "to": column, "note": "added to board"}
 
-            # Add to new column
-            board["columns"][column].append(story_id)
-            self._save_board(board)
+        # Phase 2: "Not on board" branch — draft guard (outside lock)
+        if current_col is None:
+            story = self.task_engine.get_item(story_id)
+            if story and story.get("status") == "draft":
+                return {
+                    "error": f"Cannot place draft story on board. Promote to 'new' first: "
+                    f"kronos_task_update(item_id='{story_id}', fields={{\"status\": \"new\"}})"
+                }
+            # Re-acquire lock to add to board
+            with self._lock:
+                board = self._load_board()
+                # Double-check not added by another thread
+                for col, ids in board["columns"].items():
+                    if story_id in ids:
+                        # Another thread already added it — skip
+                        break
+                else:
+                    board["columns"][column].append(story_id)
+                    self._save_board(board)
 
-        # Update story status
+        # Phase 3: Status sync (always outside lock)
         self.task_engine.update_item(story_id, {"status": COLUMN_STATUS[column]})
+
+        if current_col is None:
+            return {"moved": story_id, "from": None, "to": column, "note": "added to board"}
         return {"moved": story_id, "from": current_col, "to": column}
+
+    def cleanup_archived(self) -> list[str]:
+        """Remove dead story IDs from the board. Thread-safe.
+
+        Returns list of removed story IDs. Used by handle_task_archive
+        after stories are archived from feature FDOs.
+        """
+        # Collect all board IDs under lock
+        with self._lock:
+            board = self._load_board()
+            all_ids = set()
+            for ids in board["columns"].values():
+                all_ids.update(ids)
+
+        if not all_ids:
+            return []
+
+        # Check existence outside lock (calls task_engine)
+        dead = {sid for sid in all_ids if not self.task_engine.get_item(sid)}
+        if not dead:
+            return []
+
+        # Remove dead IDs under lock
+        removed = []
+        with self._lock:
+            board = self._load_board()
+            for col, ids in board["columns"].items():
+                before = list(ids)
+                board["columns"][col] = [s for s in ids if s not in dead]
+                removed.extend(s for s in before if s in dead)
+            if removed:
+                self._save_board(board)
+
+        return list(set(removed))
 
     # ── Views ────────────────────────────────────────────────────────────
 

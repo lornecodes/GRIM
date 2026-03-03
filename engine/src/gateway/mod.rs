@@ -12,6 +12,9 @@ use axum::{
     Router,
 };
 use crate::agents::{AgentOrchestrator, CoordinationPattern, PipelineStage};
+use crate::core::config::Config as CoreConfig;
+use crate::core::Engine;
+use crate::core::tool::ToolRegistry;
 use dashmap::DashMap;
 use governor::{
     clock::DefaultClock,
@@ -158,6 +161,9 @@ pub struct AppState {
 
     /// Agent orchestrator (if enabled).
     orchestrator: Option<Arc<Mutex<AgentOrchestrator>>>,
+
+    /// Tool registry for direct tool execution via gateway API.
+    tool_registry: Arc<ToolRegistry>,
 }
 
 /// Simple in-memory Prometheus-compatible counters.
@@ -297,6 +303,8 @@ struct ToolExecRequest {
 struct ToolExecResponse {
     success: bool,
     output: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
     execution_id: String,
     duration_ms: u64,
 }
@@ -453,6 +461,65 @@ impl GatewayServer {
         self.is_running.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Build a tool registry for the gateway from the core config file.
+    /// This gives the gateway real tool implementations for the /v1/tools
+    /// endpoints, instead of returning placeholder responses.
+    fn build_gateway_tool_registry() -> ToolRegistry {
+        use crate::core::tools::{FileReadTool, FileWriteTool, ShellTool};
+
+        // Try to load the core config from known locations.
+        // Docker mounts the config at /etc/ironclaw/grim.toml — try that first.
+        let config = CoreConfig::load("/etc/ironclaw/grim.toml")
+            .or_else(|_| CoreConfig::load("config/grim.toml"))
+            .or_else(|_| CoreConfig::load("/app/config/grim.toml"))
+            .unwrap_or_default();
+
+        let mut registry = ToolRegistry::new();
+
+        // file_read
+        if config
+            .permissions
+            .tools
+            .get("file_read")
+            .map_or(true, |t| t.enabled)
+        {
+            if let Err(e) = registry.register(Box::new(
+                FileReadTool::new(config.permissions.filesystem.clone()),
+            )) {
+                warn!("Gateway: failed to register file_read: {}", e);
+            }
+        }
+
+        // file_write
+        if config
+            .permissions
+            .tools
+            .get("file_write")
+            .map_or(true, |t| t.enabled)
+        {
+            if let Err(e) = registry.register(Box::new(
+                FileWriteTool::new(config.permissions.filesystem.clone()),
+            )) {
+                warn!("Gateway: failed to register file_write: {}", e);
+            }
+        }
+
+        // shell — only if allow_shell is true
+        if config.permissions.system.allow_shell {
+            let sandbox: Arc<dyn crate::sandbox::SandboxBackend> =
+                Arc::new(crate::sandbox::NativeSandbox);
+            if let Err(e) = registry.register(Box::new(ShellTool::new(sandbox))) {
+                warn!("Gateway: failed to register shell: {}", e);
+            }
+        }
+
+        info!(
+            "Gateway tool registry: {} tool(s) registered",
+            registry.list().len()
+        );
+        registry
+    }
+
     // -- internal helpers ---------------------------------------------------
 
     fn build_state(&self) -> Result<AppState> {
@@ -501,6 +568,10 @@ impl GatewayServer {
             None
         };
 
+        // Build tool registry from config file (same config Engine uses).
+        // Falls back to empty registry if config is unavailable.
+        let tool_registry = Self::build_gateway_tool_registry();
+
         Ok(AppState {
             config: self.config.clone(),
             jwt_decoding_key,
@@ -512,6 +583,7 @@ impl GatewayServer {
             metrics: Arc::new(Metrics::default()),
             audit_log,
             orchestrator,
+            tool_registry: Arc::new(tool_registry),
         })
     }
 
@@ -902,34 +974,24 @@ async fn handle_list_models() -> impl IntoResponse {
     Json(models)
 }
 
-/// `GET /v1/tools` -- list available tools.
-async fn handle_list_tools() -> impl IntoResponse {
-    let tools = vec![
-        ToolInfo {
-            name: "file_read".to_string(),
-            description: "Read a file from the local filesystem".to_string(),
-            risk_level: "Low".to_string(),
-        },
-        ToolInfo {
-            name: "file_write".to_string(),
-            description: "Write content to a file".to_string(),
-            risk_level: "Medium".to_string(),
-        },
-        ToolInfo {
-            name: "shell".to_string(),
-            description: "Execute a shell command in the sandbox".to_string(),
-            risk_level: "High".to_string(),
-        },
-        ToolInfo {
-            name: "http_request".to_string(),
-            description: "Make an HTTP request (SSRF-protected)".to_string(),
-            risk_level: "Medium".to_string(),
-        },
-    ];
+/// `GET /v1/tools` -- list available tools from the registry.
+async fn handle_list_tools(State(state): State<AppState>) -> impl IntoResponse {
+    let tools: Vec<ToolInfo> = state
+        .tool_registry
+        .list()
+        .iter()
+        .filter_map(|name| {
+            state.tool_registry.get(name).map(|tool| ToolInfo {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                risk_level: tool.risk_level().to_string(),
+            })
+        })
+        .collect();
     Json(tools)
 }
 
-/// `POST /v1/tools/{name}/execute` -- direct tool execution.
+/// `POST /v1/tools/{name}/execute` -- direct tool execution via registry.
 async fn handle_tool_execute(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -944,17 +1006,69 @@ async fn handle_tool_execute(
         "argument_keys": req.arguments.keys().collect::<Vec<_>>(),
     }));
 
-    // Placeholder — real implementation delegates to Engine + ToolRegistry
-    Ok(Json(ToolExecResponse {
-        success: true,
-        output: format!(
-            "Tool '{}' execution placeholder. {} argument(s) received.",
-            name,
-            req.arguments.len()
-        ),
-        execution_id: request_id,
-        duration_ms: 0,
-    }))
+    // Look up the tool in the registry
+    let tool = match state.tool_registry.get(&name) {
+        Some(t) => t,
+        None => {
+            return Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                format!("Unknown tool: {}", name),
+                &request_id,
+            ));
+        }
+    };
+
+    // Validate arguments
+    if let Err(e) = tool.validate_args(&req.arguments) {
+        return Err(ApiError::with_detail(
+            StatusCode::BAD_REQUEST,
+            "Invalid tool arguments",
+            e.to_string(),
+            &request_id,
+        ));
+    }
+
+    // Build a minimal security context for gateway-invoked tools
+    let ctx = crate::core::types::SecurityContext::new(request_id.clone());
+
+    // Execute the tool
+    let start = std::time::Instant::now();
+    match tool.execute(&req.arguments, &ctx).await {
+        Ok(result) => {
+            let duration_ms = start.elapsed().as_millis() as u64;
+
+            (state.audit_log)(&serde_json::json!({
+                "event": "tool_completed",
+                "request_id": request_id,
+                "tool": name,
+                "success": result.success,
+                "duration_ms": duration_ms,
+            }));
+
+            Ok(Json(ToolExecResponse {
+                success: result.success,
+                output: result.output,
+                error: result.error,
+                execution_id: request_id,
+                duration_ms,
+            }))
+        }
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis() as u64;
+            error!(
+                tool = %name,
+                error = %e,
+                duration_ms = duration_ms,
+                "Tool execution error"
+            );
+            Err(ApiError::with_detail(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Tool execution failed",
+                e.to_string(),
+                &request_id,
+            ))
+        }
+    }
 }
 
 /// `GET /v1/sessions` -- list active sessions.

@@ -48,9 +48,18 @@ class BaseAgent:
             "role": self.agent_role,
             "description": self.agent_description or self.default_protocol.split("\n")[0],
             "tools": [t.name for t in self.tools],
+            "tools_detail": [
+                {"name": t.name, "description": (t.description or "").split("\n")[0]}
+                for t in self.tools
+            ],
             "color": self.agent_color,
             "tier": self.agent_tier,
             "toggleable": self.agent_toggleable,
+            "protocol_priority": list(self.protocol_priority),
+            "default_protocol": self.default_protocol,
+            "temperature": 0.3,
+            "max_tool_steps": 10,
+            "model": self.config.model if hasattr(self, "config") else None,
         }
 
     def __init__(
@@ -193,8 +202,17 @@ class BaseAgent:
                     # No more tool calls — agent is done
                     break
 
-            # Extract final response
-            final_content = response.content if hasattr(response, "content") else str(response)
+            # Extract final response — content may be a list of blocks (text + tool_use)
+            raw_content = response.content if hasattr(response, "content") else str(response)
+            if isinstance(raw_content, list):
+                # Extract text from content blocks
+                final_content = "\n".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in raw_content
+                    if not (isinstance(block, dict) and block.get("type") == "tool_use")
+                )
+            else:
+                final_content = raw_content
 
             elapsed_ms = round((_time.monotonic() - _t0) * 1000)
             self._emit(event_queue, {
@@ -255,12 +273,50 @@ class BaseAgent:
 
     @staticmethod
     def _extract_task(state: dict) -> str:
-        """Extract the user's request from state messages."""
+        """Extract the user's request from state messages, with conversation context.
+
+        Includes recent conversation history so agents can resolve references
+        like "do that", "the thing above", "can you have ironclaw do that?" etc.
+        Without context, agents only see the latest message and lose track of
+        what "that" refers to.
+        """
         messages = state.get("messages", [])
         if not messages:
             return ""
+
         last_msg = messages[-1]
-        return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+        task = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+        # Include recent conversation context (last 6 messages = ~3 exchanges)
+        # so the agent can resolve anaphoric references ("that", "it", etc.)
+        if len(messages) > 1:
+            # Grab up to 6 recent messages before the current one
+            context_msgs = messages[max(0, len(messages) - 7):-1]
+            if context_msgs:
+                context_lines = []
+                for m in context_msgs:
+                    role = getattr(m, "type", "unknown")
+                    content = m.content if hasattr(m, "content") else str(m)
+                    # Truncate long messages (tool outputs, etc.)
+                    if isinstance(content, str) and len(content) > 300:
+                        content = content[:300] + "..."
+                    elif isinstance(content, list):
+                        # Multi-block messages — extract text blocks
+                        texts = [b.get("text", "")[:200] for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                        content = " ".join(texts)[:300]
+                    if content:
+                        context_lines.append(f"[{role}]: {content}")
+
+                if context_lines:
+                    context_block = "\n".join(context_lines)
+                    task = (
+                        f"[CONVERSATION CONTEXT — recent messages for reference]\n"
+                        f"{context_block}\n"
+                        f"[END CONTEXT]\n\n"
+                        f"[CURRENT REQUEST]\n{task}"
+                    )
+
+        return task
 
     @staticmethod
     def _find_protocol(state: dict, priority: list[str], default: str) -> str:

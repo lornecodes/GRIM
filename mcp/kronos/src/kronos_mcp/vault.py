@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import yaml
 import glob
 from pathlib import Path
@@ -118,6 +119,8 @@ class VaultEngine:
         if not self.vault_path.is_dir():
             raise FileNotFoundError(f"Vault not found: {vault_path}")
         self._index: dict[str, FDO] | None = None
+        self._write_locks: dict[str, threading.Lock] = {}
+        self._write_locks_guard = threading.Lock()
 
     # ── Indexing ─────────────────────────────────────────────────────────
 
@@ -374,17 +377,27 @@ class VaultEngine:
 
     # ── Write operations ─────────────────────────────────────────────────
 
+    def _get_write_lock(self, fdo_id: str) -> threading.Lock:
+        """Get or create a per-FDO write lock."""
+        with self._write_locks_guard:
+            if fdo_id not in self._write_locks:
+                self._write_locks[fdo_id] = threading.Lock()
+            return self._write_locks[fdo_id]
+
     def write_fdo(self, fdo: FDO) -> str:
-        """Write an FDO to disk. Returns the file path."""
-        domain_dir = self.vault_path / fdo.domain
-        domain_dir.mkdir(parents=True, exist_ok=True)
-        file_path = domain_dir / f"{fdo.id}.md"
-        file_path.write_text(fdo.to_markdown(), encoding="utf-8")
-        fdo.file_path = str(file_path)
-        # Update in-memory index in-place — no full rebuild needed.
-        # If index not yet built, leave it None (will be built on next access).
-        if self._index is not None:
-            self._index[fdo.id] = fdo
+        """Write an FDO to disk. Thread-safe via per-FDO lock. Returns the file path."""
+        from .fileutil import atomic_write
+        lock = self._get_write_lock(fdo.id)
+        with lock:
+            domain_dir = self.vault_path / fdo.domain
+            domain_dir.mkdir(parents=True, exist_ok=True)
+            file_path = domain_dir / f"{fdo.id}.md"
+            atomic_write(file_path, fdo.to_markdown())
+            fdo.file_path = str(file_path)
+            # Update in-memory index in-place — no full rebuild needed.
+            # If index not yet built, leave it None (will be built on next access).
+            if self._index is not None:
+                self._index[fdo.id] = fdo
         return str(file_path)
 
     def update_field(self, fdo_id: str, field_name: str, value: Any) -> FDO | None:

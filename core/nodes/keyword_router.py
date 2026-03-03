@@ -48,9 +48,11 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "fix this code", "refactor", "add a test",
         "write a function", "write a class", "edit the code",
         "modify the file", "update the code", "debug this",
-        "write a script", "code this", "build this",
+        "write a script", "code this", "code me",
+        "build this", "build me", "build a ",
         # Shell / command execution (was "operate")
-        "run command", "run this", "execute this",
+        "run command", "run this", "run pytest", "run test",
+        "execute this",
         "shell", "powershell", "bash", "terminal",
         "echo ", "mkdir", "ls ", "dir ", "pwd",
         "curl ", "wget ",

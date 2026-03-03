@@ -422,6 +422,129 @@ cases:
   # ══════════════════════════════════════════════════════════
   # Edge cases
   # ══════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════
+  # Router — IronClaw dispatch (regression tests for v0.0.5.5 routing fix)
+  # ══════════════════════════════════════════════════════════
+  - id: rt-ironclaw-build-webserver
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "have ironclaw build me a simple webserver in python"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-build-me
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "build me a python script that does data validation"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-write-webserver
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "write code for a flask webserver with two endpoints"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-have-agent-do
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "have ironclaw do that"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-code-me
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "code me a simple webserver in python please"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-implement-feature
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "implement a REST API with authentication"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-run-pytest
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "run pytest on the test suite"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-ironclaw-shell-command
+    tags: [router, delegate, ironclaw, keyword, regression]
+    message: "run the shell command to check disk space"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  # ── Skill false-positive regression: "build" should NOT trigger project-lifecycle ──
+
+  - id: rt-no-lifecycle-build-webserver
+    tags: [router, delegate, ironclaw, regression, negative]
+    message: "build a webserver for me"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-no-lifecycle-deploy-image
+    tags: [router, delegate, ironclaw, regression, negative]
+    message: "deploy the docker image to production"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  # ══════════════════════════════════════════════════════════
+  # Router — Tool-specific execution intent (v0.0.5.7)
+  # ══════════════════════════════════════════════════════════
+  - id: rt-tool-run-file-check
+    tags: [router, delegate, ironclaw, action_intent]
+    message: "run a command to check the file permissions"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-tool-execute-shell-deploy
+    tags: [router, delegate, ironclaw, action_intent]
+    message: "execute the shell command to deploy the service"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-tool-test-process
+    tags: [router, delegate, ironclaw, action_intent]
+    message: "test whether the process is still running"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-tool-check-port
+    tags: [router, delegate, ironclaw, action_intent]
+    message: "check if port 8080 is in use"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-tool-ironclaw-commit-push
+    tags: [router, delegate, ironclaw, keyword]
+    message: "have ironclaw commit these changes and push to origin"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  - id: rt-tool-ironclaw-scan
+    tags: [router, delegate, ironclaw, keyword]
+    message: "use ironclaw to scan the project for vulnerabilities"
+    expected:
+      mode: delegate
+      delegation_type: ironclaw
+
+  # ══════════════════════════════════════════════════════════
+  # Edge cases
+  # ══════════════════════════════════════════════════════════
   - id: edge-empty-message-graph
     tags: [edge_case]
     message: ""
