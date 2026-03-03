@@ -266,6 +266,15 @@ async def index():
     return HTMLResponse("<h1>GRIM</h1><p>Static files not found.</p>")
 
 
+@app.get("/icon.svg")
+async def favicon():
+    """Serve Next.js generated favicon."""
+    icon = _ui_dir / "icon.svg"
+    if icon.exists():
+        return FileResponse(str(icon), media_type="image/svg+xml")
+    return HTMLResponse("", status_code=404)
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""
