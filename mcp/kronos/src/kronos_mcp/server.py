@@ -58,6 +58,7 @@ import re
 import threading
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -1144,7 +1145,14 @@ def handle_memory_read(args: dict) -> str:
 
 
 def handle_memory_update(args: dict) -> str:
-    """Update a section or replace full memory content."""
+    """Update a section or replace full memory content.
+
+    The entire read-modify-write cycle is under _memory_lock to prevent
+    TOCTOU races (two concurrent updates both read the same content,
+    then the second write silently overwrites the first's changes).
+    """
+    from .fileutil import atomic_write
+
     full_content = args.get("full_content")
     section = args.get("section")
 
@@ -1166,16 +1174,25 @@ def handle_memory_update(args: dict) -> str:
     content_text = args.get("content", "")
     mode = args.get("mode", "replace")
 
-    current = _read_memory_file()
-    if not current:
-        current = "# GRIM Working Memory\n"
+    # Read-modify-write under a single lock to prevent TOCTOU races
+    with _memory_lock:
+        current = _read_memory_file()
+        if not current:
+            current = "# GRIM Working Memory\n"
 
-    if mode == "append":
-        updated = _append_to_memory_section(current, section, content_text)
-    else:
-        updated = _update_memory_section(current, section, content_text)
+        if mode == "append":
+            updated = _append_to_memory_section(current, section, content_text)
+        else:
+            updated = _update_memory_section(current, section, content_text)
 
-    _write_memory_file(updated)
+        try:
+            p = _memory_path()
+            atomic_write(p, updated)
+            logger.info("Updated memory.md (%d chars)", len(updated))
+        except Exception:
+            logger.exception("Failed to write memory.md")
+            raise
+
     return _json({"ok": True, "section": section, "char_count": len(content_text)})
 
 
@@ -2289,6 +2306,12 @@ async def main():
     logger.info(f"Kronos MCP starting — vault: {vault_path}")
     if skills_engine:
         logger.info(f"Skills path: {skills_path}")
+
+    # Set a larger thread pool to prevent starvation when slow tools
+    # (semantic indexing, vault scan) occupy threads for 30-60s+.
+    # Default is min(32, cpu+4) which can be as low as 8 on 4-core machines.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
 
     # On Windows, TextIOWrapper with default newline=None translates \n → \r\n.
     # MCP protocol requires \n-only line endings (newline-delimited JSON).

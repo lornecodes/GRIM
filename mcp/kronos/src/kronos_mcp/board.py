@@ -213,8 +213,14 @@ class BoardEngine:
     # ── Views ────────────────────────────────────────────────────────────
 
     def board_view(self, project_id: str | None = None) -> dict:
-        """Get the full board with enriched story data per column."""
-        board = self._load_board()
+        """Get the full board with enriched story data per column.
+
+        Lock held only for board YAML read; task_engine calls happen
+        outside the lock to avoid board→task lock ordering issues.
+        """
+        with self._lock:
+            board = self._load_board()
+
         result: dict[str, Any] = {"columns": {}, "last_synced": board.get("last_synced")}
 
         # Collect all story IDs and batch-load in one vault scan
@@ -253,7 +259,8 @@ class BoardEngine:
         priority: str | None = None,
     ) -> dict:
         """Get stories NOT on the board (the backlog)."""
-        board = self._load_board()
+        with self._lock:
+            board = self._load_board()
         on_board = set()
         for ids in board["columns"].values():
             on_board.update(ids)
@@ -270,7 +277,8 @@ class BoardEngine:
 
     def get_board_story_ids(self, columns: list[str] | None = None) -> list[str]:
         """Get story IDs from specific columns (for calendar sync)."""
-        board = self._load_board()
+        with self._lock:
+            board = self._load_board()
         target_cols = columns or COLUMNS
         ids = []
         for col in target_cols:

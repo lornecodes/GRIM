@@ -1,9 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
   <!-- GRIM sprite favicon — brightened for visibility at 16x16 -->
 
-  <!-- Dark background for contrast on any tab bar -->
-  <rect x="0" y="0" width="32" height="32" rx="4" fill="#0d1117"/>
-
   <!-- Hood outline -->
   <rect x="8"  y="2" width="2" height="2" fill="#2d4a5e"/>
   <rect x="10" y="2" width="12" height="2" fill="#4e7a90"/>
