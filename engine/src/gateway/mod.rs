@@ -544,7 +544,7 @@ impl GatewayServer {
             .route("/v1/chat/ws", get(handle_chat_ws))
             .route("/v1/models", get(handle_list_models))
             .route("/v1/tools", get(handle_list_tools))
-            .route("/v1/tools/{name}/execute", post(handle_tool_execute))
+            .route("/v1/tools/:name/execute", post(handle_tool_execute))
             .route("/v1/sessions", get(handle_list_sessions))
             .route("/v1/skills/scan", post(handle_skill_scan))
             .route("/v1/agents", get(handle_list_agents))
