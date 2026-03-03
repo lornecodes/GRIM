@@ -12,9 +12,32 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from core.config import GrimConfig
-from core.state import AgentResult
+from core.state import AgentResult, FDOSummary
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_knowledge_sources(state: dict) -> list[FDOSummary]:
+    """Merge per-turn knowledge_context with accumulated session_knowledge.
+
+    Returns a deduplicated list with per-turn entries first (fresh),
+    then session entries not already in per-turn set.
+    """
+    knowledge_context = state.get("knowledge_context", [])
+    session_knowledge = state.get("session_knowledge", [])
+
+    if not session_knowledge:
+        return list(knowledge_context)
+
+    per_turn_ids = {fdo.id for fdo in knowledge_context}
+    merged = list(knowledge_context)
+
+    for entry in session_knowledge:
+        if entry.fdo.id not in per_turn_ids:
+            merged.append(entry.fdo)
+            per_turn_ids.add(entry.fdo.id)
+
+    return merged
 
 
 class BaseAgent:
@@ -343,13 +366,14 @@ class BaseAgent:
     def build_context(self, state: dict) -> dict:
         """Build context dict from state. Override in subclasses for richer context.
 
-        Default: includes brief FDO references from knowledge_context.
+        Default: merges per-turn knowledge_context with accumulated
+        session_knowledge, deduplicating by FDO ID.
         """
         context = {}
-        knowledge_context = state.get("knowledge_context", [])
-        if knowledge_context:
+        all_fdos = _merge_knowledge_sources(state)
+        if all_fdos:
             context["relevant_fdos"] = ", ".join(
-                f"{fdo.id} ({fdo.domain})" for fdo in knowledge_context[:5]
+                f"{fdo.id} ({fdo.domain})" for fdo in all_fdos[:10]
             )
         return context
 

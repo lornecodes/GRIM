@@ -6,6 +6,10 @@ relevant FDOs to ground GRIM's responses.
 Smart retrieval: alongside the standard keyword search, also
 fetches best-practice FDOs and recent notes from the rolling log.
 All three queries run in parallel for minimal latency.
+
+Session knowledge accumulation: FDOs are accumulated across turns
+via session_knowledge (LangGraph reducer). Dedup-aware search
+re-surfaces cached entries and avoids redundant MCP calls.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import json
 import logging
 from typing import Any
 
-from core.state import FDOSummary, GrimState
+from core.state import FDOSummary, GrimState, KnowledgeEntry
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,34 @@ logger = logging.getLogger(__name__)
 # on the first call while the embedding model loads, so we use a generous
 # timeout and fall back to keyword-only on failure.
 _SEARCH_TIMEOUT = 20
+
+
+def _query_matches_fdo(query: str, fdo: FDOSummary) -> bool:
+    """Check if a query has keyword overlap with an FDO (case-insensitive).
+
+    Returns True if the query shares at least one significant word
+    with the FDO's title, tags, or ID.
+    """
+    query_words = set(query.lower().split())
+    # Remove common stop words
+    stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                  "do", "does", "did", "has", "have", "had", "in", "on", "at",
+                  "to", "for", "of", "with", "by", "from", "and", "or", "not",
+                  "it", "its", "this", "that", "what", "how", "about", "me",
+                  "my", "we", "our", "i", "you", "can", "could", "would",
+                  "should", "will", "tell", "show", "explain", "describe"}
+    query_words -= stop_words
+
+    if not query_words:
+        return False
+
+    fdo_words = set()
+    fdo_words.update(fdo.id.replace("-", " ").lower().split())
+    fdo_words.update(fdo.title.lower().split())
+    for tag in fdo.tags:
+        fdo_words.update(tag.lower().split())
+
+    return bool(query_words & fdo_words)
 
 
 def make_memory_node(mcp_session: Any = None):
@@ -41,7 +73,12 @@ def make_memory_node(mcp_session: Any = None):
         if not query or not mcp_session:
             return {"knowledge_context": []}
 
-        logger.info("Memory node: searching Kronos for '%s'", query[:80])
+        turn = state.get("turn_count", 0)
+        existing_knowledge = state.get("session_knowledge", [])
+        existing_ids = {e.fdo.id for e in existing_knowledge}
+
+        logger.info("Memory node: searching Kronos for '%s' (turn %d, %d cached)",
+                     query[:80], turn, len(existing_knowledge))
 
         # Run three searches in parallel:
         # 1. Standard keyword search (existing behavior)
@@ -58,21 +95,34 @@ def make_memory_node(mcp_session: Any = None):
         standard_data, bp_data, notes_data = results
 
         # Parse standard results
-        summaries: list[FDOSummary] = []
+        new_summaries: list[FDOSummary] = []
         if not isinstance(standard_data, Exception) and standard_data:
             results_list = standard_data if isinstance(standard_data, list) else standard_data.get("results", [])
             for item in results_list[:6]:  # reduced from 8 to leave room for BPs
-                summaries.append(_to_summary(item))
+                new_summaries.append(_to_summary(item))
 
         # Parse best-practice results (deduplicated against standard)
-        seen_ids = {s.id for s in summaries}
+        seen_ids = {s.id for s in new_summaries}
         if not isinstance(bp_data, Exception) and bp_data:
             bp_list = bp_data if isinstance(bp_data, list) else bp_data.get("results", [])
             for item in bp_list[:2]:
                 item_id = item.get("id", "")
                 if item_id and item_id not in seen_ids:
-                    summaries.append(_to_summary(item))
+                    new_summaries.append(_to_summary(item))
                     seen_ids.add(item_id)
+
+        # Re-surface relevant cached entries that match current query
+        # (these don't need a fresh MCP call — we already have them)
+        resurfaced: list[FDOSummary] = []
+        new_ids = {s.id for s in new_summaries}
+        for entry in existing_knowledge:
+            if entry.fdo.id not in new_ids and _query_matches_fdo(query, entry.fdo):
+                resurfaced.append(entry.fdo)
+                if len(resurfaced) >= 3:
+                    break
+
+        # Combine: fresh results first, then resurfaced from cache
+        combined = new_summaries + resurfaced
 
         # Parse recent notes (separate state key)
         recent_notes: list[dict] = []
@@ -87,15 +137,33 @@ def make_memory_node(mcp_session: Any = None):
                     "anchor": entry.get("anchor", ""),
                 })
 
-        bp_count = len([s for s in summaries if "best-practice" in s.tags])
+        bp_count = len([s for s in combined if "best-practice" in s.tags])
         logger.info(
-            "Memory node: %d FDOs + %d best-practices + %d recent notes",
-            len(summaries) - bp_count,
+            "Memory node: %d FDOs (%d fresh + %d cached) + %d BPs + %d notes",
+            len(combined),
+            len(new_summaries),
+            len(resurfaced),
             bp_count,
             len(recent_notes),
         )
 
-        result = {"knowledge_context": summaries[:8]}  # cap total at 8
+        # Build session knowledge entries for accumulation (reducer handles dedup)
+        new_entries = [
+            KnowledgeEntry(
+                fdo=s,
+                fetched_turn=turn,
+                fetched_by="memory",
+                query=query[:100],
+                last_referenced_turn=turn,
+            )
+            for s in combined
+        ]
+
+        result: dict[str, Any] = {
+            "knowledge_context": combined[:8],       # per-turn (capped at 8)
+            "session_knowledge": new_entries,         # accumulated via reducer
+            "turn_count": turn + 1,                  # bump turn counter
+        }
         if recent_notes:
             result["recent_notes"] = recent_notes
         return result

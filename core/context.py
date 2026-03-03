@@ -76,10 +76,11 @@ You MUST preserve:
 3. Important facts, numbers, file paths, and code references
 4. Unresolved questions or open threads
 5. The general tone and relationship context
+6. References to any knowledge FDOs listed below — include their IDs in the summary
 
 Format as a structured summary with clear sections. Be concise but complete — do NOT lose any actionable information.
 
-{existing_summary}CONVERSATION TO COMPRESS:
+{existing_summary}{knowledge_references}CONVERSATION TO COMPRESS:
 {conversation}
 
 STRUCTURED SUMMARY:"""

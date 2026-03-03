@@ -10,7 +10,7 @@ import yaml
 
 if TYPE_CHECKING:
     from core.objectives import Objective
-    from core.state import FDOSummary, FieldState, SkillContext
+    from core.state import FDOSummary, FieldState, KnowledgeEntry, SkillContext
 
 
 @dataclass
@@ -31,6 +31,7 @@ def build_system_prompt_parts(
     personality_path: Path,
     field_state: FieldState,
     knowledge_context: list[FDOSummary] | None = None,
+    session_knowledge: list[KnowledgeEntry] | None = None,
     matched_skills: list[SkillContext] | None = None,
     objectives: list[Objective] | None = None,
     identity_fdo: dict | None = None,
@@ -118,10 +119,18 @@ def build_system_prompt_parts(
                     obj_lines.append(f"  Last note: {obj.notes[-1]}")
             dynamic_sections.append("\n".join(obj_lines))
 
-    # 7b. Knowledge context
-    if knowledge_context:
+    # 7b. Knowledge context (merged: per-turn + accumulated session knowledge)
+    all_knowledge_fdos: list[FDOSummary] = list(knowledge_context or [])
+    if session_knowledge:
+        per_turn_ids = {fdo.id for fdo in all_knowledge_fdos}
+        for entry in session_knowledge:
+            if entry.fdo.id not in per_turn_ids:
+                all_knowledge_fdos.append(entry.fdo)
+                per_turn_ids.add(entry.fdo.id)
+
+    if all_knowledge_fdos:
         ctx_lines = ["\n## Relevant Knowledge\n"]
-        for fdo in knowledge_context[:10]:
+        for fdo in all_knowledge_fdos[:12]:
             conf = f"confidence: {fdo.confidence:.1f}" if fdo.confidence else ""
             ctx_lines.append(
                 f"- **{fdo.title}** ({fdo.domain}/{fdo.id}) "

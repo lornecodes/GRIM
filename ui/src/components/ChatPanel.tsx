@@ -6,6 +6,7 @@ import { useGrimSocket } from "@/hooks/useGrimSocket";
 import { useSessions } from "@/hooks/useSessions";
 import { ChatArea } from "./ChatArea";
 import { ChatPanelHeader } from "./ChatPanelHeader";
+import { SessionKnowledgePanel } from "./ui/SessionKnowledgePanel";
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 800;
@@ -19,6 +20,7 @@ export function ChatPanel() {
     useSessions();
   const { send } = useGrimSocket(activeSessionId);
 
+  const [panelView, setPanelView] = useState<"chat" | "knowledge">("chat");
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
   const dragging = useRef(false);
   const startX = useRef(0);
@@ -78,8 +80,17 @@ export function ChatPanel() {
             onSwitch={switchSession}
             onNew={newSession}
             onDelete={deleteSession}
+            panelView={panelView}
+            onViewChange={setPanelView}
           />
-          <ChatArea onSend={send} />
+          {panelView === "chat" ? (
+            <ChatArea onSend={send} />
+          ) : (
+            <SessionKnowledgePanel
+              sessionId={activeSessionId}
+              onBack={() => setPanelView("chat")}
+            />
+          )}
         </>
       )}
     </div>

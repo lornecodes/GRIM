@@ -78,12 +78,33 @@ def make_compress_node(config: GrimConfig):
                 f"PREVIOUS SUMMARY (incorporate and update):\n{existing_summary}\n\n"
             )
 
+        # Include accumulated FDO references so compression preserves them
+        session_knowledge = state.get("session_knowledge", [])
+        knowledge_block = ""
+        if session_knowledge:
+            # Sort by hit_count (most referenced first), cap at 15
+            sorted_entries = sorted(
+                session_knowledge,
+                key=lambda e: e.hit_count,
+                reverse=True,
+            )[:15]
+            fdo_lines = "\n".join(
+                f"- {e.fdo.id}: {e.fdo.title} ({e.fdo.domain}, "
+                f"referenced {e.hit_count}x)"
+                for e in sorted_entries
+            )
+            knowledge_block = (
+                f"ACCUMULATED KNOWLEDGE REFERENCES (preserve these IDs):\n"
+                f"{fdo_lines}\n\n"
+            )
+
         # LLM call to summarize
         try:
             summary_response = await llm.ainvoke([
                 HumanMessage(
                     content=COMPRESSION_PROMPT.format(
                         existing_summary=existing_block,
+                        knowledge_references=knowledge_block,
                         conversation=conversation_text,
                     )
                 )

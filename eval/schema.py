@@ -27,6 +27,7 @@ class ExpectedOutcome(BaseModel):
     action_intent: Optional[str] = None
     tools_present: Optional[list[str]] = None
     tools_absent: Optional[list[str]] = None
+    reducer_check: Optional[str] = None  # knowledge_context evaluator checks
 
 
 class Tier1Case(BaseModel):

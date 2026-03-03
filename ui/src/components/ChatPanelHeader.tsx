@@ -10,6 +10,8 @@ interface ChatPanelHeaderProps {
   onSwitch: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  panelView?: "chat" | "knowledge";
+  onViewChange?: (view: "chat" | "knowledge") => void;
 }
 
 export function ChatPanelHeader({
@@ -18,6 +20,8 @@ export function ChatPanelHeader({
   onSwitch,
   onNew,
   onDelete,
+  panelView = "chat",
+  onViewChange,
 }: ChatPanelHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -40,15 +44,30 @@ export function ChatPanelHeader({
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      <button
-        onClick={() => {
-          onNew();
-          setDropdownOpen(false);
-        }}
-        className="text-xs text-grim-accent hover:text-grim-accent-dim transition-colors px-2 py-0.5 rounded border border-grim-accent/30 hover:bg-grim-accent/10 shrink-0"
-      >
-        + new
-      </button>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {onViewChange && (
+          <button
+            onClick={() => onViewChange(panelView === "chat" ? "knowledge" : "chat")}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              panelView === "knowledge"
+                ? "text-grim-accent border-grim-accent/50 bg-grim-accent/10"
+                : "text-grim-text-dim border-grim-border/30 hover:border-grim-border/60"
+            }`}
+            title="Toggle session knowledge graph"
+          >
+            graph
+          </button>
+        )}
+        <button
+          onClick={() => {
+            onNew();
+            setDropdownOpen(false);
+          }}
+          className="text-xs text-grim-accent hover:text-grim-accent-dim transition-colors px-2 py-0.5 rounded border border-grim-accent/30 hover:bg-grim-accent/10"
+        >
+          + new
+        </button>
+      </div>
 
       {/* Session dropdown */}
       {dropdownOpen && (

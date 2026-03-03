@@ -6,6 +6,7 @@ import { DashboardTile } from "@/components/ui/DashboardTile";
 import { useGrimMemory } from "@/hooks/useGrimMemory";
 import { useGrimStore } from "@/store";
 import { loadMessages } from "@/lib/persistence";
+import { MemoryKnowledgeGraph } from "@/components/ui/MemoryKnowledgeGraph";
 import type { ChatMessage, Session } from "@/lib/types";
 
 const STORAGE_KEY = "grim-sessions";
@@ -15,7 +16,7 @@ const STORAGE_KEY = "grim-sessions";
 // ---------------------------------------------------------------------------
 
 export function MemoryView() {
-  const [tab, setTab] = useState<"memory" | "sessions">("memory");
+  const [tab, setTab] = useState<"memory" | "sessions" | "graph">("memory");
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 pb-8">
@@ -38,9 +39,18 @@ export function MemoryView() {
         <TabButton active={tab === "sessions"} onClick={() => setTab("sessions")}>
           Session History
         </TabButton>
+        <TabButton active={tab === "graph"} onClick={() => setTab("graph")}>
+          Knowledge Graph
+        </TabButton>
       </div>
 
-      {tab === "memory" ? <WorkingMemoryTab /> : <SessionHistoryTab />}
+      {tab === "memory" ? (
+        <WorkingMemoryTab />
+      ) : tab === "sessions" ? (
+        <SessionHistoryTab />
+      ) : (
+        <MemoryKnowledgeGraph />
+      )}
     </div>
   );
 }

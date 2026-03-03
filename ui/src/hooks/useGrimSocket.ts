@@ -188,6 +188,30 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             stepBubbleIds.current.clear();
             break;
           }
+          case "memory_notification": {
+            // Compact "memory updated" pill — creates a step bubble for evolve
+            // without the full memory content dump
+            if (!id) break;
+            const notifId = stepBubbleIds.current.get("evolve") || crypto.randomUUID();
+            if (!stepBubbleIds.current.has("evolve")) {
+              stepBubbleIds.current.set("evolve", notifId);
+              state.appendMessage({
+                id: notifId,
+                role: "grim",
+                content: data.summary || "Working memory updated",
+                traces: [],
+                streaming: false,
+                isStep: true,
+                node: "memory_update",
+              });
+            } else {
+              state.updateMessage(notifId, {
+                content: data.summary || "Working memory updated",
+                streaming: false,
+              });
+            }
+            break;
+          }
           case "ui_command": {
             state.dispatchUICommand(data);
             break;

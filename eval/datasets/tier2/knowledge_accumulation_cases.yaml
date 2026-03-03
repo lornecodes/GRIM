@@ -1,0 +1,205 @@
+version: "1.0"
+tier: 2
+category: knowledge_accumulation
+description: "Multi-turn scenarios testing session knowledge accumulation across turns"
+
+cases:
+  - id: ka-basic-accumulation
+    tags: [knowledge, accumulation, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What is PAC regulation?"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["PAC"]
+      - role: user
+        message: "How does it relate to SEC?"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["SEC"]
+      - role: user
+        message: "Summarize what we've discussed so far"
+        checkpoint:
+          response_contains: ["PAC", "SEC"]
+    mock_tools:
+      kronos_search:
+        - {"results": [{"id": "pac-comprehensive", "title": "PAC Regulation", "domain": "physics", "summary": "Primary Asymmetry Constraint framework"}]}
+        - {"results": [{"id": "sec-comprehensive", "title": "SEC Framework", "domain": "physics", "summary": "Symmetric Entropy Constraint framework"}]}
+        - {"results": []}
+    grading:
+      accumulation: "Does the summary reference both PAC and SEC from earlier turns without re-fetching?"
+      context_retention: "Does the response show awareness of the conversation's knowledge trajectory?"
+
+  - id: ka-dedup-across-turns
+    tags: [knowledge, dedup, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Tell me about the GRIM architecture"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["GRIM"]
+      - role: user
+        message: "What about GRIM's routing system?"
+        checkpoint:
+          response_contains: ["rout"]
+    mock_tools:
+      kronos_search:
+        - {"results": [{"id": "grim-architecture", "title": "GRIM Architecture", "domain": "ai-systems", "summary": "LangGraph-based AI companion architecture"}]}
+        - {"results": [{"id": "grim-architecture", "title": "GRIM Architecture", "domain": "ai-systems", "summary": "LangGraph-based AI companion architecture"}]}
+    grading:
+      dedup: "Does the system avoid redundantly fetching grim-architecture on the second turn?"
+      context_use: "Does the second response build on first-turn knowledge rather than repeating it?"
+
+  - id: ka-cross-agent-knowledge
+    tags: [knowledge, cross-agent, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Research the reality engine's Poincaré activation"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["Poincaré"]
+      - role: user
+        message: "Write a test for the activation function"
+        checkpoint:
+          tools_called: [claw_write_file]
+          response_contains: ["test"]
+    mock_tools:
+      kronos_search: {"results": [{"id": "reality-engine-poincare", "title": "Poincaré Activation", "domain": "modelling", "summary": "Activation function using Poincaré disk model"}]}
+      claw_write_file: {"success": true, "output": "File created: test_poincare.py"}
+    grading:
+      knowledge_transfer: "Does the coder agent have context about Poincaré activation from the research turn?"
+      execution: "Does the test reference the correct concepts from the knowledge context?"
+
+  - id: ka-survives-long-conversation
+    tags: [knowledge, compression, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What is fracton's PAC math module?"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Tell me about the recursive core exports"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "What about the GAIA integration?"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Now connect all three — how do PAC math, recursive core, and GAIA fit together?"
+        checkpoint:
+          response_contains: ["PAC", "recursive", "GAIA"]
+    mock_tools:
+      kronos_search:
+        - {"results": [{"id": "fracton-pac", "title": "Fracton PAC Math", "domain": "computing", "summary": "PAC mathematical operators"}]}
+        - {"results": [{"id": "fracton-api", "title": "Fracton Recursive Core", "domain": "computing", "summary": "35 recursive-core exports"}]}
+        - {"results": [{"id": "gaia-fracton", "title": "GAIA Fracton Integration", "domain": "ai-systems", "summary": "GAIA proof-of-concept using fracton"}]}
+        - {"results": []}
+    grading:
+      accumulation: "Does the final response synthesize knowledge from all three earlier turns?"
+      depth: "Does it go beyond surface listing to explain actual relationships?"
+      retention: "Are all three concepts present in the response without needing to re-fetch?"
+
+  - id: ka-hit-count-priority
+    tags: [knowledge, priority, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "Tell me about PAC regulation in Dawn Field Theory"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "How does PAC constrain entropy bounds?"
+        checkpoint:
+          response_contains: ["PAC"]
+      - role: user
+        message: "What are the key PAC experiments?"
+        checkpoint:
+          response_contains: ["PAC"]
+    mock_tools:
+      kronos_search:
+        - {"results": [{"id": "pac-comprehensive", "title": "PAC", "domain": "physics", "summary": "Primary Asymmetry Constraint"}, {"id": "dawn-field-theory", "title": "DFT", "domain": "physics", "summary": "Dawn Field Theory framework"}]}
+        - {"results": [{"id": "pac-comprehensive", "title": "PAC", "domain": "physics", "summary": "Primary Asymmetry Constraint"}]}
+        - {"results": [{"id": "pac-comprehensive", "title": "PAC", "domain": "physics", "summary": "Primary Asymmetry Constraint"}]}
+    grading:
+      hit_tracking: "Does PAC accumulate higher priority from repeated references?"
+      context_richness: "Do later responses show deeper understanding from accumulated context?"
+
+  - id: ka-knowledge-informs-delegation
+    tags: [knowledge, routing, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What tools does the memory agent have?"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["memory"]
+      - role: user
+        message: "Save a note about our session today"
+        checkpoint:
+          tools_called: [kronos_note_append]
+    mock_tools:
+      kronos_search: {"results": [{"id": "grim-architecture", "title": "GRIM Architecture", "domain": "ai-systems", "summary": "Agent architecture with memory, research, coder, operator agents"}]}
+      kronos_note_append: {"success": true, "anchor": "note-2026-03-03-001"}
+    grading:
+      routing_awareness: "Does knowledge from the first turn inform how the system routes the second request?"
+      tool_selection: "Does it correctly use kronos_note_append for note saving?"
+
+  - id: ka-empty-to-rich
+    tags: [knowledge, bootstrap, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "I want to explore a new concept: topological entropy gradients"
+        checkpoint:
+          tools_called: [kronos_search]
+      - role: user
+        message: "Nothing in the vault? Let's create an FDO for it"
+        checkpoint:
+          tools_called: [kronos_create]
+          response_contains: ["created"]
+      - role: user
+        message: "Now relate it to PAC regulation"
+        checkpoint:
+          tools_called: [kronos_search]
+    mock_tools:
+      kronos_search:
+        - {"results": []}
+        - {"results": [{"id": "pac-comprehensive", "title": "PAC", "domain": "physics", "summary": "Primary Asymmetry Constraint"}]}
+      kronos_create: {"success": true, "id": "topological-entropy-gradients"}
+    grading:
+      bootstrap: "Does it correctly handle the transition from empty results to knowledge creation?"
+      accumulation: "Does the newly created FDO appear in session knowledge for the third turn?"
+      linking: "Does it attempt to relate the new concept to existing knowledge?"
+
+  - id: ka-mixed-domains
+    tags: [knowledge, domains, multi-turn]
+    turn_type: multi
+    turns:
+      - role: user
+        message: "What's the current state of the reality engine?"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["reality engine"]
+      - role: user
+        message: "And the GRIM eval framework?"
+        checkpoint:
+          tools_called: [kronos_search]
+          response_contains: ["eval"]
+      - role: user
+        message: "Could we use the eval framework to test reality engine outputs?"
+        checkpoint:
+          response_contains: ["reality engine", "eval"]
+    mock_tools:
+      kronos_search:
+        - {"results": [{"id": "reality-engine", "title": "Reality Engine", "domain": "modelling", "summary": "Simulator with Möbius topology"}]}
+        - {"results": [{"id": "grim-eval", "title": "GRIM Eval Framework", "domain": "ai-systems", "summary": "Two-tier evaluation framework"}]}
+        - {"results": []}
+    grading:
+      cross_domain: "Does the response synthesize knowledge from two different domains (modelling + ai-systems)?"
+      creative_connection: "Does it propose a reasonable way to connect the eval framework with reality engine?"
+      accumulation: "Are both FDOs available in context for the third turn without re-fetching?"

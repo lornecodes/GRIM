@@ -98,6 +98,88 @@ class FDOSummary:
 
 
 # ---------------------------------------------------------------------------
+# Knowledge entry — session-level FDO accumulator with provenance
+# ---------------------------------------------------------------------------
+
+_SESSION_KNOWLEDGE_CAP = 50  # max accumulated FDOs per session
+
+
+@dataclass
+class KnowledgeEntry:
+    """An FDO fetched during this session, with provenance metadata.
+
+    Tracks when, by whom, and how often an FDO was referenced.
+    Used by the session knowledge accumulator to avoid re-fetching
+    and to provide agents with the full conversation context.
+    """
+
+    fdo: FDOSummary
+    fetched_turn: int          # which turn first retrieved this FDO
+    fetched_by: str            # "memory", "companion", "ironclaw", etc.
+    query: str                 # the search query that found it
+    last_referenced_turn: int  # updated when re-encountered
+    hit_count: int = 1         # how many times this FDO was returned/referenced
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for API responses."""
+        return {
+            "fdo_id": self.fdo.id,
+            "fdo_title": self.fdo.title,
+            "fdo_domain": self.fdo.domain,
+            "fdo_confidence": self.fdo.confidence,
+            "fetched_turn": self.fetched_turn,
+            "fetched_by": self.fetched_by,
+            "query": self.query,
+            "last_referenced_turn": self.last_referenced_turn,
+            "hit_count": self.hit_count,
+            "related": self.fdo.related,
+        }
+
+
+def _merge_session_knowledge(
+    existing: list[KnowledgeEntry] | None,
+    new: list[KnowledgeEntry] | None,
+) -> list[KnowledgeEntry]:
+    """LangGraph reducer: merge new knowledge entries into existing.
+
+    Deduplicates by FDO ID — if an FDO already exists, bump hit_count
+    and update last_referenced_turn. Otherwise append.
+    Caps at _SESSION_KNOWLEDGE_CAP entries (drops least-referenced).
+    """
+    if not existing and not new:
+        return []
+    if not existing:
+        return (new or [])[:_SESSION_KNOWLEDGE_CAP]
+    if not new:
+        return existing
+
+    # Index existing by FDO ID for O(1) lookup
+    by_id: dict[str, KnowledgeEntry] = {e.fdo.id: e for e in existing}
+
+    for entry in new:
+        fdo_id = entry.fdo.id
+        if fdo_id in by_id:
+            # Bump existing entry
+            existing_entry = by_id[fdo_id]
+            existing_entry.hit_count += entry.hit_count
+            existing_entry.last_referenced_turn = max(
+                existing_entry.last_referenced_turn,
+                entry.last_referenced_turn,
+            )
+        else:
+            by_id[fdo_id] = entry
+
+    merged = list(by_id.values())
+
+    # If over cap, drop least-referenced entries
+    if len(merged) > _SESSION_KNOWLEDGE_CAP:
+        merged.sort(key=lambda e: (e.hit_count, e.last_referenced_turn), reverse=True)
+        merged = merged[:_SESSION_KNOWLEDGE_CAP]
+
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Agent result — output from doer agents
 # ---------------------------------------------------------------------------
 
@@ -157,6 +239,10 @@ class GrimState(TypedDict, total=False):
 
     # Knowledge context (enriched per turn by memory node)
     knowledge_context: list[FDOSummary]
+
+    # Session-level knowledge accumulator (survives compression, deduped)
+    session_knowledge: Annotated[list[KnowledgeEntry], _merge_session_knowledge]
+    turn_count: int  # incremented by memory node each turn
 
     # Skill context (matched per turn by skill_match node)
     matched_skills: list[SkillContext]

@@ -35,12 +35,14 @@ class ResearchAgent(BaseAgent):
         super().__init__(config=config, tools=tools)
 
     def build_context(self, state: dict) -> dict:
-        """Research agent gets more detailed FDO context."""
+        """Research agent gets more detailed FDO context (merged from session)."""
+        from core.agents.base import _merge_knowledge_sources
+
         context = {}
-        knowledge_context = state.get("knowledge_context", [])
-        if knowledge_context:
+        all_fdos = _merge_knowledge_sources(state)
+        if all_fdos:
             fdo_details = []
-            for fdo in knowledge_context[:8]:
+            for fdo in all_fdos[:10]:
                 detail = f"{fdo.id} ({fdo.domain}, {fdo.status}): {fdo.summary[:150]}"
                 if fdo.related:
                     detail += f" → related: {', '.join(fdo.related[:3])}"

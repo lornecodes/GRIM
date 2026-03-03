@@ -97,6 +97,7 @@ _ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
 _active_ws_sessions: set[str] = set()  # live WebSocket session IDs (for Graph Studio)
+_session_knowledge: dict[str, list] = {}  # session_id → list of KnowledgeEntry.to_dict()
 
 
 def _grim_root() -> Path:
@@ -1368,6 +1369,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
                 full_response = ""
                 last_knowledge = []
+                last_session_knowledge_count = 0
                 last_mode = "companion"
                 last_skills = []
                 streaming_started = False
@@ -1442,6 +1444,16 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                 last_knowledge = output["knowledge_context"]
                                 detail["fdo_count"] = len(last_knowledge)
                                 detail["fdo_ids"] = [k.id for k in last_knowledge[:8]]
+                            if "session_knowledge" in output:
+                                sk = output["session_knowledge"]
+                                last_session_knowledge_count = len(sk) if sk else 0
+                                detail["session_knowledge_count"] = last_session_knowledge_count
+                                # Store for API access — serialize entries
+                                if sk:
+                                    _session_knowledge[session_id] = [
+                                        e.to_dict() if hasattr(e, "to_dict") else e
+                                        for e in sk
+                                    ]
                             if "mode" in output:
                                 last_mode = output["mode"]
                                 detail["mode"] = last_mode
@@ -1464,6 +1476,16 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                      node=name, action="end", duration_ms=node_elapsed,
                                      detail=detail if detail else None,
                                      step_content=step_text if step_text else None)
+
+                        # Emit compact memory notification when evolve completes
+                        # (instead of streaming full memory content to the UI)
+                        if name == "evolve":
+                            await ws.send_json({
+                                "type": "memory_notification",
+                                "updated": True,
+                                "summary": "Working memory updated",
+                                "duration_ms": node_elapsed,
+                            })
 
                     # ── LLM lifecycle ──
                     elif kind == "on_chat_model_start":
@@ -1518,6 +1540,11 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
                     # ── Token streaming ──
                     elif kind == "on_chat_model_stream":
+                        # Skip streaming tokens from evolve node — its internal
+                        # LLM calls (memory update, objective extraction) should
+                        # not dump full content to the chat UI.
+                        if _current_node == "evolve":
+                            continue
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and hasattr(chunk, "content") and chunk.content:
                             token = _extract_text(chunk.content)
@@ -1570,6 +1597,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     "meta": {
                         "mode": last_mode,
                         "knowledge_count": len(last_knowledge),
+                        "session_knowledge_count": last_session_knowledge_count,
                         "skills": last_skills,
                         "fdo_ids": [k.id for k in last_knowledge[:5]] if last_knowledge else [],
                         "total_ms": total_ms,
@@ -1656,6 +1684,165 @@ async def graph_sessions():
     return JSONResponse({
         "active": len(_active_ws_sessions),
         "session_ids": sorted(_active_ws_sessions),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Session Knowledge endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/session/knowledge")
+async def api_session_knowledge(session_id: str | None = None):
+    """Return accumulated session knowledge entries for a session.
+
+    If no session_id is provided, returns entries for the most recent active session.
+    """
+    if session_id and session_id in _session_knowledge:
+        entries = _session_knowledge[session_id]
+    elif not session_id and _session_knowledge:
+        # Most recently updated session
+        entries = list(_session_knowledge.values())[-1]
+    else:
+        entries = []
+
+    return JSONResponse({
+        "entries": entries,
+        "count": len(entries),
+    })
+
+
+@app.get("/api/session/knowledge/graph")
+async def api_session_knowledge_graph(session_id: str | None = None):
+    """Build a force-graph from session knowledge entries.
+
+    Nodes = accumulated FDOs, sized by hit_count.
+    Edges = related links between FDOs present in the session.
+    """
+    if session_id and session_id in _session_knowledge:
+        entries = _session_knowledge[session_id]
+    elif not session_id and _session_knowledge:
+        entries = list(_session_knowledge.values())[-1]
+    else:
+        return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
+
+    # Build node set
+    node_map: dict[str, dict] = {}
+    for e in entries:
+        fdo_id = e.get("fdo_id", "")
+        if not fdo_id:
+            continue
+        node_map[fdo_id] = {
+            "id": fdo_id,
+            "title": e.get("fdo_title", fdo_id),
+            "domain": e.get("fdo_domain", ""),
+            "confidence": e.get("fdo_confidence", 0),
+            "hit_count": e.get("hit_count", 1),
+            "fetched_turn": e.get("fetched_turn", 0),
+            "fetched_by": e.get("fetched_by", ""),
+        }
+
+    # Build edges from related links (only between nodes in the session)
+    edges: list[dict] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for e in entries:
+        fdo_id = e.get("fdo_id", "")
+        for related_id in e.get("related", []):
+            if related_id in node_map and fdo_id != related_id:
+                edge_key = tuple(sorted((fdo_id, related_id)))
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": edge_key[0],
+                        "target": edge_key[1],
+                        "type": "related",
+                    })
+
+    nodes = list(node_map.values())
+    return JSONResponse({
+        "nodes": nodes,
+        "edges": edges,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    })
+
+
+@app.get("/api/memory/graph")
+async def api_memory_graph():
+    """Build a force-graph from GRIM's working memory FDO references.
+
+    Parses wikilinks [[fdo-id]] from memory.md sections, builds nodes
+    from referenced FDOs, and creates edges from co-section membership
+    + related links.
+    """
+    import re
+
+    # Read memory via MCP or fallback
+    memory_content = ""
+    try:
+        if _config:
+            from core.memory_store import read_memory
+            memory_content = read_memory(_config.vault_path)
+    except Exception:
+        pass
+
+    if not memory_content:
+        return JSONResponse({"nodes": [], "edges": [], "sections": [], "node_count": 0, "edge_count": 0})
+
+    # Parse sections and extract wikilinks
+    sections: dict[str, list[str]] = {}
+    current_section = "root"
+    for line in memory_content.split("\n"):
+        if line.startswith("## "):
+            current_section = line[3:].strip()
+            sections.setdefault(current_section, [])
+        else:
+            # Extract [[fdo-id]] wikilinks
+            refs = re.findall(r"\[\[([a-z0-9-]+)\]\]", line)
+            for ref in refs:
+                sections.setdefault(current_section, [])
+                if ref not in sections[current_section]:
+                    sections[current_section].append(ref)
+
+    # Build nodes from all referenced FDOs
+    all_fdo_ids: set[str] = set()
+    for fdo_list in sections.values():
+        all_fdo_ids.update(fdo_list)
+
+    nodes: list[dict] = []
+    section_membership: dict[str, list[str]] = {}  # fdo_id → [sections]
+
+    for fdo_id in all_fdo_ids:
+        member_sections = [s for s, ids in sections.items() if fdo_id in ids]
+        section_membership[fdo_id] = member_sections
+        nodes.append({
+            "id": fdo_id,
+            "title": fdo_id,  # UI can enrich via kronos_get
+            "sections": member_sections,
+            "reference_count": len(member_sections),
+        })
+
+    # Edges: co-section membership (FDOs referenced in the same section)
+    edges: list[dict] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for section_name, fdo_ids in sections.items():
+        for i, a in enumerate(fdo_ids):
+            for b in fdo_ids[i + 1:]:
+                edge_key = tuple(sorted((a, b)))
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": edge_key[0],
+                        "target": edge_key[1],
+                        "type": "co_section",
+                        "section": section_name,
+                    })
+
+    return JSONResponse({
+        "nodes": nodes,
+        "edges": edges,
+        "sections": list(sections.keys()),
+        "node_count": len(nodes),
+        "edge_count": len(edges),
     })
 
 

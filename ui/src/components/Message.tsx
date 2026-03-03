@@ -23,10 +23,11 @@ const NODE_COLORS: Record<string, string> = {
   memory: "#8b5cf6",
   skill_match: "#ec4899",
   evolve: "#06b6d4",
+  memory_update: "#22c55e",
 };
 
 /** Nodes whose step bubbles are collapsed by default (background system work). */
-const COLLAPSED_NODES = new Set(["evolve", "memory", "identity", "compress"]);
+const COLLAPSED_NODES = new Set(["evolve", "memory", "identity", "compress", "memory_update"]);
 
 /** Short labels for collapsed system step bubbles. */
 const COLLAPSED_LABELS: Record<string, string> = {
@@ -34,6 +35,7 @@ const COLLAPSED_LABELS: Record<string, string> = {
   memory: "knowledge loaded",
   identity: "identity loaded",
   compress: "context compressed",
+  memory_update: "memory updated",
 };
 
 function ThinkingIndicator({ label = "thinking" }: { label?: string }) {

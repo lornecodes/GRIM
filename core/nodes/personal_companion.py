@@ -99,6 +99,7 @@ def make_personal_companion_node(
 
         messages = list(state.get("messages", []))
         knowledge_context = state.get("knowledge_context", [])
+        session_knowledge = state.get("session_knowledge", [])
         recent_notes = state.get("recent_notes", [])
 
         # Build system prompt — personality-forward, no skills/objectives
@@ -109,6 +110,7 @@ def make_personal_companion_node(
             personality_path=config.identity_personality_path,
             field_state=state.get("field_state"),
             knowledge_context=knowledge_context,
+            session_knowledge=session_knowledge,
             matched_skills=[],  # omit skills in personal mode
             objectives=None,  # omit objectives in personal mode
             personality_cache_path=config.personality_cache_path,

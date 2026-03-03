@@ -1,0 +1,115 @@
+version: "1.0"
+tier: 1
+category: knowledge_context
+description: "Session knowledge accumulation, dedup, reducer, and merge logic"
+
+cases:
+  # ══════════════════════════════════════════════════════════
+  # KnowledgeEntry construction
+  # ══════════════════════════════════════════════════════════
+  - id: sk-entry-defaults
+    tags: [knowledge_entry, construction]
+    message: "test entry construction"
+    expected:
+      reducer_check: entry_defaults
+    description: "KnowledgeEntry has default hit_count=1"
+
+  - id: sk-entry-to-dict
+    tags: [knowledge_entry, serialization]
+    message: "test serialization"
+    expected:
+      reducer_check: entry_to_dict
+    description: "to_dict produces expected keys"
+
+  - id: sk-entry-related
+    tags: [knowledge_entry, serialization]
+    message: "test related field"
+    expected:
+      reducer_check: entry_related
+    description: "to_dict includes related FDO IDs"
+
+  # ══════════════════════════════════════════════════════════
+  # Reducer: deduplication
+  # ══════════════════════════════════════════════════════════
+  - id: sk-reducer-both-none
+    tags: [reducer, edge_case]
+    message: "none inputs"
+    expected:
+      reducer_check: both_none
+    description: "Both None returns empty list"
+
+  - id: sk-reducer-dedup-bumps-hit-count
+    tags: [reducer, dedup]
+    message: "dedup test"
+    expected:
+      reducer_check: dedup_bumps_hit_count
+    description: "Re-encounter bumps hit_count"
+
+  - id: sk-reducer-dedup-updates-turn
+    tags: [reducer, dedup]
+    message: "dedup turn test"
+    expected:
+      reducer_check: dedup_updates_turn
+    description: "Re-encounter updates last_referenced_turn"
+
+  - id: sk-reducer-cap-enforcement
+    tags: [reducer, cap]
+    message: "cap test"
+    expected:
+      reducer_check: cap_enforcement
+    description: "Reducer caps at 50 entries"
+
+  - id: sk-reducer-cap-keeps-important
+    tags: [reducer, cap]
+    message: "cap priority test"
+    expected:
+      reducer_check: cap_keeps_important
+    description: "High hit_count entries survive cap"
+
+  # ══════════════════════════════════════════════════════════
+  # Merge knowledge sources
+  # ══════════════════════════════════════════════════════════
+  - id: sk-merge-empty
+    tags: [merge, edge_case]
+    message: "empty merge"
+    expected:
+      reducer_check: merge_empty
+    description: "Empty inputs produce empty result"
+
+  - id: sk-merge-dedup
+    tags: [merge, dedup]
+    message: "merge dedup"
+    expected:
+      reducer_check: merge_dedup
+    description: "Same FDO in both sources deduplicated"
+
+  - id: sk-merge-per-turn-priority
+    tags: [merge, priority]
+    message: "merge priority"
+    expected:
+      reducer_check: merge_priority
+    description: "Per-turn FDOs come first"
+
+  - id: sk-merge-cap-10
+    tags: [merge, cap]
+    message: "merge cap test"
+    expected:
+      reducer_check: merge_cap_10
+    description: "Merged context capped at 10 FDOs"
+
+  # ══════════════════════════════════════════════════════════
+  # Prompt builder integration
+  # ══════════════════════════════════════════════════════════
+  - id: sk-prompt-accepts-param
+    tags: [prompt_builder]
+    message: "prompt param test"
+    expected:
+      reducer_check: prompt_accepts_param
+    description: "build_system_prompt_parts accepts session_knowledge"
+
+  - id: sk-compression-placeholder
+    tags: [compression]
+    message: "compression test"
+    expected:
+      reducer_check: compression_placeholder
+    description: "COMPRESSION_PROMPT has {knowledge_references}"

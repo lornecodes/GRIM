@@ -131,6 +131,7 @@ class EvalRunner:
     ) -> list[SuiteResult]:
         """Run all Tier 1 evaluations."""
         from eval.engine.tier1.keyword_routing import evaluate_keyword_suite
+        from eval.engine.tier1.knowledge_context import evaluate_knowledge_suite
         from eval.engine.tier1.routing import evaluate_routing_suite
         from eval.engine.tier1.skill_matching import evaluate_skill_suite
         from eval.engine.tier1.tool_resolution import evaluate_tool_suite
@@ -143,6 +144,7 @@ class EvalRunner:
             "skill_matching": evaluate_skill_suite,
             "tool_groups": evaluate_tool_suite,
             "keyword_routing": evaluate_keyword_suite,
+            "knowledge_context": evaluate_knowledge_suite,
         }
 
         for category, dataset in datasets.items():

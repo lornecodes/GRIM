@@ -205,18 +205,18 @@ class TestBuildContext:
         assert "pac (physics)" in ctx["relevant_fdos"]
         assert "sec (physics)" in ctx["relevant_fdos"]
 
-    def test_limits_to_5_fdos(self):
+    def test_limits_to_10_fdos(self):
         agent = BaseAgent.__new__(BaseAgent)
         fdos = [
             FDOSummary(id=f"fdo-{i}", title=f"FDO {i}", domain="test",
                        status="stable", confidence=0.5, summary=f"FDO {i}")
-            for i in range(10)
+            for i in range(15)
         ]
         state = {"knowledge_context": fdos}
         ctx = agent.build_context(state)
-        # Should only include first 5
-        assert "fdo-4 (test)" in ctx["relevant_fdos"]
-        assert "fdo-5" not in ctx["relevant_fdos"]
+        # Should only include first 10 (merged knowledge cap)
+        assert "fdo-9 (test)" in ctx["relevant_fdos"]
+        assert "fdo-10" not in ctx["relevant_fdos"]
 
     def test_single_fdo(self):
         agent = BaseAgent.__new__(BaseAgent)

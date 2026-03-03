@@ -158,10 +158,12 @@ def make_audit_agent(config: GrimConfig):
                 "Previous review failed — check if issues were addressed."
             )
 
-        knowledge_context = state.get("knowledge_context", [])
-        if knowledge_context:
+        from core.agents.base import _merge_knowledge_sources
+
+        all_fdos = _merge_knowledge_sources(state)
+        if all_fdos:
             context["relevant_knowledge"] = ", ".join(
-                f"{fdo.id} ({fdo.domain})" for fdo in knowledge_context[:5]
+                f"{fdo.id} ({fdo.domain})" for fdo in all_fdos[:8]
             )
 
         # The audit preamble is injected as the skill protocol

@@ -21,11 +21,13 @@ export interface TraceEvent {
 export interface StreamEvent {
   type: "stream";
   token: string;
+  node?: string;
 }
 
 export interface ResponseMeta {
   mode: string;
   knowledge_count: number;
+  session_knowledge_count?: number;
   skills: string[];
   fdo_ids: string[];
   total_ms: number;
@@ -48,6 +50,15 @@ export interface StreamClearEvent {
   thinking?: string;  // the intermediate text that was cleared
 }
 
+// ── Memory notification (compact evolve node feedback) ──
+
+export interface MemoryNotificationEvent {
+  type: "memory_notification";
+  updated: boolean;
+  summary: string;
+  duration_ms?: number;
+}
+
 // ── UI command types (future GRIM UI control) ──
 
 export type UICommandType =
@@ -62,7 +73,7 @@ export interface UICommand {
   payload?: Record<string, unknown>;
 }
 
-export type ServerEvent = TraceEvent | StreamEvent | StreamClearEvent | ResponseEvent | ErrorEvent | UICommand;
+export type ServerEvent = TraceEvent | StreamEvent | StreamClearEvent | ResponseEvent | ErrorEvent | MemoryNotificationEvent | UICommand;
 
 // ── Chat state types ──
 
