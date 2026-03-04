@@ -1527,8 +1527,11 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                     # so the final answer starts fresh
                                     _node_stream_text["companion"] = ""
                                     full_response = ""
-                            # Always capture the LAST non-tool-call AI response.
-                            if not has_tool_calls and hasattr(resp, "content"):
+                            # Capture the LAST non-tool-call AI response —
+                            # but NOT from the evolve node, whose LLM calls
+                            # (objective extraction, memory update) are internal
+                            # and must not overwrite the user-facing response.
+                            if not has_tool_calls and hasattr(resp, "content") and _current_node != "evolve":
                                 text = _extract_text(resp.content)
                                 if text:
                                     full_response = text
