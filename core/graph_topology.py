@@ -351,10 +351,20 @@ NODE_POSITIONS: dict[str, tuple[int, int]] = {
     # Postprocessing (col 9-10)
     "integrate":            (9, 0),
     "evolve":               (10, 0),
+    # v0.10 subgraph nodes (alternative topology — shares cols with v0.0.6
+    # nodes that don't coexist in the same graph)
+    "companion_router":     (4, 3),   # replaces graph_router
+    "conversation":         (5, 3),   # replaces personal_companion / companion
+    "planning":             (6, 3),   # replaces planning_companion
+    "research":             (5, 4),   # replaces router → dispatch (research)
+    "code":                 (6, 4),   # replaces dispatch (ironclaw)
+    "response_generator":   (8, 3),   # new — loop heartbeat
 }
 
 # All known graph node IDs (for validation)
 ALL_NODE_IDS: frozenset[str] = frozenset(
     list(INFRA_NODE_METADATA.keys())
     + ["companion", "personal_companion", "planning_companion"]
+    + ["companion_router", "conversation", "planning", "research", "code",
+       "response_generator"]
 )

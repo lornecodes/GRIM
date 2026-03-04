@@ -12,8 +12,8 @@ v0.0.6 graph (keyword routing):
 
 v0.10 graph (companion router — use_companion_router=True):
     identity → compress → memory → skill_match → companion_router →
-        [personal_companion | planning_companion | companion | dispatch] →
-        → response_generator → [continue: companion_router | exit: integrate] →
+        [conversation | planning | research | code] →
+        response_generator → [continue: companion_router | exit: integrate] →
         integrate → evolve → END
 """
 from __future__ import annotations
@@ -172,13 +172,12 @@ def add_planning_graph(
 def add_companion_routing(
     graph: StateGraph,
     config: GrimConfig,
-    reasoning_cache: Any = None,
 ) -> dict[str, Any]:
     """Add v0.10 companion router: single LLM-backed routing node.
 
     Replaces both add_graph_routing() and add_routing() with a single
     companion_router node that uses structured output intent classification.
-    Routes directly to: personal_companion | planning_companion | companion | dispatch.
+    Routes to subgraph wrapper nodes: conversation | planning | research | code.
 
     Requires config.use_companion_router = True.
     """
@@ -188,25 +187,75 @@ def add_companion_routing(
     )
 
     router_fn = make_companion_router_node(config)
-    companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
-
     graph.add_node("companion_router", router_fn)
-    graph.add_node("companion", companion_fn)
-
     graph.add_edge("skill_match", "companion_router")
 
     graph.add_conditional_edges(
         "companion_router",
         companion_route_decision,
         {
-            "personal_companion": "personal_companion",
-            "planning_companion": "planning_companion",
-            "companion": "companion",
-            "dispatch": "dispatch",
+            "conversation": "conversation",
+            "planning": "planning",
+            "research": "research",
+            "code": "code",
         },
     )
 
-    return {"companion_router": router_fn, "companion": companion_fn}
+    return {"companion_router": router_fn}
+
+
+def add_v10_subgraphs(
+    graph: StateGraph,
+    config: GrimConfig,
+    reasoning_cache: Any,
+    agents: dict[str, Any],
+) -> dict[str, Any]:
+    """Add v0.10 subgraph wrapper nodes.
+
+    Creates all 4 subgraph wrappers and wires them to response_generator:
+      - conversation: wraps companion + personal_companion
+      - planning: wraps planning_companion
+      - research: wraps dispatch (research/codebase/memory agents)
+      - code: wraps dispatch (ironclaw/code agents)
+
+    Each subgraph produces SubgraphOutput for the Response Generator loop.
+    No graph-level audit in v0.10 — audit will move inside code subgraph later.
+    """
+    from core.subgraphs.code import make_code_subgraph
+    from core.subgraphs.conversation import make_conversation_subgraph
+    from core.subgraphs.planning import make_planning_subgraph
+    from core.subgraphs.research import make_research_subgraph
+
+    # Create underlying node functions
+    companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
+    personal_fn = make_personal_companion_node(config, reasoning_cache=reasoning_cache)
+    planning_fn = make_planning_companion_node(config, reasoning_cache=reasoning_cache)
+    dispatch_fn = make_dispatch_node(agents)
+
+    # Create subgraph wrappers
+    conv_sg = make_conversation_subgraph(companion_fn, personal_fn)
+    plan_sg = make_planning_subgraph(planning_fn)
+    res_sg = make_research_subgraph(dispatch_fn)
+    code_sg = make_code_subgraph(dispatch_fn)
+
+    # Add as graph nodes
+    graph.add_node("conversation", conv_sg)
+    graph.add_node("planning", plan_sg)
+    graph.add_node("research", res_sg)
+    graph.add_node("code", code_sg)
+
+    # All subgraphs → response_generator
+    graph.add_edge("conversation", "response_generator")
+    graph.add_edge("planning", "response_generator")
+    graph.add_edge("research", "response_generator")
+    graph.add_edge("code", "response_generator")
+
+    return {
+        "conversation": conv_sg,
+        "planning": plan_sg,
+        "research": res_sg,
+        "code": code_sg,
+    }
 
 
 def add_response_generator(
@@ -373,23 +422,40 @@ def build_graph(
     add_preprocessing(graph, config, mcp_session, skill_registry, reasoning_cache)
 
     if config.use_companion_router:
-        # v0.10: single LLM-backed router + response generator loop
-        add_companion_routing(graph, config, reasoning_cache)
+        # v0.10: LLM-backed router → subgraph wrappers → response generator loop
+        #
+        # Topology:
+        #   identity → compress → memory → skill_match → companion_router →
+        #     [conversation | planning | research | code] →
+        #     response_generator → [continue: companion_router | exit: integrate] →
+        #     integrate → evolve → END
+        #
+        # No graph-level audit pipeline in v0.10 — audit will be added
+        # inside the code subgraph in a later iteration.
+        add_companion_routing(graph, config)
         add_response_generator(graph, router_node_name="companion_router")
-        output_node = "response_generator"
-        node_count = 15  # companion_router + response_generator replaces graph_router + router
+        add_v10_subgraphs(graph, config, reasoning_cache, agents)
+
+        # Simplified postprocessing — no standalone companion edge
+        evolve_fn = make_evolve_node(config, mcp_session=mcp_session)
+        graph.add_node("integrate", integrate_node)
+        graph.add_node("evolve", evolve_fn)
+        graph.add_edge("integrate", "evolve")
+        graph.add_edge("evolve", END)
+
+        node_count = 11  # identity compress memory skill_match companion_router
+                         # conversation planning research code response_generator
+                         # integrate evolve
         logger.info("Using v0.10 companion router (LLM-backed intent classification)")
     else:
         # v0.0.6: keyword-based two-stage routing (no response generator)
         add_graph_routing(graph)
         add_routing(graph, config, reasoning_cache)
-        output_node = "integrate"
+        add_personal_graph(graph, config, reasoning_cache)
+        add_planning_graph(graph, config, reasoning_cache)
+        add_agents(graph, agents)
+        add_postprocessing(graph, config, mcp_session)
         node_count = 15
-
-    add_personal_graph(graph, config, reasoning_cache, output_node=output_node)
-    add_planning_graph(graph, config, reasoning_cache, output_node=output_node)
-    add_agents(graph, agents, output_node=output_node)
-    add_postprocessing(graph, config, mcp_session, companion_output_node=output_node)
 
     # Compile with checkpointer
     if checkpointer is None:

@@ -150,26 +150,32 @@ def make_companion_router_node(config: GrimConfig):
 
 
 def companion_route_decision(state: GrimState) -> str:
-    """LangGraph conditional edge function — routes to graph branch.
+    """LangGraph conditional edge function — routes to subgraph.
 
     Replaces both graph_route_decision and route_decision.
-    Returns the next node name based on the companion router's output.
+    Returns the subgraph node name based on the companion router's output.
 
     Mapping:
-      graph_target="personal"  → "personal_companion"
-      graph_target="planning"  → "planning_companion"
-      graph_target="research" + mode="companion"  → "companion"
-      graph_target="research" + mode="delegate"   → "dispatch"
+      graph_target="personal"                        → "conversation"
+      graph_target="planning"                        → "planning"
+      mode="companion" (no delegation)               → "conversation"
+      mode="delegate" + delegation_type="ironclaw"   → "code"
+      mode="delegate" + other delegation             → "research"
     """
     graph_target = state.get("graph_target", "research")
 
     if graph_target == "personal":
-        return "personal_companion"
+        return "conversation"
     if graph_target == "planning":
-        return "planning_companion"
+        return "planning"
 
-    # Research branch — companion or dispatch
+    # Research branch — companion (conversation) or delegate
     mode = state.get("mode", "companion")
-    if mode == "delegate":
-        return "dispatch"
-    return "companion"
+    if mode != "delegate":
+        return "conversation"
+
+    # Delegate mode — split by delegation type
+    delegation = state.get("delegation_type")
+    if delegation == "ironclaw":
+        return "code"
+    return "research"

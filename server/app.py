@@ -1423,9 +1423,15 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     _event_count += 1
 
                     # ── Node lifecycle ──
+                    # v0.0.6 nodes + v0.10 subgraph nodes
                     if kind == "on_chain_start" and name in (
-                        "identity", "compress", "memory", "skill_match", "router",
-                        "companion", "dispatch", "integrate", "evolve",
+                        "identity", "compress", "memory", "skill_match",
+                        "router", "companion", "dispatch", "integrate", "evolve",
+                        "graph_router", "personal_companion", "planning_companion",
+                        "audit_gate", "audit", "re_dispatch",
+                        # v0.10 subgraph nodes
+                        "companion_router", "conversation", "planning",
+                        "research", "code", "response_generator",
                     ):
                         if name not in seen_nodes:
                             seen_nodes.add(name)
@@ -1531,16 +1537,17 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                 # (companion will make tool calls, then answer).
                                 # UI should clear the bubble so the final answer
                                 # starts fresh.
-                                if _current_node == "companion":
-                                    thinking = _node_stream_text.get("companion", "")
+                                # Applies to companion (v0.0.6) and conversation (v0.10)
+                                if _current_node in ("companion", "conversation"):
+                                    thinking = _node_stream_text.get(_current_node, "")
                                     await ws.send_json({
                                         "type": "stream_clear",
-                                        "node": "companion",
+                                        "node": _current_node,
                                         "thinking": thinking.strip() if thinking else "",
                                     })
-                                    # Reset companion stream text and full_response
+                                    # Reset stream text and full_response
                                     # so the final answer starts fresh
-                                    _node_stream_text["companion"] = ""
+                                    _node_stream_text[_current_node] = ""
                                     full_response = ""
                             # Capture the LAST non-tool-call AI response —
                             # but NOT from the evolve node, whose LLM calls
@@ -1675,7 +1682,10 @@ async def graph_topology():
             pos = NODE_POSITIONS.get(node_id)
             if pos is None:
                 continue  # skip agents not in the graph topology (e.g. sub-agents)
-            node_type = "companion" if node_id.endswith("_companion") or node_id == "companion" else "agent"
+            _companion_nodes = {"companion", "conversation", "planning"}
+            node_type = "companion" if (
+                node_id.endswith("_companion") or node_id in _companion_nodes
+            ) else "agent"
             node = {
                 **meta,
                 "node_type": node_type,

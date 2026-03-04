@@ -253,37 +253,42 @@ class TestCompanionRouterNode:
 
 
 class TestCompanionRouteDecision:
-    """Test the unified conditional edge function."""
+    """Test the unified conditional edge function — routes to subgraph names."""
 
     def test_personal_target(self):
         state = {"graph_target": "personal", "mode": "companion"}
-        assert companion_route_decision(state) == "personal_companion"
+        assert companion_route_decision(state) == "conversation"
 
     def test_planning_target(self):
         state = {"graph_target": "planning", "mode": "companion"}
-        assert companion_route_decision(state) == "planning_companion"
+        assert companion_route_decision(state) == "planning"
 
     def test_research_companion(self):
         state = {"graph_target": "research", "mode": "companion"}
-        assert companion_route_decision(state) == "companion"
+        assert companion_route_decision(state) == "conversation"
 
     def test_research_delegate(self):
-        state = {"graph_target": "research", "mode": "delegate"}
-        assert companion_route_decision(state) == "dispatch"
+        state = {"graph_target": "research", "mode": "delegate", "delegation_type": "research"}
+        assert companion_route_decision(state) == "research"
+
+    def test_research_delegate_ironclaw(self):
+        """Ironclaw delegation routes to code subgraph."""
+        state = {"graph_target": "research", "mode": "delegate", "delegation_type": "ironclaw"}
+        assert companion_route_decision(state) == "code"
 
     def test_default_research_companion(self):
-        """Missing state fields default to research/companion."""
-        assert companion_route_decision({}) == "companion"
+        """Missing state fields default to conversation (companion mode)."""
+        assert companion_route_decision({}) == "conversation"
 
     def test_personal_ignores_mode(self):
-        """Personal always goes to personal_companion regardless of mode."""
+        """Personal always goes to conversation regardless of mode."""
         state = {"graph_target": "personal", "mode": "delegate"}
-        assert companion_route_decision(state) == "personal_companion"
+        assert companion_route_decision(state) == "conversation"
 
     def test_planning_ignores_mode(self):
-        """Planning always goes to planning_companion regardless of mode."""
+        """Planning always goes to planning regardless of mode."""
         state = {"graph_target": "planning", "mode": "delegate"}
-        assert companion_route_decision(state) == "planning_companion"
+        assert companion_route_decision(state) == "planning"
 
 
 # ── Integration: edge function matches node output ──────────────────────
@@ -301,7 +306,7 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("hey"))
-        assert companion_route_decision(result) == "personal_companion"
+        assert companion_route_decision(result) == "conversation"
 
     @pytest.mark.asyncio
     async def test_code_path(self):
@@ -312,7 +317,7 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("implement auth"))
-        assert companion_route_decision(result) == "dispatch"
+        assert companion_route_decision(result) == "code"
 
     @pytest.mark.asyncio
     async def test_planning_path(self):
@@ -323,7 +328,7 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("plan sprint"))
-        assert companion_route_decision(result) == "planning_companion"
+        assert companion_route_decision(result) == "planning"
 
     @pytest.mark.asyncio
     async def test_research_companion_path(self):
@@ -334,7 +339,7 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("hmm"))
-        assert companion_route_decision(result) == "companion"
+        assert companion_route_decision(result) == "conversation"
 
     @pytest.mark.asyncio
     async def test_research_delegate_path(self):
@@ -345,7 +350,7 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("search the vault"))
-        assert companion_route_decision(result) == "dispatch"
+        assert companion_route_decision(result) == "research"
 
     @pytest.mark.asyncio
     async def test_operations_delegate_path(self):
@@ -356,4 +361,4 @@ class TestEdgeFunctionIntegration:
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(_state("capture this"))
-        assert companion_route_decision(result) == "dispatch"
+        assert companion_route_decision(result) == "research"

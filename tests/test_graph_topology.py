@@ -282,7 +282,8 @@ class TestAllNodeIds:
         assert "planning_companion" in ALL_NODE_IDS
 
     def test_count(self):
-        assert len(ALL_NODE_IDS) == 14
+        # 14 v0.0.6 nodes + 6 v0.10 nodes = 20
+        assert len(ALL_NODE_IDS) == 20
 
     def test_is_frozenset(self):
         assert isinstance(ALL_NODE_IDS, frozenset)
@@ -885,7 +886,12 @@ class TestCrossValidation:
         infra = set(INFRA_NODE_METADATA.keys())
         companions = {"companion", "personal_companion", "planning_companion"}
         agents_in_graph = {"audit"}  # agents that have positions in the topology
-        known = infra | companions | agents_in_graph
+        # v0.10 subgraph nodes (alternative topology)
+        v10_nodes = {
+            "companion_router", "conversation", "planning",
+            "research", "code", "response_generator",
+        }
+        known = infra | companions | agents_in_graph | v10_nodes
         for node_id in NODE_POSITIONS:
             assert node_id in known, (
                 f"Node {node_id} has a position but is not in infra/companion set"
