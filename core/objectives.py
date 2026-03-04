@@ -1,10 +1,10 @@
 """Persistent objectives — long-running goals that survive compression and sessions.
 
-Objectives are stored as YAML in local/objectives/active.yaml, following the
-existing local/evolution/ pattern. They are:
-  - Loaded at session start (identity node)
-  - Injected into the system prompt (prompt builder, dynamic section)
-  - Extracted/updated by the evolve node via a lightweight LLM call
+v0.0.6 objectives are stored as YAML in local/objectives/active.yaml (evolve node).
+v0.10 objectives use the Pydantic Objective model from state.py (loop system).
+
+Both coexist during migration. LegacyObjective handles YAML persistence and
+the evolve node extraction. The state.Objective model drives the new loop.
 """
 
 from __future__ import annotations
@@ -16,12 +16,23 @@ from pathlib import Path
 
 import yaml
 
+from core.state import Objective as StateObjective
+from core.state import ObjectiveStatus
+
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Legacy objective (v0.0.6) — YAML persistence for evolve node
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Objective:
-    """A persistent objective that survives compression and sessions."""
+    """A persistent objective that survives compression and sessions.
+
+    This is the v0.0.6 YAML-backed objective. For the new v0.10 loop-driving
+    objective model, see core.state.Objective.
+    """
 
     id: str  # short slug, e.g. "implement-caching"
     description: str  # what needs to be accomplished
@@ -52,6 +63,22 @@ class Objective:
             updated=d.get("updated", ""),
             source_session=d.get("source_session", ""),
             notes=d.get("notes", []),
+        )
+
+    def to_state_objective(self) -> StateObjective:
+        """Convert to v0.10 state Objective for the loop system."""
+        status_map = {
+            "active": ObjectiveStatus.ACTIVE,
+            "completed": ObjectiveStatus.COMPLETE,
+            "stalled": ObjectiveStatus.BLOCKED,
+        }
+        return StateObjective(
+            id=self.id,
+            title=self.description,
+            status=status_map.get(self.status, ObjectiveStatus.PENDING),
+            context={"legacy": True, "notes": self.notes},
+            created_at=self.created or datetime.now().isoformat(),
+            updated_at=self.updated or datetime.now().isoformat(),
         )
 
 

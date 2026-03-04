@@ -25,7 +25,7 @@ from core.personality.user_cache import (
     compile_user_cache,
     is_user_cache_stale,
 )
-from core.state import GrimState
+from core.state import STATE_SCHEMA_VERSION, GrimState, UXMode, get_active_objectives
 
 logger = logging.getLogger(__name__)
 
@@ -108,25 +108,53 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             working_memory=working_memory or None,
         )
 
-        # Load persistent objectives
-        objectives = load_objectives(config.objectives_path)
-        if objectives:
-            active = [o for o in objectives if o.status == "active"]
-            logger.info("Loaded %d objectives (%d active)", len(objectives), len(active))
+        # Load persistent objectives (legacy YAML format)
+        legacy_objectives = load_objectives(config.objectives_path)
+        if legacy_objectives:
+            active = [o for o in legacy_objectives if o.status == "active"]
+            logger.info("Loaded %d legacy objectives (%d active)", len(legacy_objectives), len(active))
+
+        # Convert legacy objectives to v0.10 state objectives
+        state_objectives = [o.to_state_objective() for o in legacy_objectives]
+
+        # Check for existing v0.10 objectives from a previous session
+        # (these come through via the checkpointer — already in state)
+        existing_objectives = state.get("objectives", [])
+        if existing_objectives:
+            active_existing = get_active_objectives(existing_objectives)
+            if active_existing:
+                logger.info(
+                    "Cross-session resume: %d active objectives from previous session",
+                    len(active_existing),
+                )
+                # Merge: existing state objectives take priority over legacy
+                existing_ids = {o.id for o in existing_objectives}
+                for so in state_objectives:
+                    if so.id not in existing_ids:
+                        existing_objectives.append(so)
+                state_objectives = existing_objectives
 
         logger.info(
-            "Identity loaded — mode: %s, coherence: %.2f",
+            "Identity loaded — mode: %s, coherence: %.2f, objectives: %d",
             field_state.expression_mode(),
             field_state.coherence,
+            len(state_objectives),
         )
 
         return {
+            "schema_version": STATE_SCHEMA_VERSION,
             "system_prompt": prompt,
             "field_state": field_state,
             "caller_id": caller_id,
             "caller_context": caller_context,
-            "objectives": objectives,
+            "objectives": state_objectives,
             "ironclaw_available": tool_context.ironclaw_available,
+            "ux_mode": state.get("ux_mode", UXMode.FULLSCREEN.value),
+            "loop_count": 0,
+            "max_loops": 10,
+            "should_continue": False,
+            "subgraph_history": [],
+            "context_stack": [],
         }
 
     return identity_node
