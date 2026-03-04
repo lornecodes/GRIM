@@ -43,9 +43,9 @@ export function GrimTypingSprite({ size = "sm", className }: GrimTypingSpritePro
   const [tick, setTick] = useState(0);
   const [pressedKey, setPressedKey] = useState<{ row: number; col: number } | null>(null);
 
-  const px = size === "xs" ? 1.5 : size === "sm" ? 2 : 3;
-  const kpx = size === "xs" ? 5 : size === "sm" ? 6 : 8;
-  const kgap = size === "xs" ? 1.5 : size === "sm" ? 2 : 3;
+  const px = size === "xs" ? 2 : size === "sm" ? 3 : 5;
+  const kpx = size === "xs" ? 3 : size === "sm" ? 4 : 5;
+  const kgap = size === "xs" ? 1 : size === "sm" ? 1.5 : 2;
   const bob = size === "xs" ? 0 : Math.sin(tick * 2.0) * (size === "sm" ? 0.6 : 1.2);
   const eyePulse = 0.6 + Math.sin(tick * 1.2) * 0.25;
 
@@ -69,7 +69,7 @@ export function GrimTypingSprite({ size = "sm", className }: GrimTypingSpritePro
   }, []);
 
   const bodyW = BODY[0].length * px;
-  const kbW = TOP_ROW_KEYS * (kpx + kgap) - kgap + (size === "xs" ? 4 : 6);
+  const kbW = TOP_ROW_KEYS * (kpx + kgap) - kgap + (size === "xs" ? 4 : size === "sm" ? 5 : 6);
   const kbLeft = Math.round((bodyW - kbW) / 2);
 
   function pixelStyle(cell: number) {
@@ -128,18 +128,16 @@ export function GrimTypingSprite({ size = "sm", className }: GrimTypingSpritePro
           background: "#0e2030",
           border: "1px solid #1e3a52",
           borderRadius: 2,
-          padding: size === "xs" ? "2px 3px" : "3px 4px",
+          padding: size === "xs" ? "2px 3px" : size === "sm" ? "2px 3px" : "3px 4px",
           display: "flex",
           flexDirection: "column",
           gap: kgap,
           width: kbW,
         }}
       >
-        {/* Top row */}
-        <div style={{ display: "flex", gap: kgap }}>
-          {Array.from({ length: TOP_ROW_KEYS }, (_, i) => (
-            <Key key={i} row={0} col={i} />
-          ))}
+        {/* Spacebar (closest to GRIM) */}
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Key row={2} col={0} w={kpx * 4 + kgap * 3} />
         </div>
         {/* Home row */}
         <div style={{ display: "flex", gap: kgap, marginLeft: size === "xs" ? 2 : 3 }}>
@@ -147,9 +145,11 @@ export function GrimTypingSprite({ size = "sm", className }: GrimTypingSpritePro
             <Key key={i} row={1} col={i} />
           ))}
         </div>
-        {/* Spacebar */}
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <Key row={2} col={0} w={kpx * 4 + kgap * 3} />
+        {/* Top row (furthest from GRIM) */}
+        <div style={{ display: "flex", gap: kgap }}>
+          {Array.from({ length: TOP_ROW_KEYS }, (_, i) => (
+            <Key key={i} row={0} col={i} />
+          ))}
         </div>
       </div>
     </div>
