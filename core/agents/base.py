@@ -196,21 +196,48 @@ class BaseAgent:
                     "text": f"LLM call (step {step + 1})",
                 })
 
-                # Trim context to prevent bloat: keep the first 3 messages
-                # (system instructions + ack + task) and the last 4 messages
-                # (most recent tool exchange). Middle messages are dropped.
-                # Threshold is 9 (~3 tool steps) because each AI response
-                # contains large reasoning blocks that cause exponential
-                # slowdown if accumulated.
+                # Trim context to prevent bloat while preserving tool_call_id
+                # chains (Anthropic API rejects orphaned ToolMessages).
+                # Strategy: keep head (3 system msgs) + last complete
+                # AI→Tool exchange pair + the most recent AI response.
                 if len(messages) > 9:
                     head = messages[:3]  # system + ack + task
-                    tail = messages[-4:]  # last 2 exchanges
-                    dropped = len(messages) - 3 - 4
-                    summary_msg = HumanMessage(
-                        content=f"[{dropped} earlier messages trimmed for context efficiency. "
-                        f"Continue with the task based on recent results above.]"
-                    )
-                    messages = head + [summary_msg] + tail
+                    rest = messages[3:]
+
+                    # Walk backward to find complete tool exchange pairs.
+                    # Keep only the last AI+Tool pair to maintain valid chain.
+                    tail: list = []
+                    i = len(rest) - 1
+                    kept_tokens = 0
+                    while i >= 0 and kept_tokens < 4:
+                        tail.insert(0, rest[i])
+                        kept_tokens += 1
+                        i -= 1
+
+                    # Validate: strip leading ToolMessages with no matching
+                    # AIMessage (their tool_call_id would be orphaned).
+                    from langchain_core.messages import ToolMessage
+                    valid_tool_ids: set = set()
+                    for m in head + tail:
+                        if hasattr(m, "tool_calls") and m.tool_calls:
+                            for tc in m.tool_calls:
+                                valid_tool_ids.add(tc.get("id", ""))
+
+                    tail = [
+                        m for m in tail
+                        if not isinstance(m, ToolMessage)
+                        or getattr(m, "tool_call_id", "") in valid_tool_ids
+                    ]
+
+                    dropped = len(messages) - len(head) - len(tail)
+                    if dropped > 0:
+                        summary_msg = HumanMessage(
+                            content=f"[{dropped} earlier messages trimmed. "
+                            f"Continue with the task based on recent results.]"
+                        )
+                        messages = head + [summary_msg] + tail
+                    else:
+                        messages = head + tail
 
                 try:
                     response = await self.llm_with_tools.ainvoke(messages)

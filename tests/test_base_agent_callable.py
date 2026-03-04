@@ -510,6 +510,53 @@ class TestAgentLoopMessageTrimming:
         assert has_trim
 
     @pytest.mark.asyncio
+    async def test_orphan_tool_messages_stripped(self):
+        """ToolMessages whose AIMessage was trimmed are removed."""
+        from langchain_core.messages import ToolMessage
+
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.tools = []
+        agent.config = MagicMock()
+
+        invocation_args = []
+        call_count = {"n": 0}
+
+        async def fake_invoke(msgs):
+            invocation_args.append(list(msgs))
+            call_count["n"] += 1
+            resp = MagicMock()
+            if call_count["n"] <= 5:
+                resp.content = f"step {call_count['n']}"
+                resp.tool_calls = [{"name": "t", "args": {}, "id": f"id{call_count['n']}"}]
+            else:
+                resp.content = "done"
+                resp.tool_calls = []
+            return resp
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=fake_invoke)
+        agent.llm_with_tools = mock_llm
+
+        async def fake_execute_tool(tool_call):
+            return ToolMessage(content="ok", tool_call_id=tool_call["id"])
+        agent._execute_tool = fake_execute_tool
+
+        await agent.execute(task="do it")
+
+        # Check last invocation: no orphaned ToolMessages
+        last_call = invocation_args[-1]
+        for msg in last_call:
+            if isinstance(msg, ToolMessage):
+                # Its tool_call_id must match an AIMessage in the same call
+                matching_ai = any(
+                    hasattr(m, "tool_calls") and m.tool_calls and
+                    any(tc.get("id") == msg.tool_call_id for tc in m.tool_calls)
+                    for m in last_call
+                )
+                assert matching_ai, f"Orphaned ToolMessage with id={msg.tool_call_id}"
+
+    @pytest.mark.asyncio
     async def test_short_conversation_not_trimmed(self):
         """Conversations under 15 messages are NOT trimmed."""
         agent = BaseAgent.__new__(BaseAgent)
