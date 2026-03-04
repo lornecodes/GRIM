@@ -12,10 +12,9 @@ v0.0.6 graph (keyword routing):
 
 v0.10 graph (companion router — use_companion_router=True):
     identity → compress → memory → skill_match → companion_router →
-        [personal_companion → integrate → evolve → END]
-        [planning_companion → integrate → evolve → END]
-        [companion → integrate → evolve → END]
-        [dispatch → audit_gate → [audit | integrate] → evolve → END]
+        [personal_companion | planning_companion | companion | dispatch] →
+        → response_generator → [continue: companion_router | exit: integrate] →
+        integrate → evolve → END
 """
 from __future__ import annotations
 
@@ -137,14 +136,16 @@ def add_personal_graph(
     graph: StateGraph,
     config: GrimConfig,
     reasoning_cache: Any = None,
+    output_node: str = "integrate",
 ) -> dict[str, Any]:
     """Add personal companion graph branch.
 
-    Personal mode: personality-forward, no delegation, straight to integrate.
+    Personal mode: personality-forward, no delegation, straight to output_node.
+    output_node is "integrate" (v0.0.6) or "response_generator" (v0.10).
     """
     personal_fn = make_personal_companion_node(config, reasoning_cache=reasoning_cache)
     graph.add_node("personal_companion", personal_fn)
-    graph.add_edge("personal_companion", "integrate")
+    graph.add_edge("personal_companion", output_node)
 
     return {"personal_companion": personal_fn}
 
@@ -153,15 +154,17 @@ def add_planning_graph(
     graph: StateGraph,
     config: GrimConfig,
     reasoning_cache: Any = None,
+    output_node: str = "integrate",
 ) -> dict[str, Any]:
     """Add planning companion graph branch.
 
     Planning mode: work breakdown, scoping, draft creation, board population.
-    Has full task tools + vault read. Goes straight to integrate after responding.
+    Has full task tools + vault read. Goes straight to output_node after responding.
+    output_node is "integrate" (v0.0.6) or "response_generator" (v0.10).
     """
     planning_fn = make_planning_companion_node(config, reasoning_cache=reasoning_cache)
     graph.add_node("planning_companion", planning_fn)
-    graph.add_edge("planning_companion", "integrate")
+    graph.add_edge("planning_companion", output_node)
 
     return {"planning_companion": planning_fn}
 
@@ -206,13 +209,54 @@ def add_companion_routing(
     return {"companion_router": router_fn, "companion": companion_fn}
 
 
+def add_response_generator(
+    graph: StateGraph,
+    router_node_name: str = "companion_router",
+) -> dict[str, Any]:
+    """Add v0.10 Response Generator with loop/exit control.
+
+    The Response Generator is the loop heartbeat:
+      - All subgraph outputs flow through it
+      - Updates objectives, context_stack, subgraph_history
+      - Decides: loop back to router OR exit to integrate
+
+    Edges:
+      companion → response_generator
+      personal_companion → response_generator
+      planning_companion → response_generator
+      audit_gate skip → response_generator (instead of integrate)
+      audit pass/escalate → response_generator (instead of integrate)
+      response_generator → [continue: router | exit: integrate]
+    """
+    from core.nodes.response_generator import (
+        make_response_generator_node,
+        response_generator_decision,
+    )
+
+    rg_fn = make_response_generator_node()
+    graph.add_node("response_generator", rg_fn)
+
+    graph.add_conditional_edges(
+        "response_generator",
+        response_generator_decision,
+        {
+            "continue": router_node_name,
+            "exit": "integrate",
+        },
+    )
+
+    return {"response_generator": rg_fn}
+
+
 def add_agents(
     graph: StateGraph,
     agents: dict[str, Any],
+    output_node: str = "integrate",
 ) -> dict[str, Any]:
-    """Add agent execution nodes: dispatch → audit_gate → [audit | integrate].
+    """Add agent execution nodes: dispatch → audit_gate → [audit | output_node].
 
     Includes the zero-trust audit pipeline for IronClaw dispatches.
+    output_node is "integrate" (v0.0.6) or "response_generator" (v0.10).
     """
     dispatch_fn = make_dispatch_node(agents)
     audit_agent_fn = agents.get("audit")
@@ -225,18 +269,18 @@ def add_agents(
     # Dispatch → audit gate
     graph.add_edge("dispatch", "audit_gate")
 
-    # Audit gate: IronClaw + artifacts → audit, else → integrate
+    # Audit gate: IronClaw + artifacts → audit, else → output_node
     graph.add_conditional_edges(
         "audit_gate",
         audit_gate_decision,
-        {"audit": "audit", "skip": "integrate"},
+        {"audit": "audit", "skip": output_node},
     )
 
-    # Audit decision: pass → integrate, fail → re_dispatch, escalate → integrate
+    # Audit decision: pass → output_node, fail → re_dispatch, escalate → output_node
     graph.add_conditional_edges(
         "audit",
         audit_decision,
-        {"pass": "integrate", "fail": "re_dispatch", "escalate": "integrate"},
+        {"pass": output_node, "fail": "re_dispatch", "escalate": output_node},
     )
 
     # Re-dispatch loops back
@@ -249,18 +293,20 @@ def add_postprocessing(
     graph: StateGraph,
     config: GrimConfig,
     mcp_session: Any = None,
+    companion_output_node: str = "integrate",
 ) -> dict[str, Any]:
     """Add postprocessing nodes: integrate → evolve → END.
 
     Companion and agent results are integrated and the session evolves.
+    companion_output_node is "integrate" (v0.0.6) or "response_generator" (v0.10).
     """
     evolve_fn = make_evolve_node(config, mcp_session=mcp_session)
 
     graph.add_node("integrate", integrate_node)
     graph.add_node("evolve", evolve_fn)
 
-    # Companion → integrate (no audit needed)
-    graph.add_edge("companion", "integrate")
+    # Companion → output_node (integrate in v0.0.6, response_generator in v0.10)
+    graph.add_edge("companion", companion_output_node)
 
     # integrate → evolve → END
     graph.add_edge("integrate", "evolve")
@@ -327,20 +373,23 @@ def build_graph(
     add_preprocessing(graph, config, mcp_session, skill_registry, reasoning_cache)
 
     if config.use_companion_router:
-        # v0.10: single LLM-backed router replaces graph_router + router
+        # v0.10: single LLM-backed router + response generator loop
         add_companion_routing(graph, config, reasoning_cache)
-        node_count = 14  # one fewer node (no separate graph_router + router)
+        add_response_generator(graph, router_node_name="companion_router")
+        output_node = "response_generator"
+        node_count = 15  # companion_router + response_generator replaces graph_router + router
         logger.info("Using v0.10 companion router (LLM-backed intent classification)")
     else:
-        # v0.0.6: keyword-based two-stage routing
+        # v0.0.6: keyword-based two-stage routing (no response generator)
         add_graph_routing(graph)
         add_routing(graph, config, reasoning_cache)
+        output_node = "integrate"
         node_count = 15
 
-    add_personal_graph(graph, config, reasoning_cache)
-    add_planning_graph(graph, config, reasoning_cache)
-    add_agents(graph, agents)
-    add_postprocessing(graph, config, mcp_session)
+    add_personal_graph(graph, config, reasoning_cache, output_node=output_node)
+    add_planning_graph(graph, config, reasoning_cache, output_node=output_node)
+    add_agents(graph, agents, output_node=output_node)
+    add_postprocessing(graph, config, mcp_session, companion_output_node=output_node)
 
     # Compile with checkpointer
     if checkpointer is None:
