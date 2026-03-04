@@ -197,12 +197,15 @@ class BaseAgent:
                 })
 
                 # Trim context to prevent bloat: keep the first 3 messages
-                # (system instructions + ack + task) and the last 6 messages
-                # (recent tool exchanges). Middle messages get summarized.
-                if len(messages) > 15:
+                # (system instructions + ack + task) and the last 4 messages
+                # (most recent tool exchange). Middle messages are dropped.
+                # Threshold is 9 (~3 tool steps) because each AI response
+                # contains large reasoning blocks that cause exponential
+                # slowdown if accumulated.
+                if len(messages) > 9:
                     head = messages[:3]  # system + ack + task
-                    tail = messages[-6:]  # last 3 tool exchanges
-                    dropped = len(messages) - 3 - 6
+                    tail = messages[-4:]  # last 2 exchanges
+                    dropped = len(messages) - 3 - 4
                     summary_msg = HumanMessage(
                         content=f"[{dropped} earlier messages trimmed for context efficiency. "
                         f"Continue with the task based on recent results above.]"

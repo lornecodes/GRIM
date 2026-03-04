@@ -462,42 +462,52 @@ class TestAgentLoopMessageTrimming:
 
     @pytest.mark.asyncio
     async def test_messages_trimmed_when_too_many(self):
-        """When messages exceed 15, middle messages are trimmed."""
+        """When messages exceed 9, middle messages are trimmed."""
         agent = BaseAgent.__new__(BaseAgent)
         agent.agent_name = "test"
         agent.tools = []
         agent.config = MagicMock()
 
-        # Build a mock LLM that returns a final response (no tool calls)
-        mock_response = MagicMock()
-        mock_response.content = "final answer"
-        mock_response.tool_calls = []
+        # Track all invocations to see what messages the LLM receives
+        invocation_args = []
+        call_count = {"n": 0}
+
+        async def fake_invoke(msgs):
+            invocation_args.append(list(msgs))
+            call_count["n"] += 1
+            resp = MagicMock()
+            if call_count["n"] <= 5:
+                # Return tool calls for first 5 steps to build up messages
+                resp.content = f"thinking step {call_count['n']}"
+                resp.tool_calls = [{"name": "fake_tool", "args": {}, "id": f"c{call_count['n']}"}]
+            else:
+                # Final step: no tool calls
+                resp.content = "final answer"
+                resp.tool_calls = []
+            return resp
+
         mock_llm = AsyncMock()
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        mock_llm.ainvoke = AsyncMock(side_effect=fake_invoke)
         agent.llm_with_tools = mock_llm
 
-        # Build 20 messages (system + ack + task + 17 tool exchanges)
+        # Mock _execute_tool to return short results
         from langchain_core.messages import ToolMessage
-        messages_before = [
-            HumanMessage(content="[SYSTEM INSTRUCTIONS]"),
-            AIMessage(content="Understood."),
-            HumanMessage(content="do the task"),
-        ]
-        for i in range(8):
-            tc_msg = AIMessage(content=f"thinking {i}")
-            tc_msg.tool_calls = [{"name": "tool", "args": {}, "id": f"c{i}"}]
-            messages_before.append(tc_msg)
-            messages_before.append(ToolMessage(content=f"result {i}", tool_call_id=f"c{i}"))
-
-        # Should be > 15 messages
-        assert len(messages_before) > 15
+        async def fake_execute_tool(tool_call):
+            return ToolMessage(content="ok", tool_call_id=tool_call["id"])
+        agent._execute_tool = fake_execute_tool
 
         result = await agent.execute(task="do the task")
 
-        # The LLM was called — check that the messages passed to it are trimmed
-        call_args = mock_llm.ainvoke.call_args[0][0]
-        # Should be: 3 head + 1 summary + 6 tail = 10, not 20+
-        assert len(call_args) <= 12  # some tolerance
+        # By step 6, messages would be 3 + 5*2 = 13 without trimming.
+        # With trimming at >9, the last invocation should be trimmed.
+        last_call = invocation_args[-1]
+        assert len(last_call) <= 10  # 3 head + 1 summary + 4 tail + response
+        # Should contain trimming summary
+        has_trim = any(
+            hasattr(m, "content") and isinstance(m.content, str) and "trimmed" in m.content
+            for m in last_call
+        )
+        assert has_trim
 
     @pytest.mark.asyncio
     async def test_short_conversation_not_trimmed(self):
