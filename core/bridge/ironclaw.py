@@ -254,6 +254,9 @@ class IronClawBridge:
                 json={"task": task, "pattern": pattern},
             )
             resp.raise_for_status()
+            if not resp.content:
+                return {"session_id": "", "status": "failed", "agents_executed": [],
+                        "results": {}, "error": "IronClaw returned empty response"}
             return resp.json()
         except httpx.HTTPStatusError as exc:
             error_body = exc.response.json() if exc.response.content else {}

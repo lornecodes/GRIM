@@ -212,7 +212,18 @@ class BaseAgent:
                     )
                     messages = head + [summary_msg] + tail
 
-                response = await self.llm_with_tools.ainvoke(messages)
+                try:
+                    response = await self.llm_with_tools.ainvoke(messages)
+                except ValueError as ve:
+                    # "No generations found in stream" — transient API error.
+                    # Retry once; if it fails again, let it propagate.
+                    if "No generations found" in str(ve) and step < 9:
+                        logger.warning("%s agent: empty stream on step %d, retrying", self.agent_name, step + 1)
+                        import asyncio as _aio
+                        await _aio.sleep(1)
+                        response = await self.llm_with_tools.ainvoke(messages)
+                    else:
+                        raise
                 messages.append(response)
 
                 # Check for tool calls
