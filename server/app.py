@@ -1477,6 +1477,21 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                                      detail=detail if detail else None,
                                      step_content=step_text if step_text else None)
 
+                        # Capture integrate node's formatted response.
+                        # The integrate node returns {"messages": [AIMessage(...)]}
+                        # with the agent summary + audit verdict + file listing,
+                        # but it doesn't call an LLM, so on_chat_model_end never
+                        # fires for it. We must extract the text here.
+                        if name == "integrate" and isinstance(output, dict):
+                            integrate_msgs = output.get("messages", [])
+                            for im in integrate_msgs:
+                                if hasattr(im, "content"):
+                                    itext = _extract_text(im.content)
+                                    if itext:
+                                        full_response = itext
+                                        _node_text["integrate"] = itext
+                                        logger.debug("Captured integrate response (%d chars)", len(itext))
+
                         # Emit compact memory notification when evolve completes
                         # (instead of streaming full memory content to the UI)
                         if name == "evolve":
