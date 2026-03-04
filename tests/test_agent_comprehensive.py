@@ -539,11 +539,13 @@ class TestIronClawAgentComprehensive:
         assert "claw_dispatch_workflow" in tool_names
         assert "claw_scan_skill" in tool_names
 
-    def test_has_companion_tools(self, config):
+    def test_no_research_tools(self, config):
+        """IronClaw should NOT have kronos tools — context injected via build_context."""
         from core.agents.ironclaw_agent import IronClawAgent
         agent = IronClawAgent(config)
         tool_names = {t.name for t in agent.tools}
-        assert "kronos_search" in tool_names
+        assert "kronos_search" not in tool_names
+        assert "kronos_get" not in tool_names
 
     def test_no_direct_workspace_tools(self, config):
         """IronClaw agent uses claw_* tools, not direct workspace tools."""

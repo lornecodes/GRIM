@@ -16,7 +16,6 @@ from core.agents.base import BaseAgent
 from core.config import GrimConfig
 from core.state import AgentResult, GrimState
 from core.tools.ironclaw_tools import IRONCLAW_TOOLS
-from core.tools.kronos_read import COMPANION_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +54,11 @@ class IronClawAgent(BaseAgent):
     )
 
     def __init__(self, config: GrimConfig) -> None:
-        tools = IRONCLAW_TOOLS + COMPANION_TOOLS
-        super().__init__(config=config, tools=tools)
+        # IronClaw gets ONLY execution tools — no kronos research tools.
+        # Research context is injected via build_context() from the memory
+        # node. Giving IronClaw kronos tools causes it to waste steps
+        # re-researching instead of writing code.
+        super().__init__(config=config, tools=IRONCLAW_TOOLS)
 
 
 def make_ironclaw_agent(config: GrimConfig):

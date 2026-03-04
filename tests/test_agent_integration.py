@@ -112,13 +112,13 @@ class TestAgentConstruction:
         assert "claw_shell" in tool_names
         assert "claw_write_file" in tool_names
 
-    def test_ironclaw_agent_has_companion_tools(self):
+    def test_ironclaw_agent_no_research_tools(self):
+        """IronClaw should NOT have kronos tools — wastes steps researching."""
         from core.agents.ironclaw_agent import IronClawAgent
-        from core.tools.kronos_read import COMPANION_TOOLS
         agent = IronClawAgent(self._make_config())
-        companion_names = {t.name for t in COMPANION_TOOLS}
-        agent_names = {t.name for t in agent.tools}
-        assert companion_names.issubset(agent_names)
+        tool_names = {t.name for t in agent.tools}
+        assert "kronos_search" not in tool_names
+        assert "kronos_get" not in tool_names
 
     def test_planning_agent_name(self):
         from core.agents.planning_agent import PlanningAgent
