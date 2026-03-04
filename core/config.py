@@ -70,6 +70,8 @@ class GrimConfig:
     routing_default_tier: str = "sonnet"
     routing_classifier_enabled: bool = False  # enable after calibration
     routing_confidence_threshold: float = 0.6
+    routing_timeout: float = 3.0  # intent classifier LLM call timeout (seconds)
+    use_companion_router: bool = False  # v0.10: LLM-backed companion router (replaces keyword router)
 
     # Codebase — workspace-level repo awareness
     workspace_root: Path = field(default_factory=lambda: Path(".."))

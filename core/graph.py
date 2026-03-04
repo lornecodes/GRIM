@@ -4,11 +4,18 @@ The graph is built from composable sections. Each section adds a group
 of related nodes and edges. This makes it possible to build different
 graph configurations for different interaction modes.
 
-v0.0.6 graph (multi-graph architecture):
+v0.0.6 graph (keyword routing):
     identity → compress → memory → skill_match → graph_router →
         [personal: personal_companion → integrate → evolve → END]
         [research: router → [companion | dispatch] → audit_gate →
             [audit | integrate] → evolve → END]
+
+v0.10 graph (companion router — use_companion_router=True):
+    identity → compress → memory → skill_match → companion_router →
+        [personal_companion → integrate → evolve → END]
+        [planning_companion → integrate → evolve → END]
+        [companion → integrate → evolve → END]
+        [dispatch → audit_gate → [audit | integrate] → evolve → END]
 """
 from __future__ import annotations
 
@@ -159,6 +166,46 @@ def add_planning_graph(
     return {"planning_companion": planning_fn}
 
 
+def add_companion_routing(
+    graph: StateGraph,
+    config: GrimConfig,
+    reasoning_cache: Any = None,
+) -> dict[str, Any]:
+    """Add v0.10 companion router: single LLM-backed routing node.
+
+    Replaces both add_graph_routing() and add_routing() with a single
+    companion_router node that uses structured output intent classification.
+    Routes directly to: personal_companion | planning_companion | companion | dispatch.
+
+    Requires config.use_companion_router = True.
+    """
+    from core.nodes.companion_router import (
+        companion_route_decision,
+        make_companion_router_node,
+    )
+
+    router_fn = make_companion_router_node(config)
+    companion_fn = make_companion_node(config, reasoning_cache=reasoning_cache)
+
+    graph.add_node("companion_router", router_fn)
+    graph.add_node("companion", companion_fn)
+
+    graph.add_edge("skill_match", "companion_router")
+
+    graph.add_conditional_edges(
+        "companion_router",
+        companion_route_decision,
+        {
+            "personal_companion": "personal_companion",
+            "planning_companion": "planning_companion",
+            "companion": "companion",
+            "dispatch": "dispatch",
+        },
+    )
+
+    return {"companion_router": router_fn, "companion": companion_fn}
+
+
 def add_agents(
     graph: StateGraph,
     agents: dict[str, Any],
@@ -278,8 +325,18 @@ def build_graph(
     graph = StateGraph(GrimState)
 
     add_preprocessing(graph, config, mcp_session, skill_registry, reasoning_cache)
-    add_graph_routing(graph)
-    add_routing(graph, config, reasoning_cache)
+
+    if config.use_companion_router:
+        # v0.10: single LLM-backed router replaces graph_router + router
+        add_companion_routing(graph, config, reasoning_cache)
+        node_count = 14  # one fewer node (no separate graph_router + router)
+        logger.info("Using v0.10 companion router (LLM-backed intent classification)")
+    else:
+        # v0.0.6: keyword-based two-stage routing
+        add_graph_routing(graph)
+        add_routing(graph, config, reasoning_cache)
+        node_count = 15
+
     add_personal_graph(graph, config, reasoning_cache)
     add_planning_graph(graph, config, reasoning_cache)
     add_agents(graph, agents)
@@ -291,6 +348,6 @@ def build_graph(
 
     compiled = graph.compile(checkpointer=checkpointer)
     agent_count = len(agents)
-    logger.info("GRIM state graph compiled — 15 nodes, %d agents", agent_count)
+    logger.info("GRIM state graph compiled — %d nodes, %d agents", node_count, agent_count)
 
     return compiled
