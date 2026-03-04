@@ -112,13 +112,13 @@ class TestAgentConstruction:
         assert "claw_shell" in tool_names
         assert "claw_write_file" in tool_names
 
-    def test_ironclaw_agent_no_research_tools(self):
-        """IronClaw should NOT have kronos tools — wastes steps researching."""
+    def test_ironclaw_agent_limited_research_tools(self):
+        """IronClaw has kronos_get but NOT kronos_search."""
         from core.agents.ironclaw_agent import IronClawAgent
         agent = IronClawAgent(self._make_config())
         tool_names = {t.name for t in agent.tools}
+        assert "kronos_get" in tool_names
         assert "kronos_search" not in tool_names
-        assert "kronos_get" not in tool_names
 
     def test_planning_agent_name(self):
         from core.agents.planning_agent import PlanningAgent

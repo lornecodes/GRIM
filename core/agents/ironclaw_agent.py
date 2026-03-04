@@ -16,6 +16,7 @@ from core.agents.base import BaseAgent
 from core.config import GrimConfig
 from core.state import AgentResult, GrimState
 from core.tools.ironclaw_tools import IRONCLAW_TOOLS
+from core.tools.kronos_read import kronos_get
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +55,12 @@ class IronClawAgent(BaseAgent):
     )
 
     def __init__(self, config: GrimConfig) -> None:
-        # IronClaw gets ONLY execution tools — no kronos research tools.
-        # Research context is injected via build_context() from the memory
-        # node. Giving IronClaw kronos tools causes it to waste steps
-        # re-researching instead of writing code.
-        super().__init__(config=config, tools=IRONCLAW_TOOLS)
+        # IronClaw gets execution tools + kronos_get (read FDO details).
+        # NO kronos_search — that causes open-ended research spirals.
+        # kronos_get lets it look up specific FDOs from its knowledge
+        # context to get formulas/details needed for code generation.
+        tools = IRONCLAW_TOOLS + [kronos_get]
+        super().__init__(config=config, tools=tools)
 
 
 def make_ironclaw_agent(config: GrimConfig):
