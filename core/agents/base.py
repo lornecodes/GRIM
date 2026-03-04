@@ -196,6 +196,19 @@ class BaseAgent:
                     "text": f"LLM call (step {step + 1})",
                 })
 
+                # Trim context to prevent bloat: keep the first 3 messages
+                # (system instructions + ack + task) and the last 6 messages
+                # (recent tool exchanges). Middle messages get summarized.
+                if len(messages) > 15:
+                    head = messages[:3]  # system + ack + task
+                    tail = messages[-6:]  # last 3 tool exchanges
+                    dropped = len(messages) - 3 - 6
+                    summary_msg = HumanMessage(
+                        content=f"[{dropped} earlier messages trimmed for context efficiency. "
+                        f"Continue with the task based on recent results above.]"
+                    )
+                    messages = head + [summary_msg] + tail
+
                 response = await self.llm_with_tools.ainvoke(messages)
                 messages.append(response)
 
@@ -265,6 +278,11 @@ class BaseAgent:
                 summary=f"Failed: {exc}",
             )
 
+    # Max characters per tool result to prevent context bloat.
+    # Dispatch workflow results can be very large; truncating keeps
+    # the agent loop fast across many steps.
+    TOOL_RESULT_MAX_CHARS = 4000
+
     async def _execute_tool(self, tool_call: Any) -> Any:
         """Execute a single tool call and return the result message."""
         from langchain_core.messages import ToolMessage
@@ -279,8 +297,11 @@ class BaseAgent:
             if t.name == tool_name:
                 try:
                     result = await t.ainvoke(tool_args)
+                    content = str(result)
+                    if len(content) > self.TOOL_RESULT_MAX_CHARS:
+                        content = content[:self.TOOL_RESULT_MAX_CHARS] + f"\n\n[truncated — {len(content)} chars total]"
                     return ToolMessage(
-                        content=str(result),
+                        content=content,
                         tool_call_id=tool_call["id"],
                     )
                 except Exception as exc:

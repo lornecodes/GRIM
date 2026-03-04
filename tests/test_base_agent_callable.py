@@ -366,6 +366,165 @@ class TestMetadata:
             assert cls.agent_tier == "grim"
 
 
+class TestToolResultTruncation:
+    """Test that tool results are truncated to prevent context bloat."""
+
+    @pytest.mark.asyncio
+    async def test_large_tool_result_truncated(self):
+        """Tool results exceeding TOOL_RESULT_MAX_CHARS are truncated."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.tools = []
+
+        # Create a mock tool that returns a huge result
+        mock_tool = AsyncMock()
+        mock_tool.name = "big_tool"
+        mock_tool.ainvoke = AsyncMock(return_value="x" * 10000)
+        agent.tools = [mock_tool]
+
+        result = await agent._execute_tool({
+            "name": "big_tool",
+            "args": {},
+            "id": "call_123",
+        })
+
+        assert len(result.content) < 10000
+        assert "[truncated" in result.content
+        assert "10000 chars total" in result.content
+
+    @pytest.mark.asyncio
+    async def test_small_tool_result_not_truncated(self):
+        """Tool results under the limit are returned in full."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "small_tool"
+        mock_tool.ainvoke = AsyncMock(return_value="short result")
+        agent.tools = [mock_tool]
+
+        result = await agent._execute_tool({
+            "name": "small_tool",
+            "args": {},
+            "id": "call_456",
+        })
+
+        assert result.content == "short result"
+        assert "[truncated" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_tool_result_at_limit_not_truncated(self):
+        """Tool result exactly at the limit is NOT truncated."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+
+        content = "a" * BaseAgent.TOOL_RESULT_MAX_CHARS
+        mock_tool = AsyncMock()
+        mock_tool.name = "exact_tool"
+        mock_tool.ainvoke = AsyncMock(return_value=content)
+        agent.tools = [mock_tool]
+
+        result = await agent._execute_tool({
+            "name": "exact_tool",
+            "args": {},
+            "id": "call_789",
+        })
+
+        assert result.content == content
+        assert "[truncated" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_tool_error_not_truncated(self):
+        """Tool errors are returned as-is (already short)."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "error_tool"
+        mock_tool.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
+        agent.tools = [mock_tool]
+
+        result = await agent._execute_tool({
+            "name": "error_tool",
+            "args": {},
+            "id": "call_err",
+        })
+
+        assert "Tool error: boom" in result.content
+
+    def test_tool_result_max_chars_is_reasonable(self):
+        """TOOL_RESULT_MAX_CHARS should be between 1000 and 10000."""
+        assert 1000 <= BaseAgent.TOOL_RESULT_MAX_CHARS <= 10000
+
+
+class TestAgentLoopMessageTrimming:
+    """Test that the agent execute loop trims messages to prevent context bloat."""
+
+    @pytest.mark.asyncio
+    async def test_messages_trimmed_when_too_many(self):
+        """When messages exceed 15, middle messages are trimmed."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.tools = []
+        agent.config = MagicMock()
+
+        # Build a mock LLM that returns a final response (no tool calls)
+        mock_response = MagicMock()
+        mock_response.content = "final answer"
+        mock_response.tool_calls = []
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        agent.llm_with_tools = mock_llm
+
+        # Build 20 messages (system + ack + task + 17 tool exchanges)
+        from langchain_core.messages import ToolMessage
+        messages_before = [
+            HumanMessage(content="[SYSTEM INSTRUCTIONS]"),
+            AIMessage(content="Understood."),
+            HumanMessage(content="do the task"),
+        ]
+        for i in range(8):
+            tc_msg = AIMessage(content=f"thinking {i}")
+            tc_msg.tool_calls = [{"name": "tool", "args": {}, "id": f"c{i}"}]
+            messages_before.append(tc_msg)
+            messages_before.append(ToolMessage(content=f"result {i}", tool_call_id=f"c{i}"))
+
+        # Should be > 15 messages
+        assert len(messages_before) > 15
+
+        result = await agent.execute(task="do the task")
+
+        # The LLM was called — check that the messages passed to it are trimmed
+        call_args = mock_llm.ainvoke.call_args[0][0]
+        # Should be: 3 head + 1 summary + 6 tail = 10, not 20+
+        assert len(call_args) <= 12  # some tolerance
+
+    @pytest.mark.asyncio
+    async def test_short_conversation_not_trimmed(self):
+        """Conversations under 15 messages are NOT trimmed."""
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "test"
+        agent.tools = []
+        agent.config = MagicMock()
+
+        mock_response = MagicMock()
+        mock_response.content = "done"
+        mock_response.tool_calls = []
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        agent.llm_with_tools = mock_llm
+
+        result = await agent.execute(task="small task")
+
+        # LLM should receive exactly 3 messages (system + ack + task)
+        # (response is appended after the call)
+        call_args = mock_llm.ainvoke.call_args[0][0]
+        # No trimming summary message should be present
+        for msg in call_args:
+            if hasattr(msg, "content") and isinstance(msg.content, str):
+                assert "trimmed" not in msg.content
+
+
 class TestMakeCallable:
     """Test BaseAgent.make_callable returns a usable async function."""
 
