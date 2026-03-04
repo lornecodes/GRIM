@@ -31,6 +31,7 @@ class IronClawAgent(BaseAgent):
     agent_color = "#ef4444"
     agent_tier = "ironclaw"
     agent_toggleable = True
+    max_tool_steps = 20  # IronClaw needs more room: research + dispatch + file writes
 
     protocol_priority = [
         "sandboxed-execution",

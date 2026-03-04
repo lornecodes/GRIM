@@ -62,6 +62,7 @@ class BaseAgent:
     agent_color: str = "#6b7280"
     agent_tier: str = "grim"       # "grim" or "ironclaw"
     agent_toggleable: bool = False  # can be enabled/disabled from UI
+    max_tool_steps: int = 10        # max tool-calling loop iterations
 
     def metadata(self) -> dict:
         """Return UI-ready metadata dict for the agent roster API."""
@@ -81,7 +82,7 @@ class BaseAgent:
             "protocol_priority": list(self.protocol_priority),
             "default_protocol": self.default_protocol,
             "temperature": 0.3,
-            "max_tool_steps": 10,
+            "max_tool_steps": self.max_tool_steps,
             "model": self.config.model if hasattr(self, "config") else None,
         }
 
@@ -189,8 +190,8 @@ class BaseAgent:
         })
 
         try:
-            # Agent tool-calling loop (max 10 tool calls per task)
-            for step in range(10):
+            # Agent tool-calling loop
+            for step in range(self.max_tool_steps):
                 self._emit(event_queue, {
                     "cat": "llm", "node": self.agent_name, "action": "start",
                     "text": f"LLM call (step {step + 1})",
@@ -290,6 +291,21 @@ class BaseAgent:
                 )
             else:
                 final_content = raw_content
+
+            # If the agent hit max iterations with no useful text response
+            # (e.g., last response was pure tool calls), gather a summary
+            # from the tool calls that were executed.
+            if not final_content.strip() and step == self.max_tool_steps - 1:
+                tool_names = [
+                    tc["name"] for m in messages
+                    if hasattr(m, "tool_calls") and m.tool_calls
+                    for tc in m.tool_calls
+                ]
+                final_content = (
+                    f"Completed {len(tool_names)} tool calls "
+                    f"({', '.join(dict.fromkeys(tool_names))}). "
+                    f"Reached max steps ({self.max_tool_steps})."
+                )
 
             elapsed_ms = round((_time.monotonic() - _t0) * 1000)
             self._emit(event_queue, {
