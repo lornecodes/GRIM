@@ -1,0 +1,59 @@
+version: "1.0"
+tier: 3
+category: planning
+description: "Planning subgraph — sprint planning, story breakdown, estimation, transitions"
+
+cases:
+  - id: t3-plan-sprint
+    category: planning
+    tags: [planning, sprint]
+    description: "Sprint planning request should route to planning subgraph"
+    turns:
+      - role: user
+        message: "Let's plan the next sprint for GRIM. We need to add authentication and improve the eval framework."
+        expected_routing:
+          subgraph: planning
+    expected_routing:
+      subgraph: planning
+
+  - id: t3-plan-story-breakdown
+    category: planning
+    tags: [planning, breakdown]
+    description: "Story breakdown should stay in planning"
+    turns:
+      - role: user
+        message: "Break down the authentication feature into stories and tasks"
+        expected_routing:
+          subgraph: planning
+    expected_routing:
+      subgraph: planning
+
+  - id: t3-plan-estimation
+    category: planning
+    tags: [planning, estimation]
+    description: "Estimation request should use planning subgraph"
+    turns:
+      - role: user
+        message: "How long do you think it would take to add WebSocket authentication to GRIM?"
+        expected_routing:
+          subgraph: planning
+
+  - id: t3-plan-board-view
+    category: planning
+    tags: [planning, board]
+    description: "Board viewing should work in planning context"
+    turns:
+      - role: user
+        message: "Show me the current sprint board. What's in progress?"
+    expected_tools:
+      - kronos_board_view
+
+  - id: t3-plan-to-execution
+    category: planning
+    tags: [planning, transition]
+    description: "Planning to execution transition when user says 'build it'"
+    turns:
+      - role: user
+        message: "Let's plan a simple utility function to calculate PAC values"
+      - role: user
+        message: "Looks good, build it"

@@ -1,7 +1,7 @@
 """Router node — decide whether to think (companion) or delegate (agent).
 
-Examines the user message, knowledge context, and matched skills
-to determine the appropriate path through the graph.
+Examines the routing decision from graph_router (LLM-classified) to
+determine the appropriate path through the research graph.
 
 Also runs the model router to select the optimal model tier.
 """
@@ -12,13 +12,16 @@ from typing import Literal
 
 from core.config import GrimConfig
 from core.model_router import route_model
+from core.nodes.intent_classifier import (
+    resolve_delegation_target,
+    resolve_mode,
+)
 from core.nodes.keyword_router import (
-    DELEGATION_KEYWORDS,
     is_follow_up,
     match_action_intent,
     match_keywords,
 )
-from core.state import GrimState
+from core.state import GrimState, RoutingDecision
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +80,14 @@ def make_router_node(config: GrimConfig):
     async def router_node(state: GrimState) -> dict:
         """Decide: companion mode (think) or delegation mode (do).
 
+        Uses the RoutingDecision from graph_router (LLM-classified) to
+        determine mode and delegation target. Falls back to keyword
+        matching if no routing_decision is available.
+
         Priority:
-        1. skill_delegation_hint (set by skill_match from consumer declarations)
-        2. Continuity (re-delegate to same agent for follow-ups)
-        3. Keyword fallback
-        4. Action-intent fallback
-        5. Default: companion mode
+        1. LLM routing decision (from graph_router via classify_intent)
+        2. Continuity override (re-delegate to same agent for follow-ups)
+        3. Keyword fallback (if routing_decision missing)
 
         Also selects the optimal model tier via the model router.
         """
@@ -98,33 +103,61 @@ def make_router_node(config: GrimConfig):
 
         # ── Mode routing (companion vs delegate) ──
         delegation_type = None
+        mode = "companion"
 
-        # 1. Skill delegation hint (from skill_match node)
-        hint = state.get("skill_delegation_hint")
-        if hint:
-            delegation_type = hint
-            logger.info("Router: delegating to %s (skill hint)", delegation_type)
+        # 1. Use LLM routing decision from graph_router
+        rd_raw = state.get("routing_decision")
+        if rd_raw:
+            try:
+                decision = RoutingDecision(**rd_raw)
+                mode = resolve_mode(decision)
+                delegation_type = resolve_delegation_target(decision)
+                if delegation_type:
+                    logger.info(
+                        "Router: %s → %s (LLM classifier, confidence=%.2f)",
+                        mode, delegation_type, decision.confidence,
+                    )
+                else:
+                    logger.info(
+                        "Router: companion mode (LLM classifier → %s)",
+                        decision.target_subgraph,
+                    )
+            except Exception:
+                logger.warning("Router: failed to parse routing_decision, falling back to keywords")
+                rd_raw = None
 
-        # 2. Continuity — re-delegate to same agent for follow-ups
-        if not delegation_type:
-            last_delegation = state.get("last_delegation_type")
-            if last_delegation and is_follow_up(message):
-                delegation_type = last_delegation
-                logger.info("Router: continuity re-delegation to %s", delegation_type)
+        # 2. Fallback (if no routing_decision)
+        if not rd_raw:
+            # Skill delegation hint
+            hint = state.get("skill_delegation_hint")
+            if hint:
+                delegation_type = hint
+                mode = "delegate"
+                logger.info("Router: delegating to %s (skill hint)", delegation_type)
 
-        # 3. Keyword fallback
-        if not delegation_type:
-            kw_match = match_keywords(message)
-            if kw_match:
-                delegation_type = kw_match
-                logger.info("Router: delegating to %s (keyword)", delegation_type)
+            # Continuity — re-delegate to same agent for follow-ups
+            if not delegation_type:
+                last_delegation = state.get("last_delegation_type")
+                if last_delegation and is_follow_up(message):
+                    delegation_type = last_delegation
+                    mode = "delegate"
+                    logger.info("Router: continuity re-delegation to %s", delegation_type)
 
-        # 4. Action-intent fallback
-        if not delegation_type:
-            action = match_action_intent(message)
-            if action:
-                delegation_type = action
-                logger.info("Router: delegating to %s (action-intent)", delegation_type)
+            # Keyword fallback
+            if not delegation_type:
+                kw_match = match_keywords(message)
+                if kw_match:
+                    delegation_type = kw_match
+                    mode = "delegate"
+                    logger.info("Router: delegating to %s (keyword fallback)", delegation_type)
+
+            # Action-intent fallback
+            if not delegation_type:
+                action = match_action_intent(message)
+                if action:
+                    delegation_type = action
+                    mode = "delegate"
+                    logger.info("Router: delegating to %s (action-intent fallback)", delegation_type)
 
         # Build result
         if delegation_type:

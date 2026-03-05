@@ -121,6 +121,22 @@ class EvalRunner:
                 except Exception:
                     pass
 
+        # Tier 3 datasets use {category}.yaml naming
+        tier3_dir = self.config.datasets_dir / "tier3"
+        if tier3_dir.exists():
+            for path in sorted(tier3_dir.glob("*.yaml")):
+                try:
+                    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    result.append({
+                        "tier": 3,
+                        "category": data.get("category", path.stem),
+                        "description": data.get("description", ""),
+                        "case_count": len(data.get("cases", [])),
+                        "path": str(path),
+                    })
+                except Exception:
+                    pass
+
         return result
 
     # ── Execution ──

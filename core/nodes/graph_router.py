@@ -6,19 +6,20 @@ Routes user messages to the appropriate graph:
   - "planning" → planning companion (scoping, task breakdown, board population)
   - "personal" → personal companion (conversational, no delegation)
 
-Default is always "research" to preserve v0.0.5 behavior exactly.
+v0.0.10: Uses LLM intent classifier (Haiku, ~200ms) with keyword fallback.
+Previously used pure keyword/signal matching which was too rigid.
 """
 from __future__ import annotations
 
 import logging
 
-from core.nodes.keyword_router import DELEGATION_KEYWORDS, match_action_intent
+from core.nodes.intent_classifier import classify_intent, resolve_graph_target
 from core.state import GrimState
 
 logger = logging.getLogger(__name__)
 
-# Conservative personal signals — only activate on clear conversational intent.
-# Anything ambiguous defaults to research (zero regression risk).
+# Conservative personal signals — kept for Tier 3 keyword fallback
+# (used by intent_classifier._keyword_fallback via import).
 PERSONAL_SIGNALS: list[str] = [
     # Greetings / casual
     "how are you", "how's it going", "what's up",
@@ -40,8 +41,7 @@ PERSONAL_SIGNALS: list[str] = [
     "wanted to say", "i appreciate you",
 ]
 
-# Planning signals — scoping, task breakdown, sprint planning.
-# These route to the planning graph, not the research graph.
+# Planning signals — kept for Tier 3 keyword fallback.
 PLANNING_SIGNALS: list[str] = [
     # Explicit planning
     "let's plan", "plan this", "plan the implementation",
@@ -64,7 +64,7 @@ PLANNING_SIGNALS: list[str] = [
 ]
 
 # Keywords that indicate research/task intent even if personal signals match.
-# If the message contains both personal and research signals, research wins.
+# Used by Tier 3 keyword fallback in intent_classifier.
 _RESEARCH_OVERRIDES: list[str] = [
     "experiment", "vault", "fdo", "kronos", "task", "story",
     "code", "implement", "refactor", "deploy", "test",
@@ -75,6 +75,7 @@ _RESEARCH_OVERRIDES: list[str] = [
 
 def _has_delegation_keywords(message: str) -> bool:
     """Check if message matches any existing delegation keyword."""
+    from core.nodes.keyword_router import DELEGATION_KEYWORDS
     for keywords in DELEGATION_KEYWORDS.values():
         for keyword in keywords:
             if keyword in message:
@@ -83,58 +84,31 @@ def _has_delegation_keywords(message: str) -> bool:
 
 
 async def graph_router_node(state: GrimState) -> dict:
-    """Classify user message into a graph target.
+    """Classify user message into a graph target using the LLM intent classifier.
 
-    Priority:
-    1. skill_delegation_hint set → research (needs agent delegation) unless planning-related
-    2. Planning signals match → planning
-    3. Delegation keywords match → research (existing routing)
-    4. Action-intent patterns → research
-    5. Personal signals match (without research/planning overrides) → personal
-    6. Default → research
+    Three-tier routing:
+    1. Skill delegation hints → immediate classification (no LLM)
+    2. LLM structured output via Haiku (~200ms) → typed RoutingDecision
+    3. Keyword/signal fallback → existing pattern matching
+
+    Stores the full RoutingDecision in state so the downstream router
+    node can read it without making a second LLM call.
     """
-    messages = state.get("messages", [])
-    if not messages:
-        return {"graph_target": "research"}
+    decision = await classify_intent(state)
+    graph_target = resolve_graph_target(decision)
 
-    last_msg = messages[-1]
-    message = (last_msg.content if hasattr(last_msg, "content") else str(last_msg)).lower()
+    logger.info(
+        "Graph router: %s (classifier: %s, confidence=%.2f — %s)",
+        graph_target,
+        decision.target_subgraph,
+        decision.confidence,
+        decision.reasoning,
+    )
 
-    # 1. Skill hint — check if it's planning-related first
-    hint = state.get("skill_delegation_hint")
-    if hint:
-        if hint == "planning":
-            logger.info("Graph router: planning (skill hint)")
-            return {"graph_target": "planning"}
-        logger.info("Graph router: research (skill hint)")
-        return {"graph_target": "research"}
-
-    # 2. Planning signals → planning graph
-    if any(sig in message for sig in PLANNING_SIGNALS):
-        logger.info("Graph router: planning")
-        return {"graph_target": "planning"}
-
-    # 3. Delegation keywords → research
-    if _has_delegation_keywords(message):
-        logger.info("Graph router: research (delegation keywords)")
-        return {"graph_target": "research"}
-
-    # 4. Action-intent patterns → research
-    if match_action_intent(message):
-        logger.info("Graph router: research (action-intent)")
-        return {"graph_target": "research"}
-
-    # 5. Personal signals (with research override check)
-    if any(sig in message for sig in PERSONAL_SIGNALS):
-        if any(ovr in message for ovr in _RESEARCH_OVERRIDES):
-            logger.info("Graph router: research (personal signal overridden by research content)")
-            return {"graph_target": "research"}
-        logger.info("Graph router: personal")
-        return {"graph_target": "personal"}
-
-    # 6. Default → research
-    logger.info("Graph router: research (default)")
-    return {"graph_target": "research"}
+    return {
+        "graph_target": graph_target,
+        "routing_decision": decision.model_dump(),
+    }
 
 
 def graph_route_decision(state: GrimState) -> str:

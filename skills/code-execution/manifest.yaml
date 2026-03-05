@@ -15,7 +15,7 @@ permissions:
   - sandbox:required
 
 consumers:
-  ironclaw-agent:
+  operate-agent:
     role: execution
     description: Follows protocol to write, run, test, and validate code
     reads: [protocol.md, inputs, outputs, quality_gates, safety]
@@ -45,7 +45,7 @@ outputs:
   validation_output: string
 
 triggers:
-  - delegation: "GRIM routes a coding task to ironclaw-agent"
+  - delegation: "GRIM routes a coding task to operate-agent"
   - explicit: "User asks to write, fix, or refactor code"
 
 phases:

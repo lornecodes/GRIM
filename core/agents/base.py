@@ -62,7 +62,7 @@ class BaseAgent:
     agent_color: str = "#6b7280"
     agent_tier: str = "grim"       # "grim" or "ironclaw"
     agent_toggleable: bool = False  # can be enabled/disabled from UI
-    max_tool_steps: int = 10        # max tool-calling loop iterations
+    max_tool_steps: int = 30        # max tool-calling loop iterations
 
     def metadata(self) -> dict:
         """Return UI-ready metadata dict for the agent roster API."""

@@ -1,7 +1,7 @@
 """Comprehensive agent tests — every agent subclass, metadata, tools, factories,
 build_context, protocol selection, and cross-agent invariants.
 
-Covers: memory, research, codebase, operator, coder, ironclaw, audit.
+Covers: memory, research, codebase, operator, coder.
 Also tests planning (deprecated but still importable).
 
 All tests are synchronous/mocked — no real API or LLM calls.
@@ -489,235 +489,6 @@ class TestCoderAgent:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# IronClaw Agent
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestIronClawAgentComprehensive:
-    """Tests for the IronClaw Agent — sandboxed execution."""
-
-    def test_agent_name(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert agent.agent_name == "ironclaw"
-
-    def test_display_name(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert agent.agent_display_name == "IronClaw"
-
-    def test_role(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert agent.agent_role == "execution"
-
-    def test_tier_is_ironclaw(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert agent.agent_tier == "ironclaw"
-
-    def test_is_toggleable(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert agent.agent_toggleable is True
-
-    def test_has_ironclaw_tools(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "claw_read_file" in tool_names
-        assert "claw_write_file" in tool_names
-        assert "claw_shell" in tool_names
-        assert "claw_list_dir" in tool_names
-        assert "claw_http_request" in tool_names
-
-    def test_has_dispatch_tools(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "claw_list_agents" in tool_names
-        assert "claw_dispatch_workflow" in tool_names
-        assert "claw_scan_skill" in tool_names
-
-    def test_limited_research_tools(self, config):
-        """IronClaw has kronos_get (read details) but NOT kronos_search."""
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "kronos_get" in tool_names
-        assert "kronos_search" not in tool_names
-        assert "kronos_list" not in tool_names
-
-    def test_no_direct_workspace_tools(self, config):
-        """IronClaw agent uses claw_* tools, not direct workspace tools."""
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "write_file" not in tool_names
-        assert "run_shell" not in tool_names
-
-    def test_protocol_priority(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        assert "sandboxed-execution" in agent.protocol_priority
-
-    def test_metadata_dict(self, config):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        meta = agent.metadata()
-        assert meta["id"] == "ironclaw"
-        assert meta["name"] == "IronClaw"
-        assert meta["tier"] == "ironclaw"
-        assert meta["toggleable"] is True
-        assert meta["color"] == "#ef4444"
-
-    def test_custom_factory(self, config):
-        """IronClaw uses a custom factory, not make_callable."""
-        from core.agents.ironclaw_agent import make_ironclaw_agent
-        fn = make_ironclaw_agent(config)
-        assert callable(fn)
-        assert asyncio.iscoroutinefunction(fn)
-
-    def test_factory_includes_staging_context(self, config):
-        """The custom factory should support staging_job_id in state."""
-        from core.agents.ironclaw_agent import make_ironclaw_agent
-        # Just verify the factory returns a callable — deep behavior tested elsewhere
-        fn = make_ironclaw_agent(config)
-        assert fn is not None
-
-    def test_discovery_attributes(self):
-        from core.agents import ironclaw_agent
-        assert ironclaw_agent.__agent_name__ == "ironclaw"
-        assert ironclaw_agent.__agent_class__.__name__ == "IronClawAgent"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Audit Agent
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestAuditAgentComprehensive:
-    """Tests for the Audit Agent — staging review and verification."""
-
-    def test_agent_name(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        assert agent.agent_name == "audit"
-
-    def test_display_name(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        assert agent.agent_display_name == "Audit"
-
-    def test_role(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        assert agent.agent_role == "review"
-
-    def test_tier_is_ironclaw(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        assert agent.agent_tier == "ironclaw"
-
-    def test_is_toggleable(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        assert agent.agent_toggleable is True
-
-    def test_has_staging_read_tools(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "staging_list" in tool_names
-        assert "staging_read" in tool_names
-
-    def test_no_staging_write_tools(self, config):
-        """Audit agent is READ-ONLY on staging — cannot accept or reject."""
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "staging_accept" not in tool_names
-        assert "staging_reject" not in tool_names
-
-    def test_has_companion_tools(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "kronos_search" in tool_names
-
-    def test_metadata_dict(self, config):
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        meta = agent.metadata()
-        assert meta["id"] == "audit"
-        assert meta["name"] == "Audit"
-        assert meta["tier"] == "ironclaw"
-        assert meta["toggleable"] is True
-        assert meta["color"] == "#f97316"
-
-    def test_discovery_attributes(self):
-        from core.agents import audit_agent
-        assert audit_agent.__agent_name__ == "audit"
-        assert audit_agent.__agent_class__.__name__ == "AuditAgent"
-
-
-class TestAuditVerdictParsing:
-    """Tests for the _parse_verdict helper in audit_agent."""
-
-    def test_parse_json_fenced_verdict(self):
-        from core.agents.audit_agent import _parse_verdict
-        text = (
-            "Review complete.\n\n"
-            "```json\n"
-            '{"passed": true, "issues": [], "suggestions": ["add tests"], '
-            '"security_flags": [], "summary": "All clear"}\n'
-            "```"
-        )
-        v = _parse_verdict(text)
-        assert v.passed is True
-        assert v.issues == []
-        assert v.suggestions == ["add tests"]
-        assert v.summary == "All clear"
-
-    def test_parse_raw_json_verdict(self):
-        from core.agents.audit_agent import _parse_verdict
-        text = 'Some review text.\n{"passed": false, "issues": ["secret found"], "summary": "Failed"}'
-        v = _parse_verdict(text)
-        assert v.passed is False
-        assert "secret found" in v.issues
-
-    def test_parse_no_json(self):
-        from core.agents.audit_agent import _parse_verdict
-        v = _parse_verdict("No structured output at all.")
-        assert v.passed is False
-        assert len(v.issues) > 0
-
-    def test_parse_invalid_json(self):
-        from core.agents.audit_agent import _parse_verdict
-        v = _parse_verdict("{not valid json at all !!!")
-        assert v.passed is False
-
-    def test_parse_missing_passed_field(self):
-        from core.agents.audit_agent import _parse_verdict
-        v = _parse_verdict('{"issues": [], "summary": "ok"}')
-        assert v.passed is False  # defaults to False when missing
-
-    def test_parse_security_flags(self):
-        from core.agents.audit_agent import _parse_verdict
-        text = '{"passed": false, "issues": ["leak"], "security_flags": ["API key exposed"], "summary": "danger"}'
-        v = _parse_verdict(text)
-        assert "API key exposed" in v.security_flags
-
-    def test_custom_audit_factory_no_staging_job(self, config):
-        """Audit factory should fail gracefully when no staging_job_id in state."""
-        from core.agents.audit_agent import make_audit_agent
-        fn = make_audit_agent(config)
-        result = asyncio.run(fn({"messages": []}, event_queue=None))
-        assert result.success is False
-        assert "No staging job" in result.summary
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Cross-Agent Invariants
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -728,8 +499,6 @@ ALL_AGENT_CLASSES = [
     ("core.agents.codebase_agent", "CodebaseAgent"),
     ("core.agents.operator_agent", "OperatorAgent"),
     ("core.agents.coder_agent", "CoderAgent"),
-    ("core.agents.ironclaw_agent", "IronClawAgent"),
-    ("core.agents.audit_agent", "AuditAgent"),
 ]
 
 
@@ -770,7 +539,7 @@ class TestCrossAgentInvariants:
 
     def test_agent_has_tier(self, config, agent_cls):
         agent = agent_cls(config)
-        assert agent.agent_tier in ("grim", "ironclaw")
+        assert agent.agent_tier == "grim"
 
     def test_agent_has_tools(self, config, agent_cls):
         agent = agent_cls(config)
@@ -845,36 +614,13 @@ class TestToolBoundaries:
         from core.agents.operator_agent import OperatorAgent
 
         write_tools = {"write_file", "run_shell", "git_add_commit",
-                        "kronos_create", "kronos_update",
-                        "claw_write_file", "claw_shell"}
+                        "kronos_create", "kronos_update"}
 
         for cls in [ResearchAgent, CodebaseAgent, OperatorAgent]:
             agent = cls(config)
             tool_names = {t.name for t in agent.tools}
             overlap = write_tools & tool_names
             assert not overlap, f"{cls.__name__} has write tools: {overlap}"
-
-    def test_ironclaw_agent_uses_claw_tools_not_direct(self, config):
-        """IronClaw agent should use claw_* wrappers, not direct workspace tools."""
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        # Should have claw_* tools
-        claw_tools = {t for t in tool_names if t.startswith("claw_")}
-        assert len(claw_tools) >= 5
-        # Should NOT have direct workspace tools
-        assert "write_file" not in tool_names
-        assert "run_shell" not in tool_names
-
-    def test_audit_agent_is_read_only_on_staging(self, config):
-        """Audit agent can read staging but cannot accept/reject."""
-        from core.agents.audit_agent import AuditAgent
-        agent = AuditAgent(config)
-        tool_names = {t.name for t in agent.tools}
-        assert "staging_list" in tool_names
-        assert "staging_read" in tool_names
-        assert "staging_accept" not in tool_names
-        assert "staging_reject" not in tool_names
 
     def test_only_memory_agent_has_vault_writes(self, config):
         """Only memory agent should have kronos_create/update."""
@@ -990,8 +736,6 @@ DISCOVERABLE_MODULES = [
     "core.agents.codebase_agent",
     "core.agents.operator_agent",
     "core.agents.coder_agent",
-    "core.agents.ironclaw_agent",
-    "core.agents.audit_agent",
 ]
 
 

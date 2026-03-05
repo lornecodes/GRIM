@@ -26,31 +26,16 @@ const AGENT_LABELS: Record<string, string> = {
   dispatch: "Dispatch",
   memory: "Memory",
   coder: "Coder",
+  code: "Coder",
   research: "Research",
   operator: "Operator",
   codebase: "Codebase",
   audit: "Audit",
-  ironclaw: "IronClaw",
-};
-
-const AGENT_TIER: Record<string, "grim" | "ironclaw"> = {
-  companion: "grim",
-  personal_companion: "grim",
-  planning_companion: "grim",
-  dispatch: "grim",
-  memory: "grim",
-  coder: "grim",
-  research: "grim",
-  operator: "grim",
-  codebase: "grim",
-  audit: "ironclaw",
-  ironclaw: "ironclaw",
 };
 
 export interface ActiveAgent {
   node: string;
   label: string;
-  tier: "grim" | "ironclaw";
   traces: TraceEvent[];
   lastActive: number;
   totalMs: number;
@@ -92,7 +77,6 @@ export function useActiveAgents(recentMessageCount = 5): ActiveAgent[] {
       agents.push({
         node,
         label: AGENT_LABELS[node] || node,
-        tier: AGENT_TIER[node] || "grim",
         traces,
         lastActive,
         totalMs,

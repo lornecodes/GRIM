@@ -159,7 +159,7 @@ class TestTier1HardOverrides:
     async def test_skill_hint_operate(self):
         state = _state("git status", skill_delegation_hint="operate")
         result = await classify_intent(state)
-        assert result.target_subgraph == "operations"
+        assert result.target_subgraph == "code"
         assert result.confidence == 1.0
 
     @pytest.mark.asyncio
@@ -321,7 +321,7 @@ class TestTier3KeywordFallback:
 
     def test_operate_keyword(self):
         result = _keyword_fallback("git status please")
-        assert result.target_subgraph == "operations"
+        assert result.target_subgraph == "code"
         assert result.confidence == 0.7
 
     def test_action_intent_match(self):

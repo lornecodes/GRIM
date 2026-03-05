@@ -42,7 +42,7 @@ consumers:
     role: execution
     description: Router node calls route_model() with GRIM context signals
     reads: [protocol.md, inputs, outputs]
-  ironclaw:
+  operate-agent:
     role: execution
-    description: IronClaw engine integrates via core/model_router.py
+    description: Operate agent integrates via core/model_router.py
     reads: [protocol.md, inputs, outputs]

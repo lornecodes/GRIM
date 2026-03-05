@@ -99,27 +99,6 @@ class TestAgentConstruction:
         assert "kronos_search" in tool_names
         assert "read_file" in tool_names
 
-    def test_ironclaw_agent_name(self):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(self._make_config())
-        assert agent.agent_name == "ironclaw"
-
-    def test_ironclaw_agent_has_claw_tools(self):
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(self._make_config())
-        tool_names = {t.name for t in agent.tools}
-        assert "claw_read_file" in tool_names
-        assert "claw_shell" in tool_names
-        assert "claw_write_file" in tool_names
-
-    def test_ironclaw_agent_limited_research_tools(self):
-        """IronClaw has kronos_get but NOT kronos_search."""
-        from core.agents.ironclaw_agent import IronClawAgent
-        agent = IronClawAgent(self._make_config())
-        tool_names = {t.name for t in agent.tools}
-        assert "kronos_get" in tool_names
-        assert "kronos_search" not in tool_names
-
     def test_planning_agent_name(self):
         from core.agents.planning_agent import PlanningAgent
         agent = PlanningAgent(self._make_config())
@@ -219,7 +198,6 @@ class TestAgentModelConfig:
         from core.agents.memory_agent import MemoryAgent
         from core.agents.operator_agent import OperatorAgent
         from core.agents.research_agent import ResearchAgent
-        from core.agents.ironclaw_agent import IronClawAgent
         from core.agents.planning_agent import PlanningAgent
 
         cfg = GrimConfig()
@@ -230,7 +208,6 @@ class TestAgentModelConfig:
             MemoryAgent(cfg),
             OperatorAgent(cfg),
             ResearchAgent(cfg),
-            IronClawAgent(cfg),
             PlanningAgent(cfg),
         ]
 
@@ -375,143 +352,17 @@ class TestRouterModelPipeline:
         assert result["selected_model"] == TIER_MODELS["sonnet"]
 
 
-# ─── Dispatch Wiring ────────────────────────────────────────────────────
-
-
-class TestDispatchWiring:
-    """Test that dispatch routes to the correct agent based on delegation_type."""
-
-    def _make_agents(self):
-        """Create mock agent callables."""
-        agents = {}
-        for name in ["memory", "code", "research", "operate", "ironclaw", "planning", "codebase"]:
-            mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
-            mock_fn.__name__ = f"{name}_agent_fn"
-            agents[name] = mock_fn
-        return agents
-
-    @pytest.mark.asyncio
-    async def test_dispatch_planning(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "planning"})
-        agents["planning"].assert_called_once()
-        assert result["agent_result"].agent == "planning"
-
-    @pytest.mark.asyncio
-    async def test_dispatch_memory(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "memory"})
-        agents["memory"].assert_called_once()
-        assert result["agent_result"].agent == "memory"
-
-    @pytest.mark.asyncio
-    async def test_dispatch_code(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "code"})
-        agents["code"].assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_dispatch_research(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "research"})
-        agents["research"].assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_dispatch_operate(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "operate"})
-        agents["operate"].assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_dispatch_ironclaw(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "ironclaw"})
-        agents["ironclaw"].assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_dispatch_codebase(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "codebase"})
-        agents["codebase"].assert_called_once()
-        assert result["agent_result"].agent == "codebase"
-
-    @pytest.mark.asyncio
-    async def test_dispatch_unknown_type(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "nonexistent"})
-        assert result["agent_result"].success is False
-
-    @pytest.mark.asyncio
-    async def test_dispatch_no_delegation_type(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({})
-        assert result["agent_result"] is None
-
-    @pytest.mark.asyncio
-    async def test_dispatch_agent_exception(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agents = self._make_agents()
-        agents["code"] = AsyncMock(side_effect=RuntimeError("boom"))
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "code"})
-        assert result["agent_result"].success is False
-        assert "boom" in result["agent_result"].summary
-
-
 # ─── Graph Agent Registration ────────────────────────────────────────────
 
 
 class TestGraphAgentRegistration:
     """Test that build_graph registers the right agents."""
 
-    def test_graph_builds_without_ironclaw(self):
+    def test_graph_builds(self):
         from core.graph import build_graph
         cfg = GrimConfig()
         graph = build_graph(cfg)
         assert graph is not None
-
-    def test_graph_builds_with_ironclaw(self):
-        from core.graph import build_graph
-        from core.bridge.ironclaw import IronClawBridge
-        cfg = GrimConfig()
-        bridge = IronClawBridge(base_url="http://localhost:3100")
-        graph = build_graph(cfg, ironclaw_bridge=bridge)
-        assert graph is not None
-
-    def test_graph_has_dispatch_node(self):
-        from core.graph import build_graph
-        cfg = GrimConfig()
-        graph = build_graph(cfg)
-        # LangGraph compiled graph has nodes
-        assert "dispatch" in graph.get_graph().nodes
 
     def test_graph_has_companion_node(self):
         from core.graph import build_graph
@@ -546,52 +397,6 @@ class TestRouterDelegation:
         assert result["mode"] == "companion"
 
     @pytest.mark.asyncio
-    async def test_ironclaw_keywords_delegate(self):
-        from langchain_core.messages import HumanMessage
-        from core.nodes.router import make_router_node
-
-        cfg = GrimConfig()
-        router_fn = make_router_node(cfg)
-        result = await router_fn({
-            "messages": [HumanMessage(content="run sandboxed: ls -la")],
-            "matched_skills": [],
-        })
-        # Should delegate (not companion), with ironclaw as delegation type
-        if result["mode"] == "delegate":
-            assert result.get("delegation_type") == "ironclaw"
-
-    @pytest.mark.asyncio
-    async def test_planning_keywords_no_longer_delegate(self):
-        """v0.0.6 Phase 2: planning is graph-level, not a delegation target.
-        'plan this implementation' matches 'implement' → ironclaw."""
-        from langchain_core.messages import HumanMessage
-        from core.nodes.router import make_router_node
-
-        cfg = GrimConfig()
-        router_fn = make_router_node(cfg)
-        result = await router_fn({
-            "messages": [HumanMessage(content="plan this implementation")],
-            "matched_skills": [],
-        })
-        assert result["mode"] == "delegate"
-        assert result["delegation_type"] == "ironclaw"
-
-    @pytest.mark.asyncio
-    async def test_code_keywords_delegate_to_ironclaw(self):
-        """v0.0.6: code keywords route to ironclaw, not code."""
-        from langchain_core.messages import HumanMessage
-        from core.nodes.router import make_router_node
-
-        cfg = GrimConfig()
-        router_fn = make_router_node(cfg)
-        result = await router_fn({
-            "messages": [HumanMessage(content="write code for a parser")],
-            "matched_skills": [],
-        })
-        assert result["mode"] == "delegate"
-        assert result["delegation_type"] == "ironclaw"
-
-    @pytest.mark.asyncio
     async def test_operate_keywords_narrow_to_git_reads(self):
         """v0.0.6: git status stays operate (read-only)."""
         from langchain_core.messages import HumanMessage
@@ -605,21 +410,6 @@ class TestRouterDelegation:
         })
         assert result["mode"] == "delegate"
         assert result["delegation_type"] == "operate"
-
-    @pytest.mark.asyncio
-    async def test_shell_commands_delegate_to_ironclaw(self):
-        """v0.0.6: shell execution routes to ironclaw, not operate."""
-        from langchain_core.messages import HumanMessage
-        from core.nodes.router import make_router_node
-
-        cfg = GrimConfig()
-        router_fn = make_router_node(cfg)
-        result = await router_fn({
-            "messages": [HumanMessage(content="run command ls -la")],
-            "matched_skills": [],
-        })
-        assert result["mode"] == "delegate"
-        assert result["delegation_type"] == "ironclaw"
 
     @pytest.mark.asyncio
     async def test_skill_consumer_routes_delegation(self):
@@ -644,7 +434,7 @@ class TestRouterDelegation:
         })
 
         if result["mode"] == "delegate":
-            assert result["delegation_type"] in ("code", "operate", "research", "memory", "ironclaw")
+            assert result["delegation_type"] in ("code", "operate", "research", "memory")
 
 
 # ─── Agent Factory Functions ─────────────────────────────────────────────
@@ -674,12 +464,6 @@ class TestAgentFactories:
     def test_make_research_agent_returns_callable(self):
         from core.agents.research_agent import make_research_agent
         fn = make_research_agent(GrimConfig())
-        assert callable(fn)
-        assert asyncio.iscoroutinefunction(fn)
-
-    def test_make_ironclaw_agent_returns_callable(self):
-        from core.agents.ironclaw_agent import make_ironclaw_agent
-        fn = make_ironclaw_agent(GrimConfig())
         assert callable(fn)
         assert asyncio.iscoroutinefunction(fn)
 
@@ -745,30 +529,6 @@ class TestAgentProtocolSelection:
             mock_exec.assert_called_once()
             call_kwargs = mock_exec.call_args[1]
             assert call_kwargs["skill_protocol"] == "Git protocol"
-
-    @pytest.mark.asyncio
-    async def test_ironclaw_prefers_sandboxed_execution(self):
-        from core.agents.ironclaw_agent import make_ironclaw_agent
-        from langchain_core.messages import HumanMessage
-
-        cfg = GrimConfig()
-        fn = make_ironclaw_agent(cfg)
-
-        with patch("core.agents.base.BaseAgent.execute", new_callable=AsyncMock) as mock_exec:
-            from core.state import AgentResult
-            mock_exec.return_value = AgentResult(agent="ironclaw", success=True, summary="done")
-
-            await fn({
-                "messages": [HumanMessage(content="run ls in sandbox")],
-                "skill_protocols": {
-                    "code-execution": "Code protocol",
-                    "sandboxed-execution": "Sandbox protocol",
-                },
-            })
-
-            mock_exec.assert_called_once()
-            call_kwargs = mock_exec.call_args[1]
-            assert call_kwargs["skill_protocol"] == "Sandbox protocol"
 
     @pytest.mark.asyncio
     async def test_planning_prefers_sprint_plan(self):
@@ -899,66 +659,6 @@ class TestEventQueueSerialization:
                 f"GrimState['{key}'] has type {_type} which contains Queue — "
                 "not serializable by LangGraph checkpointer."
             )
-
-
-# ─── Dispatch Config Propagation ─────────────────────────────────────────
-
-
-class TestDispatchConfigPropagation:
-    """Test that dispatch reads event queue from config, not state."""
-
-    def _make_agents(self):
-        agents = {}
-        for name in ["memory", "code", "research", "operate", "ironclaw", "planning"]:
-            mock_fn = AsyncMock(return_value=MagicMock(agent=name, success=True, summary="done"))
-            mock_fn.__name__ = f"{name}_agent_fn"
-            agents[name] = mock_fn
-        return agents
-
-    @pytest.mark.asyncio
-    async def test_dispatch_passes_queue_from_config(self):
-        """Dispatch should extract event_queue from config['configurable']."""
-        import asyncio as _aio
-        from core.nodes.dispatch import make_dispatch_node
-
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-        queue = _aio.Queue()
-
-        config = {"configurable": {"agent_event_queue": queue}}
-        await dispatch_fn({"delegation_type": "memory"}, config=config)
-
-        # The agent_fn should have been called with event_queue=queue
-        call_kwargs = agents["memory"].call_args[1]
-        assert call_kwargs.get("event_queue") is queue
-
-    @pytest.mark.asyncio
-    async def test_dispatch_works_without_config(self):
-        """Dispatch should work when config is None (backward compat)."""
-        from core.nodes.dispatch import make_dispatch_node
-
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        result = await dispatch_fn({"delegation_type": "memory"})
-        agents["memory"].assert_called_once()
-        # event_queue should be None
-        call_kwargs = agents["memory"].call_args[1]
-        assert call_kwargs.get("event_queue") is None
-
-    @pytest.mark.asyncio
-    async def test_dispatch_works_without_queue_in_config(self):
-        """Dispatch should work when config has no agent_event_queue key."""
-        from core.nodes.dispatch import make_dispatch_node
-
-        agents = self._make_agents()
-        dispatch_fn = make_dispatch_node(agents)
-
-        config = {"configurable": {"thread_id": "test-thread"}}
-        result = await dispatch_fn({"delegation_type": "code"}, config=config)
-        agents["code"].assert_called_once()
-        call_kwargs = agents["code"].call_args[1]
-        assert call_kwargs.get("event_queue") is None
 
 
 # ─── BaseAgent Event Emission ────────────────────────────────────────────

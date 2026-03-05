@@ -29,9 +29,8 @@ User message → skill_match → router → companion (think)
 | `memory` | Memory Agent | Kronos write tools | Create/update/link FDOs, vault operations |
 | `code` | Coder Agent | File read/write, shell, Kronos read | Write code, refactor, debug, run tests |
 | `research` | Research Agent | File read, Kronos read/write | Ingest papers, deep analysis, summarize |
-| `operate` | Operator Agent | Git, shell, file, Kronos read | Shell commands, git, infrastructure, HTTP |
-| `ironclaw` | IronClaw Agent | IronClaw bridge, Kronos read | Sandboxed execution, security-sensitive ops |
-| `audit` | Audit Agent | Staging read, Kronos read | Review staged files, security audit |
+| `operate` | Operator Agent | Git, shell, file, Kronos read | Shell commands, git, infrastructure, code ops |
+| `codebase` | Codebase Agent | File read, Kronos read | Codebase exploration, code analysis |
 
 ---
 
@@ -61,9 +60,7 @@ deep-ingest       → research
 vault-sync        → operate
 git-operations    → operate
 shell-execution   → operate
-sandboxed-*       → ironclaw
-ironclaw-review   → audit
-staging-*         → operate
+docker-release    → operate
 ```
 
 Falls back to permission hints (`vault:write` → memory, `filesystem:write` → code, `shell:execute` → operate).
@@ -153,7 +150,7 @@ When adding a new capability to GRIM:
 |------|------|
 | `identity/system_prompt.md` | Capability claims (what GRIM tells users it can do) |
 | `core/nodes/router.py` | Routing logic: skills → continuity → keywords → intent → companion |
-| `core/nodes/dispatch.py` | Dispatches to the chosen agent |
+| `core/nodes/companion_router.py` | Routes within research graph |
 | `core/nodes/integrate.py` | Formats agent results, persists `last_delegation_type` |
 | `core/state.py` | `GrimState` TypedDict with routing fields |
 | `core/personality/prompt_builder.py` | Assembles system prompt with matched skills |

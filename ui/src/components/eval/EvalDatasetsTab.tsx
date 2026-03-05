@@ -129,6 +129,27 @@ export function EvalDatasetsTab({ eval_ }: Props) {
                 onClick={() => handleSelectDataset(d.tier, d.category)}
               />
             ))}
+
+          {/* Tier 3 */}
+          {datasets.some((d) => d.tier === 3) && (
+            <>
+              <div className="text-[10px] text-grim-text-dim font-medium mt-3 mb-1">Tier 3 — Live Integration</div>
+              {datasets
+                .filter((d) => d.tier === 3)
+                .map((d) => (
+                  <DatasetButton
+                    key={`${d.tier}-${d.category}`}
+                    label={d.category}
+                    count={d.case_count}
+                    active={
+                      selectedDataset?.tier === d.tier &&
+                      selectedDataset?.category === d.category
+                    }
+                    onClick={() => handleSelectDataset(d.tier, d.category)}
+                  />
+                ))}
+            </>
+          )}
         </div>
       </div>
 
@@ -150,12 +171,16 @@ export function EvalDatasetsTab({ eval_ }: Props) {
                   Tier {selectedDataset.tier} — {cases.length} cases
                 </div>
               </div>
-              <button
-                onClick={() => setShowAddForm(!showAddForm)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-grim-accent/20 text-grim-accent hover:bg-grim-accent/30 transition-colors"
-              >
-                {showAddForm ? "Cancel" : "+ Add Case"}
-              </button>
+              {selectedDataset.tier !== 3 ? (
+                <button
+                  onClick={() => setShowAddForm(!showAddForm)}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-grim-accent/20 text-grim-accent hover:bg-grim-accent/30 transition-colors"
+                >
+                  {showAddForm ? "Cancel" : "+ Add Case"}
+                </button>
+              ) : (
+                <span className="text-[10px] text-grim-text-dim">read-only</span>
+              )}
             </div>
 
             {/* Add case form */}
@@ -216,8 +241,8 @@ export function EvalDatasetsTab({ eval_ }: Props) {
                           {isExpanded ? "−" : "+"}
                         </span>
                       </button>
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1 pr-2">
+                      {/* Action buttons (Tier 1/2 only) */}
+                      {selectedDataset.tier !== 3 && <div className="flex items-center gap-1 pr-2">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleStartEdit(c); }}
                           className="px-2 py-1 text-[10px] text-grim-text-dim hover:text-grim-accent transition-colors"
@@ -249,7 +274,7 @@ export function EvalDatasetsTab({ eval_ }: Props) {
                             del
                           </button>
                         )}
-                      </div>
+                      </div>}
                     </div>
                     {isExpanded && (
                       <div className="px-4 py-3 border-t border-grim-border bg-grim-bg/30">

@@ -3,9 +3,11 @@
 Provides:
   GET  /              → Chat UI (Next.js static build or legacy HTML)
   GET  /health        → Health check
-  WS   /ws/{sid}      → WebSocket chat (streaming-ready)
+  WS   /ws/{sid}      → WebSocket chat (streaming-ready, LangGraph v1)
+  WS   /ws/v2/{sid}   → WebSocket chat (GrimClient SDK sessions)
   POST /api/chat      → REST fallback (request/response)
   GET  /api/sessions  → List session thread IDs
+  GET  /api/v2/sessions → List active SDK sessions
 
 Startup:
   uvicorn server.app:app --host 0.0.0.0 --port 8080
@@ -19,7 +21,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -93,11 +95,12 @@ _graph: Any = None
 _config: GrimConfig | None = None
 _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
 _checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifetime
-_ironclaw_bridge: Any = None  # IronClawBridge instance (optional)
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
+_execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
 _active_ws_sessions: set[str] = set()  # live WebSocket session IDs (for Graph Studio)
 _session_knowledge: dict[str, list] = {}  # session_id → list of KnowledgeEntry.to_dict()
+_session_manager: Any = None  # SessionManager for v2 SDK sessions
 
 
 def _grim_root() -> Path:
@@ -111,7 +114,7 @@ def _grim_root() -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start Kronos MCP, build graph, serve until shutdown."""
-    global _graph, _config, _mcp_cleanup, _checkpointer, _ironclaw_bridge
+    global _graph, _config, _mcp_cleanup, _checkpointer
 
     grim_root = _grim_root()
     load_dotenv(grim_root / ".env")
@@ -152,27 +155,6 @@ async def lifespan(app: FastAPI):
         from core.reasoning_cache import ReasoningCache
         reasoning_cache = await ReasoningCache.from_env()
 
-        # Initialize IronClaw bridge (optional — graceful if unavailable)
-        ironclaw_bridge = None
-        ironclaw_url = os.environ.get("IRONCLAW_URL", "http://localhost:3100")
-        ironclaw_api_key = os.environ.get("IRONCLAW_API_KEY", "grim-internal-key")
-        try:
-            from core.bridge.ironclaw import IronClawBridge
-            bridge = IronClawBridge(base_url=ironclaw_url, api_key=ironclaw_api_key)
-            if await bridge.is_available():
-                ironclaw_bridge = bridge
-                _ironclaw_bridge = bridge
-                health = await bridge.health()
-                logger.info(
-                    "IronClaw connected: %s (v%s, uptime %.0fs)",
-                    ironclaw_url, health.version, health.uptime_secs,
-                )
-            else:
-                logger.info("IronClaw not available at %s — running without sandbox", ironclaw_url)
-                await bridge.close()
-        except Exception as exc:
-            logger.info("IronClaw bridge init failed: %s — running without sandbox", exc)
-
         # Load skill registry for /api/skills endpoint
         from core.skills.loader import load_skills
         global _skill_registry
@@ -184,7 +166,6 @@ async def lifespan(app: FastAPI):
             mcp_session=mcp_session,
             checkpointer=checkpointer,
             reasoning_cache=reasoning_cache,
-            ironclaw_bridge=ironclaw_bridge,
         )
         logger.info("Graph built — server ready")
 
@@ -201,12 +182,48 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Failed to build agent roster metadata: %s", exc)
 
+        # Boot Execution Pool (Project Charizard) if enabled
+        global _execution_pool
+        if _config.pool_enabled:
+            try:
+                from core.pool import ExecutionPool, JobQueue
+                from pathlib import Path as _Path
+                import core.tools.pool_tools  # triggers tool registration
+
+                queue = JobQueue(_config.pool_db_path)
+                _execution_pool = ExecutionPool(queue, _config)
+                await _execution_pool.start()
+                tool_context.execution_pool = _execution_pool
+                logger.info("Execution pool started: %d slots", _config.pool_num_slots)
+            except Exception as exc:
+                logger.warning("Could not start execution pool: %s", exc)
+                _execution_pool = None
+        else:
+            logger.info("Execution pool disabled (pool.enabled: false)")
+
+        # Boot SessionManager for v2 SDK sessions
+        global _session_manager
+        try:
+            from server.sessions import SessionManager
+            _session_manager = SessionManager(_config)
+            await _session_manager.start()
+        except Exception as exc:
+            logger.warning("Could not start SessionManager: %s", exc)
+            _session_manager = None
+
         yield
 
-        # Cleanup IronClaw bridge on shutdown
-        if _ironclaw_bridge:
+        # Shutdown SessionManager
+        if _session_manager:
             try:
-                await _ironclaw_bridge.close()
+                await _session_manager.stop()
+            except Exception:
+                pass
+
+        # Shutdown Execution Pool
+        if _execution_pool:
+            try:
+                await _execution_pool.stop()
             except Exception:
                 pass
 
@@ -279,19 +296,11 @@ async def favicon():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    ironclaw = "disconnected"
-    if _ironclaw_bridge:
-        try:
-            h = await _ironclaw_bridge.health()
-            ironclaw = "connected" if h.healthy else "disconnected"
-        except Exception:
-            ironclaw = "disconnected"
     return JSONResponse({
         "status": "ok",
         "env": _config.env if _config else "unknown",
         "vault": str(_config.vault_path) if _config else None,
         "graph": _graph is not None,
-        "ironclaw": ironclaw,
     })
 
 
@@ -380,33 +389,6 @@ async def update_config(req: ConfigUpdateRequest):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@app.get("/api/ironclaw/status")
-async def ironclaw_status():
-    """IronClaw engine status — gateway health, tools, metrics."""
-    if not _ironclaw_bridge:
-        return JSONResponse({
-            "available": False,
-            "message": "IronClaw bridge not initialized",
-        })
-
-    health = await _ironclaw_bridge.health()
-    tools = await _ironclaw_bridge.list_tools() if health.healthy else []
-    metrics = await _ironclaw_bridge.get_metrics() if health.healthy else None
-
-    return JSONResponse({
-        "available": health.healthy,
-        "version": health.version,
-        "uptime_secs": health.uptime_secs,
-        "tools": [{"name": t.name, "description": t.description, "risk_level": t.risk_level} for t in tools],
-        "metrics": {
-            "requests_total": metrics.requests_total,
-            "requests_failed": metrics.requests_failed,
-            "active_sessions": metrics.active_sessions,
-            "uptime_seconds": metrics.uptime_seconds,
-        } if metrics else None,
-    })
-
-
 # ---------------------------------------------------------------------------
 # Agent Team endpoints
 # ---------------------------------------------------------------------------
@@ -422,53 +404,6 @@ async def list_agents():
             "enabled": meta["id"] not in disabled,
         })
     return JSONResponse({"agents": agents})
-
-
-# Static IronClaw agent roles — fallback when engine is offline
-IRONCLAW_AGENT_ROLES = [
-    {"id": "researcher", "name": "Researcher", "description": "Gathers information, searches docs, explores codebases", "capabilities": ["research", "natural_language"], "color": "#3b82f6"},
-    {"id": "coder", "name": "Coder", "description": "Code generation, refactoring, debugging, implementation", "capabilities": ["code_generation", "debugging"], "color": "#34d399"},
-    {"id": "reviewer", "name": "Reviewer", "description": "Code review, security checks, quality analysis", "capabilities": ["code_review", "security"], "color": "#f59e0b"},
-    {"id": "planner", "name": "Planner", "description": "Task breakdown, planning, delegation to specialists", "capabilities": ["planning", "natural_language"], "color": "#8b5cf6"},
-    {"id": "tester", "name": "Tester", "description": "Test writing, validation, coverage analysis", "capabilities": ["testing", "debugging"], "color": "#06b6d4"},
-    {"id": "security_auditor", "name": "Security Auditor", "description": "Vulnerability analysis, threat modelling, mitigation", "capabilities": ["security", "code_review"], "color": "#ef4444"},
-]
-
-IRONCLAW_COORDINATION_PATTERNS = ["sequential", "parallel", "debate", "hierarchical", "pipeline"]
-
-
-@app.get("/api/ironclaw/agents")
-async def ironclaw_agents():
-    """IronClaw agent roster — limbs tier via bridge, with static fallback."""
-    fallback = {
-        "enabled": False,
-        "roles": IRONCLAW_AGENT_ROLES,
-        "coordination_patterns": IRONCLAW_COORDINATION_PATTERNS,
-        "active_sessions": 0,
-        "max_concurrent_sessions": 0,
-    }
-
-    if not _ironclaw_bridge:
-        return JSONResponse({**fallback, "message": "IronClaw bridge not initialized"})
-
-    try:
-        data = await _ironclaw_bridge.list_agents()
-        # Enrich with static metadata if the engine returns minimal data
-        roles = data.get("roles", [])
-        if roles and not roles[0].get("color"):
-            role_map = {r["id"]: r for r in IRONCLAW_AGENT_ROLES}
-            for role in roles:
-                static = role_map.get(role.get("id", ""), {})
-                role.setdefault("color", static.get("color", "#6b7280"))
-                role.setdefault("description", static.get("description", ""))
-                role.setdefault("capabilities", static.get("capabilities", []))
-            data["roles"] = roles
-        data.setdefault("coordination_patterns", IRONCLAW_COORDINATION_PATTERNS)
-        data["enabled"] = True
-        return JSONResponse(data)
-    except Exception as exc:
-        logger.warning("Failed to list IronClaw agents: %s", exc)
-        return JSONResponse({**fallback, "error": str(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -725,56 +660,6 @@ async def update_identity(req: IdentityUpdateRequest):
     except Exception as exc:
         logger.exception("Identity update failed")
         return JSONResponse({"error": str(exc)}, status_code=500)
-
-
-class WorkflowRequest(BaseModel):
-    task: str
-    pattern: dict
-
-
-@app.post("/api/ironclaw/workflow")
-async def ironclaw_workflow(req: WorkflowRequest):
-    """Run an IronClaw agent workflow — proxy to bridge."""
-    if not _ironclaw_bridge:
-        return JSONResponse(
-            {"error": "IronClaw bridge not initialized"},
-            status_code=503,
-        )
-
-    try:
-        result = await _ironclaw_bridge.run_workflow(req.task, req.pattern)
-        return JSONResponse(result)
-    except Exception as exc:
-        logger.error("IronClaw workflow failed: %s", exc)
-        return JSONResponse(
-            {"error": str(exc)},
-            status_code=500,
-        )
-
-
-class ScanRequest(BaseModel):
-    code: str
-    file_name: str = "code.py"
-
-
-@app.post("/api/ironclaw/scan")
-async def ironclaw_scan(req: ScanRequest):
-    """Scan code for security vulnerabilities via IronClaw engine."""
-    if not _ironclaw_bridge:
-        return JSONResponse(
-            {"error": "IronClaw bridge not initialized"},
-            status_code=503,
-        )
-
-    try:
-        result = await _ironclaw_bridge.scan_skill(req.code, req.file_name)
-        return JSONResponse(result)
-    except Exception as exc:
-        logger.error("IronClaw scan failed: %s", exc)
-        return JSONResponse(
-            {"error": str(exc)},
-            status_code=500,
-        )
 
 
 @app.get("/api/sessions")
@@ -1285,6 +1170,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     caller_id: str | None = None  # default: "peter" — services pass their own id
+    sandbox: bool = False  # sandbox mode — blocks vault/memory writes for eval
 
 
 class ChatResponse(BaseModel):
@@ -1312,6 +1198,7 @@ async def chat_rest(req: ChatRequest):
                 "messages": [HumanMessage(content=req.message)],
                 "session_start": datetime.now(),
                 "caller_id": caller_id,
+                "sandbox": req.sandbox,
             },
             config=graph_config,
         )
@@ -1356,9 +1243,11 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                 payload = json.loads(data)
                 message = payload.get("message", data)
                 caller_id = payload.get("caller_id", "peter")
+                sandbox_mode = payload.get("sandbox", False)
             except json.JSONDecodeError:
                 message = data
                 caller_id = "peter"
+                sandbox_mode = False
 
             if not message:
                 continue
@@ -1414,6 +1303,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                         "messages": [HumanMessage(content=message)],
                         "session_start": datetime.now(),
                         "caller_id": caller_id,
+                        "sandbox": sandbox_mode,
                     },
                     config=graph_config,
                     version="v2",
@@ -1426,12 +1316,8 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     # v0.0.6 nodes + v0.10 subgraph nodes
                     if kind == "on_chain_start" and name in (
                         "identity", "compress", "memory", "skill_match",
-                        "router", "companion", "dispatch", "integrate", "evolve",
+                        "router", "companion", "integrate", "evolve",
                         "graph_router", "personal_companion", "planning_companion",
-                        "audit_gate", "audit", "re_dispatch",
-                        # v0.10 subgraph nodes
-                        "companion_router", "conversation", "planning",
-                        "research", "code", "response_generator",
                     ):
                         if name not in seen_nodes:
                             seen_nodes.add(name)
@@ -1650,6 +1536,194 @@ async def websocket_chat(ws: WebSocket, session_id: str):
         logger.info("WS disconnected: %s", session_id)
     finally:
         _active_ws_sessions.discard(session_id)
+
+
+# ---------------------------------------------------------------------------
+# v2 WebSocket — GrimClient SDK sessions
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/v2/{session_id}")
+async def websocket_chat_v2(ws: WebSocket, session_id: str):
+    """v2 WebSocket chat — uses GrimClient SDK sessions.
+
+    Same client protocol as /ws/{session_id}:
+      Client sends: {"message": "...", "caller_id": "..."}
+      Server sends:
+        {"type": "trace", "cat": "...", "text": "..."}  — trace events
+        {"type": "stream", "token": "..."}               — text tokens
+        {"type": "response", "content": "...", "meta": {...}} — final
+        {"type": "error", "content": "..."}              — error
+    """
+    if _session_manager is None:
+        await ws.accept()
+        await ws.send_json({"type": "error", "content": "SDK sessions not available"})
+        await ws.close()
+        return
+
+    await ws.accept()
+    logger.info("WS v2 connected: %s", session_id)
+
+    try:
+        while True:
+            data = await ws.receive_text()
+            try:
+                payload = json.loads(data)
+                message = payload.get("message", data)
+                caller_id = payload.get("caller_id", "peter")
+            except json.JSONDecodeError:
+                message = data
+                caller_id = "peter"
+
+            if not message:
+                continue
+
+            try:
+                import time as _time
+                _t0 = _time.monotonic()
+
+                # Get or create the GrimClient for this session
+                client = await _session_manager.get_or_create(
+                    session_id, caller_id=caller_id,
+                )
+
+                await ws.send_json({
+                    "type": "trace", "cat": "sdk", "text": "Processing...",
+                    "ms": 0,
+                })
+
+                full_response = ""
+                tool_trace: list[str] = []
+
+                async for event in client.send_streaming(message):
+                    elapsed = round((_time.monotonic() - _t0) * 1000)
+
+                    if event.type == "text":
+                        token = event.data.get("text", "")
+                        if token:
+                            full_response += token
+                            await ws.send_json({
+                                "type": "stream",
+                                "token": token,
+                                "node": "sdk",
+                            })
+
+                    elif event.type == "tool_use":
+                        tool_name = event.data.get("name", "unknown")
+                        tool_input = event.data.get("input", {})
+                        tool_trace.append(tool_name)
+                        await ws.send_json({
+                            "type": "trace",
+                            "cat": "tool",
+                            "text": f"⚡ {tool_name}",
+                            "tool": tool_name,
+                            "action": "call",
+                            "ms": elapsed,
+                            "input": _safe_truncate(tool_input),
+                        })
+
+                    elif event.type == "result":
+                        cost = event.data.get("cost_usd")
+                        turns = event.data.get("num_turns")
+                        total_ms = round((_time.monotonic() - _t0) * 1000)
+
+                        await ws.send_json({
+                            "type": "trace",
+                            "cat": "sdk",
+                            "text": f"Complete ({total_ms}ms)",
+                            "ms": total_ms,
+                        })
+
+                # Mark session active
+                _session_manager.touch(session_id)
+
+                total_ms = round((_time.monotonic() - _t0) * 1000)
+
+                if not full_response:
+                    full_response = "I processed your message but have no response to show."
+
+                # Get cost/turn data from session
+                session_info = client.session_info
+
+                await ws.send_json({
+                    "type": "response",
+                    "content": full_response,
+                    "meta": {
+                        "mode": "sdk",
+                        "tools": tool_trace,
+                        "total_ms": total_ms,
+                        "cost_usd": session_info.get("total_cost_usd", 0),
+                        "turn_count": session_info.get("turn_count", 0),
+                    },
+                })
+
+                logger.info("WS v2 turn: %s — %d chars, %d tools, %dms",
+                            session_id, len(full_response), len(tool_trace), total_ms)
+
+            except Exception as exc:
+                import traceback
+                tb = traceback.format_exc()
+                logger.error("WS v2 error: %s\n%s", exc, tb)
+                exc_type = type(exc).__name__
+                await ws.send_json({
+                    "type": "error",
+                    "content": f"Error ({exc_type}): {exc}",
+                })
+
+    except WebSocketDisconnect:
+        logger.info("WS v2 disconnected: %s", session_id)
+
+
+# ---------------------------------------------------------------------------
+# v2 Session API endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v2/sessions")
+async def list_v2_sessions():
+    """List active SDK sessions."""
+    if _session_manager is None:
+        return JSONResponse({"sessions": [], "error": "SDK sessions not available"}, status_code=503)
+    return JSONResponse({
+        "sessions": _session_manager.list_sessions(),
+        "count": _session_manager.active_count,
+    })
+
+
+@app.delete("/api/v2/sessions/{session_id}")
+async def destroy_v2_session(session_id: str):
+    """Destroy an SDK session."""
+    if _session_manager is None:
+        return JSONResponse({"error": "SDK sessions not available"}, status_code=503)
+    existed = await _session_manager.destroy(session_id)
+    if existed:
+        return JSONResponse({"ok": True, "session_id": session_id})
+    return JSONResponse({"error": "Session not found"}, status_code=404)
+
+
+@app.post("/api/v2/chat")
+async def chat_v2_rest(req: ChatRequest):
+    """REST endpoint for v2 SDK sessions — send a message, get a response."""
+    if _session_manager is None:
+        return JSONResponse({"error": "SDK sessions not available"}, status_code=503)
+
+    session_id = req.session_id or str(uuid.uuid4())[:8]
+    caller_id = req.caller_id or "peter"
+
+    try:
+        client = await _session_manager.get_or_create(session_id, caller_id=caller_id)
+        resp = await client.send(req.message)
+
+        _session_manager.touch(session_id)
+
+        return JSONResponse({
+            "response": resp.text or "No response.",
+            "session_id": session_id,
+            "tool_calls": resp.tool_calls,
+            "cost_usd": resp.cost_usd,
+            "num_turns": resp.num_turns,
+        })
+    except Exception as exc:
+        logger.exception("v2 chat error")
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -1919,21 +1993,129 @@ async def api_eval_start(req: EvalRunRequest):
         except Exception:
             pass
 
-    async def _run():
-        try:
-            runner = EvalRunner(EvalConfig(), progress_callback=_progress)
-            result = await runner.run(tier=req.tier, categories=req.categories)
-            _eval_runs[run_id]["results"] = result.model_dump()
-            _eval_runs[run_id]["status"] = "completed"
-            await _broadcast({"type": "complete", "run_id": run_id})
-        except Exception as exc:
-            logger.exception("Eval run %s failed", run_id)
-            _eval_runs[run_id]["status"] = "failed"
-            _eval_runs[run_id]["error"] = str(exc)
-            await _broadcast({"type": "error", "run_id": run_id, "message": str(exc)})
+    if req.tier == 3:
+        # Tier 3 — live integration eval via Tier3Executor
+        async def _run_tier3():
+            try:
+                from eval.tier3.executor import Tier3Executor
+                from eval.tier3.judges import create_default_judges
 
-    asyncio.create_task(_run())
+                config = EvalConfig.from_env()
+                judges = create_default_judges()
+                executor = Tier3Executor(config=config, judges=judges, progress_callback=_progress)
+                results = await executor.run(categories=req.categories)
+
+                # Wrap into standard result shape for UI compatibility
+                wrapped = _wrap_tier3_results(run_id, results)
+                _eval_runs[run_id]["results"] = wrapped
+                _eval_runs[run_id]["status"] = "completed"
+
+                # Persist to disk
+                from eval.engine.comparator import save_run
+                from eval.schema import EvalRun
+                persist_path = config.results_dir / f"{run_id}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.json"
+                config.results_dir.mkdir(parents=True, exist_ok=True)
+                persist_path.write_text(json.dumps(wrapped, default=str), encoding="utf-8")
+
+                await _broadcast({"type": "complete", "run_id": run_id})
+            except Exception as exc:
+                logger.exception("Tier 3 eval run %s failed", run_id)
+                _eval_runs[run_id]["status"] = "failed"
+                _eval_runs[run_id]["error"] = str(exc)
+                await _broadcast({"type": "error", "run_id": run_id, "message": str(exc)})
+
+        asyncio.create_task(_run_tier3())
+    else:
+        # Tier 1/2/all — existing EvalRunner
+        async def _run():
+            try:
+                runner = EvalRunner(EvalConfig(), progress_callback=_progress)
+                result = await runner.run(tier=req.tier, categories=req.categories)
+                _eval_runs[run_id]["results"] = result.model_dump()
+                _eval_runs[run_id]["status"] = "completed"
+                await _broadcast({"type": "complete", "run_id": run_id})
+            except Exception as exc:
+                logger.exception("Eval run %s failed", run_id)
+                _eval_runs[run_id]["status"] = "failed"
+                _eval_runs[run_id]["error"] = str(exc)
+                await _broadcast({"type": "error", "run_id": run_id, "message": str(exc)})
+
+        asyncio.create_task(_run())
     return JSONResponse({"run_id": run_id, "status": "running"})
+
+
+def _wrap_tier3_results(run_id: str, results: list) -> dict:
+    """Wrap Tier3CaseResults into the standard EvalRun-like dict shape."""
+    from collections import defaultdict
+
+    by_cat: dict[str, list] = defaultdict(list)
+    for r in results:
+        by_cat[r.category].append(r)
+
+    suites = []
+    total_passed = 0
+    total_cases = 0
+    total_dur = 0
+
+    for cat, cat_results in sorted(by_cat.items()):
+        cases = []
+        for r in cat_results:
+            last_response = ""
+            if r.turn_results:
+                last_response = r.turn_results[-1].response_text or ""
+            cases.append({
+                "case_id": r.case_id,
+                "tier": 3,
+                "category": r.category,
+                "passed": r.passed,
+                "score": r.overall_score,
+                "duration_ms": r.duration_ms or 0,
+                "tags": r.tags or [],
+                "checks": [],
+                "dimensions": [
+                    {"name": j.judge, "score": j.score, "rationale": j.rationale or ""}
+                    for j in (r.judgments or [])
+                ],
+                "tool_trace": r.tools_called or [],
+                "response_text": last_response,
+                "error": r.error,
+                # Tier 3 extras
+                "judgments": [j.model_dump() for j in (r.judgments or [])],
+                "routing_path": r.routing_path or [],
+                "subgraph_history": r.subgraph_history or [],
+                "metrics": r.metrics.model_dump() if r.metrics else None,
+                "turn_results": [tr.model_dump() for tr in (r.turn_results or [])],
+            })
+
+        cat_passed = sum(1 for c in cases if c["passed"])
+        cat_total = len(cases)
+        cat_score = sum(c["score"] for c in cases) / cat_total if cat_total else 0
+        suites.append({
+            "tier": 3,
+            "category": cat,
+            "cases": cases,
+            "passed": cat_passed,
+            "total": cat_total,
+            "score": round(cat_score, 4),
+        })
+        total_passed += cat_passed
+        total_cases += cat_total
+        total_dur += sum(c["duration_ms"] for c in cases)
+
+    overall = sum(s["score"] for s in suites) / len(suites) if suites else 0
+
+    return {
+        "run_id": run_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tier": 3,
+        "status": "completed",
+        "suites": suites,
+        "overall_score": round(overall, 4),
+        "pass_rate": round(total_passed / total_cases, 4) if total_cases else 0,
+        "total_cases": total_cases,
+        "total_passed": total_passed,
+        "duration_ms": total_dur,
+    }
 
 
 @app.get("/api/eval/run/{run_id}")
@@ -2049,14 +2231,66 @@ async def api_eval_datasets():
     return JSONResponse(runner.list_datasets())
 
 
+@app.get("/api/eval/cases/{tier}")
+async def api_eval_cases(tier: int, category: str | None = None):
+    """Get test case listing for a tier (id, category, tags, description, turn_count)."""
+    from eval.config import EvalConfig
+
+    config = EvalConfig()
+    cases: list[dict] = []
+
+    if tier == 3:
+        from eval.tier3.executor import Tier3Executor
+        executor = Tier3Executor(config)
+        categories = [category] if category else None
+        datasets = executor.load_datasets(categories)
+        for ds in datasets.values():
+            for c in ds.cases:
+                cases.append({
+                    "id": c.id,
+                    "tier": 3,
+                    "category": c.category.value,
+                    "description": c.description or "",
+                    "tags": c.tags or [],
+                    "turn_count": len(c.turns),
+                })
+    else:
+        tier_dir = config.datasets_dir / f"tier{tier}"
+        if tier_dir.exists():
+            for path in sorted(tier_dir.glob("*_cases.yaml")):
+                try:
+                    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    cat = data.get("category", path.stem)
+                    if category and cat != category:
+                        continue
+                    for c in data.get("cases", []):
+                        cases.append({
+                            "id": c.get("id", ""),
+                            "tier": tier,
+                            "category": cat,
+                            "description": c.get("description", ""),
+                            "tags": c.get("tags", []),
+                            "turn_count": len(c.get("turns", [c])),
+                        })
+                except Exception:
+                    pass
+
+    return JSONResponse({"total": len(cases), "cases": cases})
+
+
 @app.get("/api/eval/datasets/{tier}/{category}")
 async def api_eval_dataset(tier: int, category: str):
     """Get a full dataset as JSON."""
     from eval.config import EvalConfig
 
     config = EvalConfig()
-    tier_dir = config.datasets_dir / f"tier{tier}"
-    path = tier_dir / f"{category}_cases.yaml"
+    if tier == 3:
+        # Tier 3 uses {category}.yaml naming
+        tier_dir = config.datasets_dir / "tier3"
+        path = tier_dir / f"{category}.yaml"
+    else:
+        tier_dir = config.datasets_dir / f"tier{tier}"
+        path = tier_dir / f"{category}_cases.yaml"
     if not path.exists():
         return JSONResponse({"error": "Dataset not found"}, status_code=404)
     try:
@@ -2170,6 +2404,92 @@ async def ws_eval_progress(ws: WebSocket, run_id: str):
     except WebSocketDisconnect:
         entry.get("ws_clients", []).remove(ws) if ws in entry.get("ws_clients", []) else None
         logger.info("Eval WS disconnected: %s", run_id)
+
+
+# ---------------------------------------------------------------------------
+# Pool API (Project Charizard)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/pool/status")
+async def api_pool_status():
+    """Get execution pool status."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    return JSONResponse(_execution_pool.status)
+
+
+@app.get("/api/pool/jobs")
+async def api_pool_jobs(status: str | None = None, job_type: str | None = None, limit: int = 50):
+    """List pool jobs, optionally filtered by status and/or job type."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    from core.pool.models import JobStatus as JS, JobType as JT
+    sf = None
+    if status:
+        try:
+            sf = JS(status)
+        except ValueError:
+            return JSONResponse({"error": f"Invalid status: {status}"}, status_code=400)
+    tf = None
+    if job_type:
+        try:
+            tf = JT(job_type)
+        except ValueError:
+            return JSONResponse({"error": f"Invalid job_type: {job_type}"}, status_code=400)
+
+    jobs = await _execution_pool.queue.list_jobs(status_filter=sf, type_filter=tf, limit=limit)
+    return JSONResponse([j.model_dump(mode="json") for j in jobs])
+
+
+@app.get("/api/pool/jobs/{job_id}")
+async def api_pool_job(job_id: str):
+    """Get a specific pool job by ID."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    job = await _execution_pool.queue.get(job_id)
+    if job is None:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+@app.post("/api/pool/jobs")
+async def api_pool_submit(request: Request):
+    """Submit a new pool job."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    from core.pool.models import Job, JobPriority, JobType
+
+    body = await request.json()
+    try:
+        job = Job(
+            job_type=JobType(body["job_type"]),
+            instructions=body["instructions"],
+            priority=JobPriority(body.get("priority", "normal")),
+            plan=body.get("plan"),
+            workspace_id=body.get("workspace_id"),
+            kronos_domains=body.get("kronos_domains", []),
+            kronos_fdo_ids=body.get("kronos_fdo_ids", []),
+        )
+    except (KeyError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    job_id = await _execution_pool.submit(job)
+    return JSONResponse({"job_id": job_id, "status": "queued"})
+
+
+@app.post("/api/pool/jobs/{job_id}/cancel")
+async def api_pool_cancel(job_id: str):
+    """Cancel a queued or blocked pool job."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    success = await _execution_pool.queue.cancel(job_id)
+    if success:
+        return JSONResponse({"ok": True, "job_id": job_id})
+    return JSONResponse({"error": "Cannot cancel — job may be running or finished"}, status_code=409)
 
 
 # ---------------------------------------------------------------------------

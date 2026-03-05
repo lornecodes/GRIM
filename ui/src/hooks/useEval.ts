@@ -33,6 +33,26 @@ export interface SuiteProgress {
   total?: number;
   passed?: number;
   score?: number;
+  // Tier 3 per-case fields
+  case_id?: string;
+  index?: number;
+  duration_ms?: number;
+}
+
+export interface TestCase {
+  id: string;
+  tier: number;
+  category: string;
+  description: string;
+  tags: string[];
+  turn_count: number;
+}
+
+export interface CaseRunStatus {
+  case_id: string;
+  status: "pending" | "running" | "passed" | "failed";
+  score?: number;
+  duration_ms?: number;
 }
 
 // ── API base ──
@@ -66,6 +86,8 @@ export function useEval() {
   const [progress, setProgress] = useState<SuiteProgress[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testCases, setTestCases] = useState<TestCase[]>([]);
+  const [caseRunStatus, setCaseRunStatus] = useState<CaseRunStatus[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,6 +106,21 @@ export function useEval() {
     try {
       const res = await fetch(`${apiBase()}/api/eval/datasets`);
       if (res.ok) setDatasets(await res.json());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  // ── Fetch test cases for a tier ──
+  const fetchTestCases = useCallback(async (tier: number, category?: string) => {
+    try {
+      let url = `${apiBase()}/api/eval/cases/${tier}`;
+      if (category) url += `?category=${encodeURIComponent(category)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setTestCases(data.cases || []);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
@@ -121,6 +158,7 @@ export function useEval() {
   const startRun = useCallback(async (tier: number | string = "all", categories?: string[]) => {
     setRunStatus("running");
     setProgress([]);
+    setCaseRunStatus([]);
     setError(null);
 
     try {
@@ -140,9 +178,39 @@ export function useEval() {
         wsRef.current = ws;
         ws.onmessage = (e) => {
           const event = JSON.parse(e.data);
+
+          // Tier 1/2 suite events
           if (event.type === "suite_start" || event.type === "suite_end") {
             setProgress((p) => [...p, event]);
           }
+
+          // Tier 3 per-case events
+          if (event.type === "tier3_case_start") {
+            setCaseRunStatus((prev) => [
+              ...prev.filter((c) => c.case_id !== event.case_id),
+              { case_id: event.case_id, status: "running" },
+            ]);
+            setProgress((p) => [...p, { ...event, tier: 3 }]);
+          }
+          if (event.type === "tier3_case_end") {
+            setCaseRunStatus((prev) =>
+              prev.map((c) =>
+                c.case_id === event.case_id
+                  ? {
+                      ...c,
+                      status: event.passed ? "passed" : "failed",
+                      score: event.score,
+                      duration_ms: event.duration_ms,
+                    }
+                  : c
+              )
+            );
+            setProgress((p) => [...p, { ...event, tier: 3 }]);
+          }
+          if (event.type === "tier3_start") {
+            setProgress((p) => [...p, { ...event, tier: 3, type: "tier3_start" }]);
+          }
+
           if (event.type === "complete") {
             setRunStatus("completed");
             fetchRuns();
@@ -154,7 +222,6 @@ export function useEval() {
           }
         };
         ws.onerror = () => {
-          // Fallback to polling if WS fails
           ws.close();
         };
       } catch {
@@ -264,9 +331,10 @@ export function useEval() {
 
   return {
     // State
-    runs, activeResult, datasets, datasetContent, runStatus, activeRunId, progress, loading, error,
+    runs, activeResult, datasets, datasetContent, runStatus, activeRunId,
+    progress, loading, error, testCases, caseRunStatus,
     // Actions
-    fetchRuns, fetchDatasets, fetchResults, fetchDatasetContent,
+    fetchRuns, fetchDatasets, fetchResults, fetchDatasetContent, fetchTestCases,
     startRun, appendCase, updateCase, deleteCase, compareRuns,
     setActiveResult, setError,
   };

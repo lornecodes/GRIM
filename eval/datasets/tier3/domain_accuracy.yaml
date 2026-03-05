@@ -1,0 +1,76 @@
+version: "1.0"
+tier: 3
+category: domain_accuracy
+description: "Domain accuracy — verify DFT knowledge against vault ground truth"
+
+cases:
+  - id: t3-domain-pac-constants
+    category: domain_accuracy
+    tags: [domain, pac, physics]
+    description: "PAC constants and fundamentals should be correct"
+    turns:
+      - role: user
+        message: "What is PAC in Dawn Field Theory? Give me the key concepts and any important constants."
+        expected_routing:
+          subgraph: research
+    ground_truth_fdo_ids:
+      - pac-comprehensive
+    domain_facts:
+      - claim: "PAC"
+        fdo_source: pac-comprehensive
+      - claim: "coherence"
+        fdo_source: pac-comprehensive
+    expected_tools:
+      - kronos_search
+
+  - id: t3-domain-sec-derivation
+    category: domain_accuracy
+    tags: [domain, sec, physics]
+    description: "SEC concept should be accurately described"
+    turns:
+      - role: user
+        message: "Explain the SEC principle in Dawn Field Theory. How does it relate to entropy?"
+    ground_truth_fdo_ids:
+      - sec-derivation
+    domain_facts:
+      - claim: "entropy"
+        fdo_source: sec-derivation
+
+  - id: t3-domain-rbf-explanation
+    category: domain_accuracy
+    tags: [domain, rbf, physics]
+    description: "RBF should be correctly explained"
+    turns:
+      - role: user
+        message: "What is RBF in the context of Dawn Field Theory?"
+    ground_truth_fdo_ids:
+      - rbf-boundary
+    domain_facts:
+      - claim: "boundary"
+        fdo_source: rbf-boundary
+
+  - id: t3-domain-med-principle
+    category: domain_accuracy
+    tags: [domain, med, physics]
+    description: "MED principle should be accurately described"
+    turns:
+      - role: user
+        message: "Tell me about the MED principle. What role does it play in the theory?"
+    ground_truth_fdo_ids:
+      - med-principle
+
+  - id: t3-domain-cross-relationship
+    category: domain_accuracy
+    tags: [domain, cross, physics]
+    description: "Cross-domain relationships should be correctly identified"
+    turns:
+      - role: user
+        message: "How do PAC, SEC, RBF, and MED relate to each other in Dawn Field Theory? Give me the big picture."
+    ground_truth_fdo_ids:
+      - pac-comprehensive
+      - dawn-field-theory
+    domain_facts:
+      - claim: "PAC"
+      - claim: "SEC"
+      - claim: "RBF"
+      - claim: "MED"

@@ -57,9 +57,9 @@ class TestAgentDiscovery:
     """Test auto-discovery from core/agents/ directory."""
 
     def test_discovers_all_agents(self, grim_config):
-        """Should discover all 7 agents (v0.0.6 Phase 3: +codebase)."""
+        """Should discover all 5 agents (IronClaw/audit removed)."""
         reg = AgentRegistry.discover(grim_config)
-        expected = {"memory", "code", "research", "operate", "audit", "ironclaw", "codebase"}
+        expected = {"memory", "code", "research", "operate", "codebase"}
         assert set(reg.names()) == expected
 
     def test_default_config_disables_code(self):
@@ -82,14 +82,14 @@ class TestAgentDiscovery:
 
     def test_disabled_agents_excluded(self, grim_config):
         """Disabled agents should not appear in registry."""
-        reg = AgentRegistry.discover(grim_config, disabled=["ironclaw", "audit"])
-        assert "ironclaw" not in reg
-        assert "audit" not in reg
-        assert "memory" in reg
+        reg = AgentRegistry.discover(grim_config, disabled=["memory", "research"])
+        assert "memory" not in reg
+        assert "research" not in reg
+        assert "operate" in reg
 
     def test_all_disabled(self, grim_config):
         """If all agents are disabled, registry should be empty."""
-        all_names = ["memory", "code", "research", "operate", "audit", "ironclaw", "planning", "codebase"]
+        all_names = ["memory", "code", "research", "operate", "planning", "codebase"]
         reg = AgentRegistry.discover(grim_config, disabled=all_names)
         assert len(reg) == 0
 
@@ -139,7 +139,7 @@ class TestAgentMetadata:
         reg = AgentRegistry.discover(grim_config)
         assert len(reg._classes) > 0
         assert "memory" in reg._classes
-        assert "ironclaw" in reg._classes
+        assert "research" in reg._classes
 
     def test_build_metadata_returns_list(self, grim_config):
         """build_metadata() returns a list of metadata dicts."""

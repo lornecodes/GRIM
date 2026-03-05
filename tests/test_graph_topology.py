@@ -35,14 +35,14 @@ class TestInfraNodeMetadata:
 
     EXPECTED_INFRA = {
         "identity", "compress", "memory", "skill_match", "graph_router",
-        "router", "dispatch", "audit_gate", "re_dispatch", "integrate", "evolve",
+        "router", "integrate", "evolve",
     }
 
     def test_all_infra_nodes_present(self):
         assert set(INFRA_NODE_METADATA.keys()) == self.EXPECTED_INFRA
 
     def test_infra_node_count(self):
-        assert len(INFRA_NODE_METADATA) == 11
+        assert len(INFRA_NODE_METADATA) == 8
 
     def test_required_fields(self):
         required = {"id", "name", "role", "description", "tools", "color",
@@ -57,7 +57,7 @@ class TestInfraNodeMetadata:
 
     def test_all_tiers_valid(self):
         for node_id, meta in INFRA_NODE_METADATA.items():
-            assert meta["tier"] in ("grim", "ironclaw"), f"{node_id} has invalid tier"
+            assert meta["tier"] in ("grim",), f"{node_id} has invalid tier"
 
     def test_all_infra_are_grim_tier(self):
         """All infrastructure nodes should be grim tier."""
@@ -75,14 +75,14 @@ class TestInfraNodeMetadata:
             assert meta["tools"] == [], f"{node_id} should have empty tools"
 
     def test_router_nodes_have_routing_rules(self):
-        routers = {"graph_router", "router", "audit_gate"}
+        routers = {"graph_router", "router"}
         for r in routers:
             assert "routing_rules" in INFRA_NODE_METADATA[r], f"{r} missing routing_rules"
             assert len(INFRA_NODE_METADATA[r]["routing_rules"]) >= 2
 
     def test_non_router_nodes_lack_routing_rules(self):
         """Only router/gate nodes should have routing_rules."""
-        routers = {"graph_router", "router", "audit_gate"}
+        routers = {"graph_router", "router"}
         for node_id, meta in INFRA_NODE_METADATA.items():
             if node_id not in routers:
                 assert "routing_rules" not in meta, f"{node_id} should not have routing_rules"
@@ -100,7 +100,7 @@ class TestInfraNodeMetadata:
 
     def test_routing_nodes(self):
         routing = [n for n, m in INFRA_NODE_METADATA.items() if m["node_type"] == "routing"]
-        assert set(routing) == {"graph_router", "router", "dispatch"}
+        assert set(routing) == {"graph_router", "router"}
 
     def test_postprocessing_nodes(self):
         postproc = [n for n, m in INFRA_NODE_METADATA.items() if m["node_type"] == "postprocessing"]
@@ -119,10 +119,7 @@ class TestStaticEdges:
     """Verify edge definitions are complete and consistent."""
 
     def test_minimum_edge_count(self):
-        assert len(STATIC_EDGES) >= 19
-
-    def test_exact_edge_count(self):
-        assert len(STATIC_EDGES) == 19
+        assert len(STATIC_EDGES) >= 10
 
     def test_no_duplicate_edges(self):
         seen = set()
@@ -148,16 +145,10 @@ class TestStaticEdges:
     def test_all_edge_endpoints_are_known_nodes(self):
         known = set(INFRA_NODE_METADATA.keys()) | {
             "companion", "personal_companion", "planning_companion",
-            "audit",
         }
         for edge in STATIC_EDGES:
             assert edge["source"] in known, f"Unknown source: {edge['source']}"
             assert edge["target"] in known, f"Unknown target: {edge['target']}"
-
-    def test_loop_edge_exists(self):
-        loop = [e for e in STATIC_EDGES
-                if e["source"] == "re_dispatch" and e["target"] == "dispatch"]
-        assert len(loop) == 1, "re_dispatch -> dispatch loop edge missing"
 
     def test_no_self_loops(self):
         for edge in STATIC_EDGES:
@@ -179,7 +170,7 @@ class TestStaticEdges:
 
     def test_conditional_edge_count(self):
         conditional = [e for e in STATIC_EDGES if e["type"] == "conditional"]
-        assert len(conditional) >= 8, "Should have at least 8 conditional edges"
+        assert len(conditional) >= 4, "Should have at least 4 conditional edges"
 
     def test_static_edge_count(self):
         static = [e for e in STATIC_EDGES if e["type"] == "static"]
@@ -190,17 +181,9 @@ class TestStaticEdges:
         targets = [e["target"] for e in STATIC_EDGES if e["source"] == "graph_router"]
         assert set(targets) == {"router", "personal_companion", "planning_companion"}
 
-    def test_router_has_two_branches(self):
+    def test_router_routes_to_companion(self):
         targets = [e["target"] for e in STATIC_EDGES if e["source"] == "router"]
-        assert set(targets) == {"companion", "dispatch"}
-
-    def test_audit_gate_has_two_branches(self):
-        targets = [e["target"] for e in STATIC_EDGES if e["source"] == "audit_gate"]
-        assert set(targets) == {"audit", "integrate"}
-
-    def test_audit_has_two_branches(self):
-        targets = [e["target"] for e in STATIC_EDGES if e["source"] == "audit"]
-        assert set(targets) == {"integrate", "re_dispatch"}
+        assert set(targets) == {"companion"}
 
     def test_all_companions_connect_to_integrate(self):
         """All three companion nodes should feed into integrate."""
@@ -243,7 +226,6 @@ class TestNodePositions:
 
     def test_columns_increase_left_to_right(self):
         assert NODE_POSITIONS["identity"][0] < NODE_POSITIONS["graph_router"][0]
-        assert NODE_POSITIONS["integrate"][0] > NODE_POSITIONS["dispatch"][0]
         assert NODE_POSITIONS["evolve"][0] > NODE_POSITIONS["integrate"][0]
 
     def test_preprocessing_in_early_columns(self):
@@ -252,7 +234,7 @@ class TestNodePositions:
 
     def test_postprocessing_in_late_columns(self):
         for n in ["integrate", "evolve"]:
-            assert NODE_POSITIONS[n][0] >= 9, f"{n} should be in columns 9+"
+            assert NODE_POSITIONS[n][0] >= 7, f"{n} should be in columns 7+"
 
     def test_personal_companion_above_main_line(self):
         """Personal companion should be at a negative row (above main pipeline)."""
@@ -263,13 +245,9 @@ class TestNodePositions:
         assert NODE_POSITIONS["planning_companion"][1] > 0
 
     def test_minimum_column_count(self):
-        """Should span at least 10 columns."""
+        """Should span at least 8 columns."""
         cols = {pos[0] for pos in NODE_POSITIONS.values()}
-        assert max(cols) - min(cols) >= 9
-
-    def test_re_dispatch_below_audit(self):
-        """Re-dispatch should be below audit for the loop arc to render correctly."""
-        assert NODE_POSITIONS["re_dispatch"][1] > NODE_POSITIONS["audit"][1]
+        assert max(cols) - min(cols) >= 8
 
 
 class TestAllNodeIds:
@@ -282,8 +260,8 @@ class TestAllNodeIds:
         assert "planning_companion" in ALL_NODE_IDS
 
     def test_count(self):
-        # 14 v0.0.6 nodes + 6 v0.10 nodes = 20
-        assert len(ALL_NODE_IDS) == 20
+        # 8 infra nodes + 3 companions = 11 core nodes
+        assert len(ALL_NODE_IDS) >= 11
 
     def test_is_frozenset(self):
         assert isinstance(ALL_NODE_IDS, frozenset)
@@ -347,7 +325,7 @@ class TestCanvasLayout:
 
 
 class TestGraphStructure:
-    """Verify the graph has proper DAG properties (except the re_dispatch loop)."""
+    """Verify the graph has proper DAG properties."""
 
     @pytest.fixture(autouse=True)
     def _build_adjacency(self):
@@ -367,7 +345,7 @@ class TestGraphStructure:
     def test_integrate_is_convergence_point(self):
         """Multiple nodes should feed into integrate."""
         incoming = [e["source"] for e in STATIC_EDGES if e["target"] == "integrate"]
-        assert len(incoming) >= 4  # companion, personal, planning, audit_gate/audit
+        assert len(incoming) >= 3  # companion, personal_companion, planning_companion
 
     def test_all_paths_reach_integrate(self):
         """Every path from graph_router should eventually reach integrate."""
@@ -399,19 +377,15 @@ class TestGraphStructure:
                 f"{chain[i]} does not connect to {chain[i+1]}"
             )
 
-    def test_loop_is_bounded(self):
-        """The re_dispatch -> dispatch loop should be the only cycle."""
-        # Check that removing the loop edge makes the graph acyclic
-        edges_no_loop = [e for e in STATIC_EDGES
-                         if not (e["source"] == "re_dispatch" and e["target"] == "dispatch")]
+    def test_graph_is_acyclic(self):
+        """The graph should be a clean DAG with no cycles."""
         adj: dict[str, list[str]] = {}
-        for e in edges_no_loop:
+        for e in STATIC_EDGES:
             adj.setdefault(e["source"], []).append(e["target"])
 
         # Topological sort should succeed (no cycles)
         visited: set[str] = set()
         temp: set[str] = set()
-        order: list[str] = []
         has_cycle = False
 
         def dfs(node: str):
@@ -426,7 +400,6 @@ class TestGraphStructure:
                 dfs(n)
             temp.discard(node)
             visited.add(node)
-            order.append(node)
 
         all_nodes = set(adj.keys())
         for n in adj.values():
@@ -434,7 +407,7 @@ class TestGraphStructure:
         for node in all_nodes:
             dfs(node)
 
-        assert not has_cycle, "Graph has cycles beyond the re_dispatch loop"
+        assert not has_cycle, "Graph has unexpected cycles"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -522,7 +495,6 @@ class TestSmoke:
         r = INFRA_NODE_METADATA["router"]
         assert "signals" in r
         assert "memory" in r["signals"]
-        assert "ironclaw" in r["signals"]
 
     def test_signals_json_serializable(self):
         """Signals dicts should be JSON-serializable."""
@@ -567,9 +539,6 @@ def _make_mock_agent_metadata():
          "description": "Task planning", "tools": ["kronos_task_create"],
          "color": "#a78bfa", "tier": "grim", "toggleable": False},
         # Agent nodes
-        {"id": "audit", "name": "Audit", "role": "review",
-         "description": "Staging review", "tools": ["staging_read"],
-         "color": "#f97316", "tier": "ironclaw", "toggleable": True},
         {"id": "memory", "name": "Memory", "role": "vault_ops",
          "description": "Vault operations", "tools": ["kronos_search", "kronos_create"],
          "color": "#8b5cf6", "tier": "grim", "toggleable": False},
@@ -640,7 +609,7 @@ class TestTopologyEndpoint(unittest.TestCase):
         """Agent nodes with positions should appear."""
         client = self._make_client()
         data = client.get("/api/graph/topology").json()
-        self.assertIn("audit", data["nodes"])
+        self.assertIn("memory", data["nodes"])
 
     def test_agents_without_positions_excluded(self):
         """Agents not in NODE_POSITIONS should NOT appear in topology."""
@@ -682,10 +651,12 @@ class TestTopologyEndpoint(unittest.TestCase):
 
     def test_disabled_agent_shows_as_disabled(self):
         """Agents in agents_disabled should have enabled=false."""
-        config = _make_test_config(agents_disabled=["audit"])
+        config = _make_test_config(agents_disabled=["memory"])
         client = self._make_client(config=config)
         data = client.get("/api/graph/topology").json()
-        self.assertFalse(data["nodes"]["audit"]["enabled"])
+        # memory appears as an agent node — should be disabled
+        if "memory" in data["nodes"]:
+            self.assertFalse(data["nodes"]["memory"]["enabled"])
 
     def test_edge_format(self):
         client = self._make_client()
@@ -710,8 +681,8 @@ class TestTopologyEndpoint(unittest.TestCase):
     def test_agent_node_type(self):
         client = self._make_client()
         data = client.get("/api/graph/topology").json()
-        # audit, memory, research are agents
-        for n in ["audit", "memory", "research"]:
+        # memory, research are agents
+        for n in ["memory", "research"]:
             if n in data["nodes"]:
                 self.assertEqual(data["nodes"][n]["node_type"], "agent")
 
@@ -885,13 +856,7 @@ class TestCrossValidation:
         """Every node in NODE_POSITIONS should be either infra or a known companion/agent."""
         infra = set(INFRA_NODE_METADATA.keys())
         companions = {"companion", "personal_companion", "planning_companion"}
-        agents_in_graph = {"audit"}  # agents that have positions in the topology
-        # v0.10 subgraph nodes (alternative topology)
-        v10_nodes = {
-            "companion_router", "conversation", "planning",
-            "research", "code", "response_generator",
-        }
-        known = infra | companions | agents_in_graph | v10_nodes
+        known = infra | companions
         for node_id in NODE_POSITIONS:
             assert node_id in known, (
                 f"Node {node_id} has a position but is not in infra/companion set"

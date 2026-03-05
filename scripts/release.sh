@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 # ── GRIM Release Manager ─────────────────────────────────────
 #
-# Single script for the full Docker lifecycle (GRIM + IronClaw):
+# Single script for the full Docker lifecycle:
 #   build, test, deploy, clean, status.
 #
-# Builds TWO images:
-#   grim       — Python/FastAPI/LangGraph AI companion
-#   ironclaw   — Rust sandboxed execution engine (REST gateway)
-#
 # Usage:
-#   ./scripts/release.sh setup     Full local setup (Python + UI + IronClaw + tests)
-#   ./scripts/release.sh build     Build GRIM + IronClaw Docker images
+#   ./scripts/release.sh setup     Full local setup (Python + UI + tests)
+#   ./scripts/release.sh build     Build GRIM Docker image
 #   ./scripts/release.sh unit      Run host-side unit tests (no Docker)
 #   ./scripts/release.sh test      Run all tests inside container
-#   ./scripts/release.sh up        Start GRIM + IronClaw (detached)
-#   ./scripts/release.sh down      Stop GRIM + IronClaw
+#   ./scripts/release.sh up        Start GRIM (detached)
+#   ./scripts/release.sh down      Stop GRIM
 #   ./scripts/release.sh logs      Tail container logs
 #   ./scripts/release.sh status    Show container health + image info
 #   ./scripts/release.sh clean     Remove old images + dangling layers + anonymous volumes
@@ -47,15 +43,11 @@ if command -v cygpath &>/dev/null; then
     GRIM_DIR="$(cygpath -m "$GRIM_DIR")"
 fi
 IMAGE_NAME="grim"
-IRONCLAW_IMAGE_NAME="ironclaw"
 KEEP_IMAGES="${GRIM_KEEP:-1}"
 
 # Compose file paths (quoted separately to handle spaces in paths)
 COMPOSE_FILE="$GRIM_DIR/docker-compose.yml"
 COMPOSE_PROD_FILE="$GRIM_DIR/docker-compose.prod.yml"
-
-# IronClaw engine
-ENGINE_DIR="$GRIM_DIR/engine"
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -88,23 +80,20 @@ cmd_build() {
     local tag
     tag=$(_version_tag)
 
-    # ── Build IronClaw engine image ──
-    if [[ -d "$ENGINE_DIR" && -f "$ENGINE_DIR/Dockerfile" ]]; then
-        _log "Building $IRONCLAW_IMAGE_NAME:$tag ..."
-        docker build -t "$IRONCLAW_IMAGE_NAME:$tag" -t "$IRONCLAW_IMAGE_NAME:latest" "$ENGINE_DIR"
-        _ok "Built: $IRONCLAW_IMAGE_NAME:$tag + $IRONCLAW_IMAGE_NAME:latest"
-
-        _clean_old_images "$IRONCLAW_IMAGE_NAME"
-    else
-        _warn "IronClaw engine not found at $ENGINE_DIR — skipping engine build"
-    fi
-
     # ── Build GRIM image ──
     _log "Building $IMAGE_NAME:$tag ..."
     docker build -t "$IMAGE_NAME:$tag" -t "$IMAGE_NAME:latest" "$GRIM_DIR"
     _ok "Built: $IMAGE_NAME:$tag + $IMAGE_NAME:latest"
 
     _clean_old_images "$IMAGE_NAME"
+
+    # ── Build Discord bot image ──
+    _log "Building grim-discord:$tag ..."
+    docker build -f "$GRIM_DIR/Dockerfile.discord" \
+        -t "grim-discord:$tag" -t "grim-discord:latest" "$GRIM_DIR"
+    _ok "Built: grim-discord:$tag + grim-discord:latest"
+
+    _clean_old_images "grim-discord"
 
     # Remove dangling images from this build
     local dangling
@@ -115,7 +104,7 @@ cmd_build() {
 
     _log "── Images ──"
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null
-    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
+    docker images "grim-discord" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
 }
 
 _clean_old_images() {
@@ -142,7 +131,7 @@ _clean_stale_images() {
     local removed=0
 
     # 1. Clean old tagged versions of our images
-    for img in "$IMAGE_NAME" "$IRONCLAW_IMAGE_NAME" "grim-ironclaw" "grim-ai-bridge"; do
+    for img in "$IMAGE_NAME" "grim-ai-bridge"; do
         local tags
         tags=$(docker images "$img" --format "{{.Tag}}" 2>/dev/null | grep -v "latest" | sort -r || true)
         [[ -z "$tags" ]] && continue
@@ -200,8 +189,8 @@ cmd_test() {
         vault=""
     fi
 
-    # Core + model routing + IronClaw + agent integration tests — no vault needed
-    _log "── Core + routing + IronClaw + agent tests (container) ──"
+    # Core + model routing + agent integration tests — no vault needed
+    _log "── Core + routing + agent tests (container) ──"
     docker run --rm \
         -e KRONOS_VAULT_PATH=/app/tests/vault \
         -e KRONOS_SKILLS_PATH=/app/skills \
@@ -209,7 +198,6 @@ cmd_test() {
         python -m pytest \
             tests/test_grim_core.py \
             tests/test_model_routing.py \
-            tests/test_ironclaw.py \
             tests/test_agent_integration.py \
             tests/test_memory_system.py \
             tests/test_agent_registry.py \
@@ -254,24 +242,13 @@ cmd_test() {
 }
 
 cmd_up() {
-    _log "Starting GRIM + IronClaw ..."
+    _log "Starting GRIM ..."
 
     # Use pre-built images — don't rebuild (compose cache can serve stale layers).
     # Run 'release.sh build' first if code changed.
     _compose up -d
     _log "Waiting for health checks ..."
     sleep 5
-
-    # Check IronClaw health
-    local ic_health
-    ic_health=$(docker inspect --format='{{.State.Health.Status}}' ironclaw 2>/dev/null || echo "not found")
-    if [[ "$ic_health" == "healthy" ]]; then
-        _ok "IronClaw is healthy (port 3100, internal network)"
-    elif [[ "$ic_health" == "not found" ]]; then
-        _warn "IronClaw container not found — running GRIM without sandbox"
-    else
-        _warn "IronClaw health: $ic_health (may still be starting)"
-    fi
 
     # Check GRIM health
     local health
@@ -300,20 +277,21 @@ cmd_logs() {
 cmd_status() {
     echo ""
     _log "── Container Status ──"
-    docker ps --filter "name=grim" --filter "name=ironclaw" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No containers"
+    docker ps --filter "name=grim" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No containers"
 
     echo ""
     _log "── Health ──"
-    local grim_health ic_health
+    local grim_health
     grim_health=$(docker inspect --format='{{.State.Health.Status}}' grim 2>/dev/null || echo "not running")
-    ic_health=$(docker inspect --format='{{.State.Health.Status}}' ironclaw 2>/dev/null || echo "not running")
-    echo "  GRIM:     $grim_health"
-    echo "  IronClaw: $ic_health"
+    echo "  GRIM: $grim_health"
+    local discord_health
+    discord_health=$(docker inspect --format='{{.State.Health.Status}}' grim-discord 2>/dev/null || echo "not running")
+    echo "  Discord: $discord_health"
 
     echo ""
     _log "── Images ──"
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || echo "No GRIM images"
-    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || echo "No IronClaw images"
+    docker images "grim-discord" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
 
     echo ""
     _log "── Volumes ──"
@@ -327,9 +305,9 @@ cmd_status() {
 cmd_clean() {
     _log "Cleaning up Docker resources ..."
 
-    # 1. Remove stopped grim + ironclaw containers
+    # 1. Remove stopped grim containers
     local stopped
-    for name in grim ironclaw ai-bridge; do
+    for name in grim grim-discord ai-bridge; do
         stopped=$(docker ps -a --filter "name=$name" --filter "status=exited" -q 2>/dev/null)
         if [[ -n "$stopped" ]]; then
             _log "Removing stopped $name containers ..."
@@ -340,16 +318,15 @@ cmd_clean() {
     # 2. Remove dead/created containers from test runs
     local dead
     dead=$(docker ps -a --filter "status=exited" --filter "status=dead" --filter "status=created" \
-        --format "{{.ID}} {{.Image}}" 2>/dev/null | grep -E "(grim|ironclaw)" | awk '{print $1}' || true)
+        --format "{{.ID}} {{.Image}}" 2>/dev/null | grep -E "(grim)" | awk '{print $1}' || true)
     if [[ -n "$dead" ]]; then
         _log "Removing dead test containers ..."
         echo "$dead" | xargs docker rm -f 2>/dev/null || true
     fi
 
-    # 3. Remove old image tags for both images
+    # 3. Remove old image tags
     _clean_old_images "$IMAGE_NAME"
-    _clean_old_images "$IRONCLAW_IMAGE_NAME"
-    _clean_old_images "grim-ironclaw"
+    _clean_old_images "grim-discord"
     _clean_old_images "grim-ai-bridge"
 
     # 4. Remove dangling images
@@ -377,7 +354,6 @@ cmd_clean() {
     _log ""
     _log "── Remaining Images ──"
     docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
-    docker images "$IRONCLAW_IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
     _log ""
     _log "── Disk Usage ──"
     docker system df 2>/dev/null || true
@@ -441,13 +417,6 @@ cmd_unit() {
         return 1
     }
 
-    # IronClaw bridge tests
-    _log "── IronClaw bridge tests (host) ──"
-    (cd "$GRIM_DIR" && python -m pytest tests/test_ironclaw.py -v --tb=short) || {
-        _err "IronClaw tests FAILED — aborting"
-        return 1
-    }
-
     # Agent integration tests
     _log "── Agent integration tests (host) ──"
     (cd "$GRIM_DIR" && python -m pytest tests/test_agent_integration.py -v --tb=short) || {
@@ -487,7 +456,7 @@ cmd_rebuild() {
     cmd_test
     cmd_up
     cmd_integration
-    _ok "Rebuild complete — GRIM + IronClaw running on port ${GRIM_PORT:-8080}"
+    _ok "Rebuild complete — GRIM running on port ${GRIM_PORT:-8080}"
 }
 
 cmd_deploy() {
@@ -521,7 +490,7 @@ cmd_deploy() {
     cmd_clean
 
     _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    _ok "Deploy complete — GRIM + IronClaw running on port ${GRIM_PORT:-8080}"
+    _ok "Deploy complete — GRIM running on port ${GRIM_PORT:-8080}"
     _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -549,7 +518,7 @@ cmd_prod() {
 }
 
 cmd_setup() {
-    _log "Setting up GRIM + IronClaw (local development) ..."
+    _log "Setting up GRIM (local development) ..."
     _log ""
 
     # ── 1. Python deps ──
@@ -596,42 +565,13 @@ cmd_setup() {
     fi
     _log ""
 
-    # ── 3. IronClaw engine (Rust) ──
-    _log "━━━ IronClaw Engine (Rust) ━━━"
-    if [[ -d "$ENGINE_DIR" && -f "$ENGINE_DIR/Cargo.toml" ]]; then
-        if command -v cargo &>/dev/null; then
-            _log "Building IronClaw (this may take a few minutes on first run) ..."
-            (cd "$ENGINE_DIR" && cargo build --release) || {
-                _err "IronClaw build failed"
-                return 1
-            }
-            local binary
-            if [[ -f "$ENGINE_DIR/target/release/ironclaw.exe" ]]; then
-                binary="$ENGINE_DIR/target/release/ironclaw.exe"
-            elif [[ -f "$ENGINE_DIR/target/release/ironclaw" ]]; then
-                binary="$ENGINE_DIR/target/release/ironclaw"
-            fi
-            if [[ -n "$binary" ]]; then
-                _ok "IronClaw built: $binary"
-            else
-                _warn "Build succeeded but binary not found in expected location"
-            fi
-        else
-            _warn "Rust/cargo not found — IronClaw engine won't be available locally"
-            _warn "Install: https://rustup.rs/ or use Docker (release.sh deploy)"
-        fi
-    else
-        _warn "IronClaw engine not found at $ENGINE_DIR"
-    fi
-    _log ""
-
-    # ── 4. Local directories ──
+    # ── 3. Local directories ──
     _log "━━━ Local Directories ━━━"
     mkdir -p "$GRIM_DIR/local/evolution" "$GRIM_DIR/local/objectives" "$GRIM_DIR/logs"
     _ok "Created local/, logs/"
     _log ""
 
-    # ── 5. Run tests ──
+    # ── 4. Run tests ──
     _log "━━━ Verification ━━━"
     cmd_unit || {
         _warn "Some tests failed — check output above"
@@ -644,7 +584,6 @@ cmd_setup() {
     _ok "Next steps:"
     _ok "  Local dev:   uvicorn server.app:app --reload --port 8080"
     _ok "  Docker:      ./scripts/release.sh deploy"
-    _ok "  IronClaw:    ironclaw ui --config engine/config/grim.yaml"
     _ok "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -672,14 +611,14 @@ case "${1:-up}" in
         echo "Usage: $0 <command>"
         echo ""
         echo "Commands:"
-        echo "  setup         Full local setup: Python deps + UI build + IronClaw + tests"
-        echo "  up            Start GRIM + IronClaw (default — docker compose up -d)"
-        echo "  build         Build GRIM + IronClaw Docker images with version tag"
+        echo "  setup         Full local setup: Python deps + UI build + tests"
+        echo "  up            Start GRIM (default — docker compose up -d)"
+        echo "  build         Build GRIM Docker image with version tag"
         echo "  unit          Run host-side unit tests (no Docker)"
         echo "  test          Run unit + handler tests inside container"
         echo "  integration   Run integration tests against live containers"
         echo "  deploy        Gated pipeline: unit → build → test → up → integration → clean"
-        echo "  down          Stop GRIM + IronClaw"
+        echo "  down          Stop GRIM"
         echo "  logs          Tail container logs"
         echo "  status        Show containers, images, volumes, disk usage"
         echo "  clean         Remove old images, dead containers, anonymous volumes (keeps last $KEEP_IMAGES)"

@@ -18,7 +18,7 @@ consumers:
     role: read-only
     description: Read-only git status, diff, log checks
     reads: [protocol.md, safety, quality_gates]
-  ironclaw-agent:
+  operate-agent:
     role: execution
     description: Git write operations — commits, pushes, branch creation
     reads: [protocol.md, safety, quality_gates]
@@ -45,7 +45,7 @@ outputs:
   error: string
 
 triggers:
-  - delegation: "GRIM routes a git task to ops-agent (reads) or ironclaw-agent (writes)"
+  - delegation: "GRIM routes a git task to ops-agent (reads) or operate-agent (writes)"
   - explicit: "User asks to commit, branch, or push"
 
 safety:

@@ -1,0 +1,68 @@
+version: "1.0"
+tier: 3
+category: research
+description: "Research subgraph — vault search, FDO retrieval, deep dive, knowledge graph"
+
+cases:
+  - id: t3-res-vault-search
+    category: research
+    tags: [research, vault, search]
+    description: "Vault search should delegate to research agent"
+    turns:
+      - role: user
+        message: "Search the vault for everything we know about PAC regulation"
+        expected_routing:
+          subgraph: research
+          delegation_type: research
+    expected_routing:
+      subgraph: research
+      delegation_type: research
+    expected_tools:
+      - kronos_search
+
+  - id: t3-res-fdo-retrieval
+    category: research
+    tags: [research, vault, get]
+    description: "Specific FDO retrieval should route to research"
+    turns:
+      - role: user
+        message: "Get the pac-comprehensive FDO from the vault"
+        expected_routing:
+          subgraph: research
+          delegation_type: research
+    expected_tools:
+      - kronos_get
+
+  - id: t3-res-deep-dive
+    category: research
+    tags: [research, deep_dive]
+    description: "Deep dive into a concept's source material"
+    turns:
+      - role: user
+        message: "Deep dive into the source material behind the Möbius topology experiments"
+        expected_routing:
+          subgraph: research
+    expected_tools:
+      - kronos_deep_dive
+
+  - id: t3-res-cross-reference
+    category: research
+    tags: [research, graph]
+    description: "Cross-referencing concepts via knowledge graph"
+    turns:
+      - role: user
+        message: "How does PAC connect to SEC in the knowledge graph? Show me the relationships"
+        expected_routing:
+          subgraph: research
+    expected_tools:
+      - kronos_graph
+
+  - id: t3-res-knowledge-graph
+    category: research
+    tags: [research, navigate]
+    description: "Navigate the knowledge graph around a concept"
+    turns:
+      - role: user
+        message: "What's the graph around dawn-field-theory? I want to see all the connections"
+        expected_routing:
+          subgraph: research

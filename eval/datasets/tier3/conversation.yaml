@@ -1,0 +1,78 @@
+version: "1.0"
+tier: 3
+category: conversation
+description: "Conversational subgraph — greetings, emotional support, follow-ups, personality"
+
+cases:
+  - id: t3-conv-greeting
+    category: conversation
+    tags: [conversation, greeting]
+    description: "Basic greeting should route to conversation, respond warmly"
+    turns:
+      - role: user
+        message: "Hey GRIM, how's it going?"
+        expected_routing:
+          subgraph: conversation
+        response_excludes:
+          - "error"
+          - "I cannot"
+    expected_routing:
+      subgraph: conversation
+
+  - id: t3-conv-emotional-support
+    category: conversation
+    tags: [conversation, emotional]
+    description: "Venting / emotional support stays in conversation mode"
+    turns:
+      - role: user
+        message: "I'm feeling really frustrated with this project, nothing seems to be working"
+        expected_routing:
+          subgraph: conversation
+        response_excludes:
+          - "kronos_search"
+          - "error"
+    expected_routing:
+      subgraph: conversation
+
+  - id: t3-conv-followup
+    category: conversation
+    tags: [conversation, followup]
+    description: "Follow-up question should maintain conversation context"
+    turns:
+      - role: user
+        message: "I really like how feedback loops work in systems"
+      - role: user
+        message: "Can you elaborate on that?"
+        response_excludes:
+          - "error"
+    expected_routing:
+      subgraph: conversation
+    max_tokens: 100000
+    max_wall_time_ms: 90000
+
+  - id: t3-conv-personality
+    category: conversation
+    tags: [conversation, personality]
+    description: "GRIM should express personality — not generic assistant"
+    turns:
+      - role: user
+        message: "Tell me about yourself, GRIM. What are you?"
+        expected_routing:
+          subgraph: conversation
+        response_excludes:
+          - "I'm an AI assistant"
+          - "I'm a large language model"
+    expected_routing:
+      subgraph: conversation
+
+  - id: t3-conv-context-recall
+    category: conversation
+    tags: [conversation, context]
+    description: "Multi-turn context should be maintained"
+    turns:
+      - role: user
+        message: "My name is Peter and I'm working on Dawn Field Theory"
+      - role: user
+        message: "What did I just tell you I was working on?"
+        response_contains:
+          - "Dawn Field"

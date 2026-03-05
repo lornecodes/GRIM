@@ -136,3 +136,12 @@ dlp:
 
 antitheft:
   enforce: false                  # enable for production
+
+# Execution Pool (Project Charizard) — async job execution via Agent SDK
+pool:
+  enabled: false                  # set true when Phase 1 is tested
+  num_slots: 2                    # concurrent agent slots
+  poll_interval: 2.0              # seconds between queue polls
+  db_path: "local/pool.db"       # SQLite queue persistence
+  max_turns_per_job: 20           # safety valve on agent turns
+  job_timeout_secs: 300           # 5 min max per job

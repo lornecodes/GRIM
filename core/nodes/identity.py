@@ -26,6 +26,7 @@ from core.personality.user_cache import (
     is_user_cache_stale,
 )
 from core.state import STATE_SCHEMA_VERSION, GrimState, UXMode, get_active_objectives
+from core.tools.sandbox import activate_sandbox, deactivate_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,13 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
 
     async def identity_node(state: GrimState) -> dict:
         """Load identity and assemble system prompt."""
+        # Sandbox mode — activate write blocking for this request
+        if state.get("sandbox"):
+            activate_sandbox()
+            logger.info("Identity node: SANDBOX MODE — vault/memory writes blocked")
+        else:
+            deactivate_sandbox()
+
         logger.info("Identity node: loading personality")
 
         # Load field state from personality.yaml
@@ -148,7 +156,7 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             "caller_id": caller_id,
             "caller_context": caller_context,
             "objectives": state_objectives,
-            "ironclaw_available": tool_context.ironclaw_available,
+            "ironclaw_available": False,  # Legacy field — IronClaw removed
             "ux_mode": state.get("ux_mode", UXMode.FULLSCREEN.value),
             "loop_count": 0,
             "max_loops": 10,

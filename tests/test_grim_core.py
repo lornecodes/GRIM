@@ -393,10 +393,6 @@ class TestConsumerToDelegation(unittest.TestCase):
         from core.skills.registry import _consumer_to_delegation
         self.assertEqual(_consumer_to_delegation("ops-agent"), "operate")
 
-    def test_ironclaw_agent_mapping(self):
-        from core.skills.registry import _consumer_to_delegation
-        self.assertEqual(_consumer_to_delegation("ironclaw-agent"), "ironclaw")
-
     def test_audit_agent_mapping(self):
         from core.skills.registry import _consumer_to_delegation
         self.assertEqual(_consumer_to_delegation("audit-agent"), "audit")
@@ -422,19 +418,6 @@ class TestConsumerToDelegation(unittest.TestCase):
             ],
         )
         self.assertEqual(skill.delegation_target(), "planning")
-
-    def test_delegation_target_with_ironclaw_consumer(self):
-        """Skill with ironclaw-agent execution consumer → 'ironclaw'."""
-        from core.skills.registry import Skill, SkillConsumer
-        skill = Skill(
-            name="shell-execution", version="1.0",
-            description="Shell execution",
-            protocol="## Protocol",
-            consumers=[
-                SkillConsumer(name="ironclaw-agent", role="execution"),
-            ],
-        )
-        self.assertEqual(skill.delegation_target(), "ironclaw")
 
 
 class TestSkillLoader(unittest.TestCase):
@@ -531,30 +514,6 @@ class TestSkillMatcher(unittest.TestCase):
         skill = self.registry.get("git-operations")
         score = _score_skill("use git-operations to push changes", skill)
         self.assertLess(score, 2)
-
-    def test_code_delegation_via_router_keywords(self):
-        """Router catches 'write code' even when skill matcher doesn't."""
-        from core.nodes.router import DELEGATION_KEYWORDS
-        msg = "write code for a Fibonacci generator"
-        matched_type = None
-        for dtype, keywords in DELEGATION_KEYWORDS.items():
-            for kw in keywords:
-                if kw in msg:
-                    matched_type = dtype
-                    break
-        self.assertEqual(matched_type, "ironclaw")
-
-    def test_git_delegation_via_router_keywords(self):
-        """Router catches 'commit' even when skill matcher doesn't."""
-        from core.nodes.router import DELEGATION_KEYWORDS
-        msg = "commit and push the current changes"
-        matched_type = None
-        for dtype, keywords in DELEGATION_KEYWORDS.items():
-            for kw in keywords:
-                if kw in msg:
-                    matched_type = dtype
-                    break
-        self.assertEqual(matched_type, "ironclaw")
 
     def test_matching_returns_sorted_by_score(self):
         from core.skills.matcher import match_skills
@@ -1231,17 +1190,6 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(result["mode"], "delegate")
         self.assertEqual(result["delegation_type"], "memory")
 
-    def test_keyword_delegation_code(self):
-        from core.config import GrimConfig
-        from core.nodes.router import make_router_node
-        router_node = make_router_node(GrimConfig())
-        result = run_async(router_node({
-            "messages": [make_human_message("write code for a Fibonacci generator")],
-            "matched_skills": [],
-        }))
-        self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "ironclaw")
-
     def test_keyword_delegation_research(self):
         from core.config import GrimConfig
         from core.nodes.router import make_router_node
@@ -1252,17 +1200,6 @@ class TestRouterNode(unittest.TestCase):
         }))
         self.assertEqual(result["mode"], "delegate")
         self.assertEqual(result["delegation_type"], "research")
-
-    def test_keyword_delegation_operate(self):
-        from core.config import GrimConfig
-        from core.nodes.router import make_router_node
-        router_node = make_router_node(GrimConfig())
-        result = run_async(router_node({
-            "messages": [make_human_message("commit and push these changes")],
-            "matched_skills": [],
-        }))
-        self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "ironclaw")
 
     def test_route_decision_function(self):
         from core.nodes.router import route_decision
@@ -1277,9 +1214,6 @@ class TestRouterNode(unittest.TestCase):
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
         ctx = SkillContext(name="kronos-promote", version="1.0", description="")
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
-        # Code skills → ironclaw (v0.0.6: execution layer)
-        ctx = SkillContext(name="code-execution", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
         # Deep ingest → research
         ctx = SkillContext(name="deep-ingest", version="1.0", description="")
         self.assertEqual(_skill_ctx_to_delegation(ctx), "research")
@@ -1298,24 +1232,6 @@ class TestRouterNode(unittest.TestCase):
         ctx = SkillContext(name="task-manage", version="1.0", description="")
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
 
-    def test_ironclaw_execution_skills(self):
-        """v0.0.6: all execution skills route to ironclaw."""
-        from core.nodes.router import _skill_ctx_to_delegation
-        for skill_name in ["code-execution", "file-operations", "shell-execution",
-                           "docker-release", "cliproxyapi", "ship-it",
-                           "staging-organize", "staging-cleanup"]:
-            ctx = SkillContext(name=skill_name, version="1.0", description="")
-            self.assertEqual(
-                _skill_ctx_to_delegation(ctx), "ironclaw",
-                f"{skill_name} should route to ironclaw",
-            )
-
-    def test_audit_skill_delegation(self):
-        """ironclaw-review routes to audit agent."""
-        from core.nodes.router import _skill_ctx_to_delegation
-        ctx = SkillContext(name="ironclaw-review", version="1.0", description="")
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "audit")
-
     def test_git_operations_routes_to_operate(self):
         """git-operations routes to operate (read-only infra)."""
         from core.nodes.router import _skill_ctx_to_delegation
@@ -1329,50 +1245,6 @@ class TestRouterNode(unittest.TestCase):
         ctx = SkillContext(name="custom-skill", version="1.0", description="",
                            permissions=["vault:write"])
         self.assertEqual(_skill_ctx_to_delegation(ctx), "memory")
-        # Filesystem write → ironclaw (v0.0.6: execution layer)
-        ctx = SkillContext(name="custom-skill", version="1.0", description="",
-                           permissions=["filesystem:write"])
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
-        # Shell write → ironclaw (v0.0.6: execution layer)
-        ctx = SkillContext(name="custom-skill", version="1.0", description="",
-                           permissions=["shell:write"])
-        self.assertEqual(_skill_ctx_to_delegation(ctx), "ironclaw")
-
-
-class TestDispatchNode(unittest.TestCase):
-    def test_dispatch_no_delegation_type(self):
-        from core.nodes.dispatch import make_dispatch_node
-        node = make_dispatch_node({})
-        result = run_async(node({"delegation_type": None}))
-        self.assertIsNone(result["agent_result"])
-
-    def test_dispatch_unknown_agent(self):
-        from core.nodes.dispatch import make_dispatch_node
-        node = make_dispatch_node({"memory": AsyncMock()})
-        result = run_async(node({"delegation_type": "unknown"}))
-        self.assertFalse(result["agent_result"].success)
-        self.assertIn("No agent available", result["agent_result"].summary)
-
-    def test_dispatch_calls_correct_agent(self):
-        from core.nodes.dispatch import make_dispatch_node
-        expected = AgentResult(agent="memory", success=True, summary="Done")
-        agent_fn = AsyncMock(return_value=expected)
-        node = make_dispatch_node({"memory": agent_fn})
-        result = run_async(node({
-            "delegation_type": "memory",
-            "messages": [make_human_message("save this")],
-        }))
-        agent_fn.assert_called_once()
-        self.assertTrue(result["agent_result"].success)
-        self.assertEqual(result["agent_result"].summary, "Done")
-
-    def test_dispatch_handles_agent_exception(self):
-        from core.nodes.dispatch import make_dispatch_node
-        agent_fn = AsyncMock(side_effect=RuntimeError("Agent crashed"))
-        node = make_dispatch_node({"code": agent_fn})
-        result = run_async(node({"delegation_type": "code"}))
-        self.assertFalse(result["agent_result"].success)
-        self.assertIn("failed", result["agent_result"].summary)
 
 
 class TestIntegrateNode(unittest.TestCase):
@@ -1486,7 +1358,7 @@ class TestGraphWiring(unittest.TestCase):
         graph = build_graph(cfg, mcp_session=None)
         node_names = set(graph.get_graph().nodes.keys())
         expected = {"identity", "memory", "skill_match", "router",
-                    "companion", "dispatch", "integrate", "evolve",
+                    "companion", "integrate", "evolve",
                     "__start__", "__end__"}
         self.assertTrue(expected.issubset(node_names),
                         f"Missing nodes: {expected - node_names}")

@@ -4,12 +4,9 @@ Fallback routing layer — used when no skill consumer or continuity
 signal matches. Maps substring patterns in user messages to delegation
 targets.
 
-v0.0.6 boundaries:
-  - GRIM = management layer (plan, manage, orchestrate, review)
-  - IronClaw = execution layer (code writes, shell, testing, file ops)
-  - "code" delegation removed — all code ops route to "ironclaw"
-  - "operate" narrowed to git reads + file reads — execution → "ironclaw"
-  - "planning" added for task breakdown and board management
+NOTE: The dispatch pipeline is removed — all routes go through companion
+nodes now. These keywords still influence delegation_type for logging
+and continuity, but the graph routes everything to companion.
 """
 from __future__ import annotations
 
@@ -39,32 +36,46 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "what does the literature say", "find papers on",
         "summarize this", "break this down",
     ],
-    "ironclaw": [
-        # Direct IronClaw references
-        "ironclaw", "iron claw", "iron-claw",
-        "use the engine", "engine agent",
-        # Code operations (was "code" delegation — all go to IronClaw)
+    "operate": [
+        # Code operations
         "write code", "implement", "create file",
         "fix this code", "refactor", "add a test",
         "write a function", "write a class", "edit the code",
         "modify the file", "update the code", "debug this",
         "write a script", "code this", "code me",
         "build this", "build me", "build a ",
-        # Shell / command execution (was "operate")
+        "write a program", "write a server", "write a webserver",
+        "write a web server", "write a tool", "write a module",
+        "write a library", "write a package", "write a test",
+        "write a bot", "write a cli", "write a plugin",
+        "write a parser", "write a wrapper", "write an api",
+        "write me a", "create a program", "create a server",
+        "create a webserver", "create a web server", "create a tool",
+        "create a module", "create a bot", "create a cli",
+        "make a server", "make a webserver", "make a web server",
+        "make a program", "make a bot", "make a tool",
+        "set up a server", "set up a webserver", "setup a server",
+        "spin up a", "scaffold a", "scaffold me",
+        "program that", "server that", "app that",
+        # Shell / command execution
         "run command", "run this", "run pytest", "run test",
         "execute this",
         "shell", "powershell", "bash", "terminal",
         "echo ", "mkdir", "ls ", "dir ", "pwd",
         "curl ", "wget ",
-        # Git write operations (was "operate")
+        # Git operations
+        "git status", "git log", "git diff", "git pull",
         "git push", "commit", "push to github",
-        # HTTP execution (was "operate")
+        # File operations
+        "list files", "show me the directory", "what files",
+        "read the file", "show me the file", "cat ",
+        # HTTP execution
         "http request", "fetch ", "call the api",
         "check the weather", "hit the endpoint",
         "make a request",
-        # Ops / deployment (was "operate")
+        # Ops / deployment
         "upload to zenodo", "deploy", "test execution",
-        # Network / system queries (was "operate")
+        # Network / system queries
         "ip address", "my ip", "what is my ip",
         "ping ", "traceroute", "nslookup", "dig ",
         "ifconfig", "ipconfig", "hostname",
@@ -73,36 +84,8 @@ DELEGATION_KEYWORDS: dict[str, list[str]] = {
         "which ", "where ",
         "what os", "what operating system",
         "system info", "disk space", "memory usage",
-        # Sandboxed execution
-        "run sandboxed", "execute safely", "isolated shell",
-        "sandboxed execution", "run in sandbox",
-        "secure execute", "run securely",
-        "run this safely", "execute in sandbox",
-        "run isolated", "safe execution",
-        # Agent dispatch
-        "dispatch agent", "agent workflow", "multi-agent",
-        "dispatch workflow",
-        # Security scanning
-        "security scan", "scan for vulnerabilities", "security audit",
-        "security analysis", "vulnerability scan",
-        "scan this code", "audit this code",
-        # Container/Docker tasks
-        "container analysis", "docker analysis",
-        "analyze the container", "inspect the container",
-    ],
-    "operate": [
-        # Git reads only (narrowed — no writes, no shell)
-        "git status", "git log", "git diff", "git pull",
-        # File reads only
-        "list files", "show me the directory", "what files",
-        "read the file", "show me the file", "cat ",
         # Infrastructure awareness
         "check the status", "sync vault",
-    ],
-    "audit": [
-        "review staging", "audit output", "check staged",
-        "staging review", "review the output",
-        "audit the files", "review execution output",
     ],
     "codebase": [
         "look at the code", "check the code", "show me the code",
@@ -150,7 +133,7 @@ def match_keywords(message: str) -> str | None:
         message: Lowercased user message.
 
     Returns:
-        Delegation type (e.g., "memory", "code") or None.
+        Delegation type (e.g., "memory", "operate") or None.
     """
     for delegation_type, keywords in DELEGATION_KEYWORDS.items():
         for keyword in keywords:
@@ -163,17 +146,17 @@ def match_action_intent(message: str) -> str | None:
     """Match action-intent patterns (verb + target).
 
     Catches requests like "run the command" that miss specific keywords.
-    Routes to ironclaw — action-intent means execution.
+    Routes to operate — action-intent means execution.
 
     Args:
         message: Lowercased user message.
 
     Returns:
-        "ironclaw" if matched, else None.
+        "operate" if matched, else None.
     """
     for verb in _ACTION_VERBS:
         if verb in message and any(t in message for t in _ACTION_TARGETS):
-            return "ironclaw"
+            return "operate"
     return None
 
 

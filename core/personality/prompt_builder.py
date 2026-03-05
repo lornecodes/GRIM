@@ -109,14 +109,18 @@ def build_system_prompt_parts(
     # --- Dynamic layers (change per turn) ---
 
     # 7a. Active objectives (persistent across sessions)
+    # Supports both core.objectives.Objective (dataclass: .description, .notes)
+    # and core.state.Objective (Pydantic: .title, .context)
     if objectives:
         active = [o for o in objectives if o.status == "active"]
         if active:
             obj_lines = ["\n## Active Objectives\n"]
             for obj in active:
-                obj_lines.append(f"- **{obj.id}**: {obj.description}")
-                if obj.notes:
-                    obj_lines.append(f"  Last note: {obj.notes[-1]}")
+                label = getattr(obj, "description", None) or getattr(obj, "title", str(obj.id))
+                obj_lines.append(f"- **{obj.id}**: {label}")
+                notes = getattr(obj, "notes", None)
+                if notes:
+                    obj_lines.append(f"  Last note: {notes[-1]}")
             dynamic_sections.append("\n".join(obj_lines))
 
     # 7b. Knowledge context (merged: per-turn + accumulated session knowledge)

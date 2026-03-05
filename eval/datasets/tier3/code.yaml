@@ -1,0 +1,77 @@
+version: "1.0"
+tier: 3
+category: code
+description: "Code subgraph — function writing, experiment rebuild, refactoring, debugging"
+
+cases:
+  - id: t3-code-simple-function
+    category: code
+    tags: [code, simple]
+    description: "Simple function request should route to code subgraph"
+    turns:
+      - role: user
+        message: "Write a Python function that calculates the PAC coherence metric given alpha and beta inputs"
+        expected_routing:
+          subgraph: code
+          delegation_type: ironclaw
+    expected_routing:
+      subgraph: code
+      delegation_type: ironclaw
+    code_expectations:
+      must_contain:
+        - "def "
+        - "alpha"
+        - "beta"
+        - "return"
+
+  - id: t3-code-experiment-rebuild
+    category: code
+    tags: [code, experiment]
+    description: "Rebuilding a simulation from existing experiments"
+    turns:
+      - role: user
+        message: "Look at the milestone 1 experiments in dawn-field-theory and write a simplified version of the PAC boundary test"
+        expected_routing:
+          subgraph: code
+    expected_routing:
+      subgraph: code
+
+  - id: t3-code-refactoring
+    category: code
+    tags: [code, refactor]
+    description: "Code refactoring request"
+    turns:
+      - role: user
+        message: "Refactor this function to be more readable: def f(x,y): return x**2+2*x*y+y**2"
+        expected_routing:
+          subgraph: code
+    code_expectations:
+      must_contain:
+        - "def"
+      must_not_contain:
+        - "def f(x,y)"
+
+  - id: t3-code-debugging
+    category: code
+    tags: [code, debug]
+    description: "Debugging request should route to code"
+    turns:
+      - role: user
+        message: "I'm getting an IndexError in my PAC calculation loop. The array has 10 elements but it's trying to access index 10. Help me fix this off-by-one error."
+        expected_routing:
+          subgraph: code
+    expected_routing:
+      subgraph: code
+
+  - id: t3-code-multi-file
+    category: code
+    tags: [code, complex]
+    description: "Multi-file code change should use code subgraph"
+    turns:
+      - role: user
+        message: "Create a Python module with two files: a pac_calculator.py with the core math and a test_pac.py with unit tests"
+        expected_routing:
+          subgraph: code
+    expected_routing:
+      subgraph: code
+      delegation_type: ironclaw

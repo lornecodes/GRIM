@@ -223,3 +223,162 @@ class ComparisonResult(BaseModel):
     unchanged: int = 0
     has_regressions: bool = False
     overall_delta: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — Live integration eval schemas
+# ---------------------------------------------------------------------------
+
+
+class Tier3Category(str, Enum):
+    """Categories of Tier 3 live integration tests."""
+
+    CONVERSATION = "conversation"
+    RESEARCH = "research"
+    PLANNING = "planning"
+    CODE = "code"
+    TASK_SWITCHING = "task_switching"
+    DOMAIN_ACCURACY = "domain_accuracy"
+
+
+class RoutingExpectation(BaseModel):
+    """Expected routing outcome for a Tier 3 case."""
+
+    subgraph: Optional[str] = None       # conversation, research, planning, code
+    delegation_type: Optional[str] = None # ironclaw, research, memory, etc.
+    model_tier: Optional[str] = None      # haiku, sonnet, opus
+
+
+class DomainFact(BaseModel):
+    """A verifiable fact for domain accuracy checks."""
+
+    claim: str                    # the factual claim to check
+    fdo_source: Optional[str] = None  # FDO ID where this fact lives
+    tolerance: float = 0.0       # for numeric claims (relative error)
+
+
+class CodeExpectation(BaseModel):
+    """Expected outcome for code generation cases."""
+
+    must_contain: list[str] = Field(default_factory=list)   # required patterns
+    must_not_contain: list[str] = Field(default_factory=list)
+    reference_path: Optional[str] = None  # path to reference implementation
+    runnable: bool = False        # should the code execute without errors?
+
+
+class Tier3Turn(BaseModel):
+    """A single turn in a Tier 3 multi-turn case."""
+
+    role: str = "user"
+    message: str
+    expected_routing: Optional[RoutingExpectation] = None
+    response_contains: list[str] = Field(default_factory=list)
+    response_excludes: list[str] = Field(default_factory=list)
+
+
+class Tier3Case(BaseModel):
+    """A single Tier 3 live integration test case."""
+
+    id: str
+    category: Tier3Category
+    tags: list[str] = Field(default_factory=list)
+    description: str = ""
+
+    # Turns (at least one)
+    turns: list[Tier3Turn]
+
+    # Routing expectations (for single-turn; multi-turn uses per-turn)
+    expected_routing: Optional[RoutingExpectation] = None
+
+    # Expected tool usage
+    expected_tools: list[str] = Field(default_factory=list)
+    unexpected_tools: list[str] = Field(default_factory=list)
+
+    # Domain accuracy ground truth
+    ground_truth_fdo_ids: list[str] = Field(default_factory=list)
+    domain_facts: list[DomainFact] = Field(default_factory=list)
+
+    # Code generation expectations
+    code_expectations: Optional[CodeExpectation] = None
+
+    # Efficiency thresholds (overrides per case)
+    max_tokens: Optional[int] = None
+    max_wall_time_ms: Optional[int] = None
+    max_loops: Optional[int] = None
+
+
+class Tier3Dataset(BaseModel):
+    """A Tier 3 dataset file."""
+
+    version: str = "1.0"
+    tier: int = 3
+    category: str
+    description: str = ""
+    cases: list[Tier3Case]
+
+
+class Tier3Metrics(BaseModel):
+    """Efficiency metrics extracted from a Tier 3 trace."""
+
+    total_tokens: int = 0             # input + output
+    input_tokens: int = 0
+    output_tokens: int = 0
+    token_breakdown: dict[str, int] = Field(default_factory=dict)  # per-node
+    wall_time_ms: int = 0
+    node_times: dict[str, int] = Field(default_factory=dict)  # per-node ms
+    turns: int = 0                    # graph loop iterations
+    agent_traversal: list[str] = Field(default_factory=list)  # ordered node list
+    tool_call_count: int = 0
+    llm_call_count: int = 0
+    cost_estimate_usd: float = 0.0
+
+
+class Tier3Judgment(BaseModel):
+    """A single judge's verdict on a Tier 3 case."""
+
+    judge: str            # routing, quality, domain, code, efficiency
+    score: float = 0.0    # 0.0 - 1.0
+    passed: bool = True
+    rationale: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class Tier3TurnResult(BaseModel):
+    """Result of a single turn in a multi-turn Tier 3 case."""
+
+    turn_index: int
+    response_text: str = ""
+    routing_path: list[str] = Field(default_factory=list)
+    subgraph: Optional[str] = None
+    tools_called: list[str] = Field(default_factory=list)
+    metrics: Tier3Metrics = Field(default_factory=Tier3Metrics)
+    trace_events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class Tier3CaseResult(BaseModel):
+    """Full result of a Tier 3 live integration test case."""
+
+    case_id: str
+    category: str
+    tags: list[str] = Field(default_factory=list)
+    passed: bool = False
+    overall_score: float = 0.0
+
+    # Per-turn results
+    turn_results: list[Tier3TurnResult] = Field(default_factory=list)
+
+    # Aggregated across all turns
+    routing_path: list[str] = Field(default_factory=list)
+    tools_called: list[str] = Field(default_factory=list)
+    loop_count: int = 0
+    subgraph_history: list[str] = Field(default_factory=list)
+
+    # Judgments from multiple judges
+    judgments: list[Tier3Judgment] = Field(default_factory=list)
+
+    # Aggregated metrics
+    metrics: Tier3Metrics = Field(default_factory=Tier3Metrics)
+
+    # Timing
+    duration_ms: int = 0
+    error: Optional[str] = None

@@ -1,0 +1,41 @@
+# ── GRIM Discord Bot Container ──────────────────────────────
+# Lightweight bot — no UI, no server, just the Discord client.
+#
+# Build:
+#   docker build -f Dockerfile.discord -t grim-discord .
+#
+# Run:
+#   docker run -e GRIM_DISCORD_TOKEN=... -e GRIM_DISCORD_OWNER_ID=... \
+#     -v /path/to/kronos-vault:/vault grim-discord
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ── Dependencies ────────────────────────────────────────────
+RUN pip install --no-cache-dir --upgrade pip setuptools
+
+COPY pyproject.toml ./
+COPY mcp/kronos/pyproject.toml mcp/kronos/README.md mcp/kronos/
+COPY mcp/kronos/src/ mcp/kronos/src/
+
+RUN pip install --no-cache-dir ".[discord,pool,cache]" && \
+    pip install --no-cache-dir "./mcp/kronos[cache]"
+
+# ── Application ─────────────────────────────────────────────
+COPY core/ core/
+COPY clients/ clients/
+COPY config/ config/
+COPY identity/ identity/
+COPY skills/ skills/
+
+# Default env
+ENV GRIM_ENV=production
+ENV KRONOS_VAULT_PATH=/vault
+ENV KRONOS_SKILLS_PATH=/app/skills
+
+# Health check (Discord bot runs its own on port 8081)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"
+
+CMD ["python", "-m", "clients.discord_bot"]

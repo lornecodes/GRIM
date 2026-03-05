@@ -22,9 +22,8 @@ class ToolContext:
     """
 
     mcp_session: Any = None
-    ironclaw_bridge: Any = None
     workspace_root: Path | None = None
-    staging_path: str | None = None
+    execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
 
     def configure(self, **kwargs) -> None:
         """Set multiple fields at once. Only sets non-None values."""
@@ -36,10 +35,6 @@ class ToolContext:
     @property
     def mcp_available(self) -> bool:
         return self.mcp_session is not None
-
-    @property
-    def ironclaw_available(self) -> bool:
-        return self.ironclaw_bridge is not None
 
 
 # Module-level singleton — configured once at boot

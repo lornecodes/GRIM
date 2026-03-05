@@ -47,9 +47,38 @@ class EvalConfig:
     # Skills path for skill matching tests
     skills_path: Path | None = None
 
+    # --- Tier 3: Live integration ---
+    tier3_docker_url: str = "http://localhost:8080"
+    tier3_ws_url: str = "ws://localhost:8080"
+    tier3_timeout_ms: int = 120_000  # 2 minutes per case
+    tier3_sandbox: bool = True       # always sandbox by default
+    tier3_max_concurrent: int = 1    # sequential by default (live server)
+
+    # Tier 3 judge config
+    tier3_judge_model: str = "claude-sonnet-4-6"
+
+    # Tier 3 thresholds
+    tier3_routing_threshold: float = 0.90   # 90% routing accuracy
+    tier3_quality_threshold: float = 0.70
+    tier3_domain_threshold: float = 0.80
+    tier3_efficiency_threshold: float = 0.60
+
+    # Tier 3 efficiency baselines (populated after first run)
+    tier3_baselines_path: Path | None = None
+
+    # Tier 3 datasets
+    tier3_datasets_dir: Path | None = None
+
+    # Vault path for ground truth (real vault, not fixtures)
+    ground_truth_vault_path: Path | None = None
+
     def __post_init__(self) -> None:
         if self.vault_path is None:
             self.vault_path = self.fixtures_dir / "vault"
+        if self.tier3_datasets_dir is None:
+            self.tier3_datasets_dir = self.datasets_dir / "tier3"
+        if self.tier3_baselines_path is None:
+            self.tier3_baselines_path = self.results_dir / "tier3" / "baselines.yaml"
 
     @classmethod
     def from_env(cls) -> EvalConfig:
@@ -65,4 +94,9 @@ class EvalConfig:
             config.judge_model = m
         if p := os.environ.get("GRIM_SKILLS_PATH"):
             config.skills_path = Path(p)
+        if u := os.environ.get("GRIM_TIER3_URL"):
+            config.tier3_docker_url = u
+            config.tier3_ws_url = u.replace("http", "ws")
+        if p := os.environ.get("GRIM_VAULT_PATH"):
+            config.ground_truth_vault_path = Path(p)
         return config

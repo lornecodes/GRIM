@@ -20,7 +20,7 @@ consumers:
     role: recognition
     description: Recognizes when user wants to ship/deploy/release
     reads: [triggers, quality_gates]
-  ironclaw-agent:
+  operate-agent:
     role: execution
     description: Executes the gated deployment pipeline and sandboxed test/build commands
     reads: [protocol.md, safety, quality_gates]
@@ -69,13 +69,13 @@ safety:
   - "Always verify all services are healthy after deployment"
   - "Keep previous images for rollback (GRIM_KEEP=3)"
   - "Never expose API keys in logs or build output"
-  - "If IronClaw container fails, GRIM can still deploy without it"
+  - "If a service container fails, GRIM can still deploy without it"
   - "Post-deploy E2E failures do not auto-rollback — report and let user decide"
 
 quality_gates:
-  - "Gate 1: Unit tests — Python (pytest core + model routing + ironclaw + agent integration) + UI (vitest)"
-  - "Gate 2: Docker build — both ironclaw and grim images build successfully"
+  - "Gate 1: Unit tests — Python (pytest core + model routing + agent integration) + UI (vitest)"
+  - "Gate 2: Docker build — grim image builds successfully"
   - "Gate 3: Service health — all 5 services start and pass health checks"
   - "Gate 4: Integration tests — 35 live endpoint tests (infrastructure, MCP, REST, WebSocket, errors)"
-  - "Gate 5: Post-deploy verification — IronClaw gateway + GRIM API + UI all responding"
+  - "Gate 5: Post-deploy verification — GRIM API + UI all responding"
   - "Gate 6: Cleanup — old images removed only after all gates pass"

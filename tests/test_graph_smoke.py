@@ -15,14 +15,13 @@ class TestGraphSmoke:
         assert graph is not None
 
     def test_graph_has_expected_nodes(self, grim_config):
-        """Compiled graph should have all 14 nodes (v0.0.6 multi-graph)."""
+        """Compiled graph should have all 11 nodes (dispatch pipeline removed)."""
         graph = build_graph(grim_config, mcp_session=None)
         nodes = list(graph.get_graph().nodes.keys())
         expected = [
             "identity", "compress", "memory", "skill_match",
-            "graph_router", "personal_companion",
-            "router", "companion", "dispatch", "audit_gate", "audit",
-            "re_dispatch", "integrate", "evolve",
+            "graph_router", "personal_companion", "planning_companion",
+            "router", "companion", "integrate", "evolve",
         ]
         for node in expected:
             assert node in nodes, f"Missing node: {node}"

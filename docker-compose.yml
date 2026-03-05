@@ -92,34 +92,6 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  # ── IronClaw Engine (sandboxed execution) ────────────────
-  ironclaw:
-    build:
-      context: ./engine
-      dockerfile: Dockerfile
-    container_name: ironclaw
-    volumes:
-      - ./engine/config/grim.toml:/etc/ironclaw/grim.toml:ro
-      - ironclaw-logs:/app/logs
-      - ./staging:/workspace/staging
-    expose:
-      - "3100"
-    # No host ports — IronClaw only accessible via grim-net
-    networks:
-      - grim-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:3100/v1/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "3"
-
   # ── GRIM ──────────────────────────────────────────────────
   grim:
     build: .
@@ -129,8 +101,6 @@ services:
       ai-bridge:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      ironclaw:
         condition: service_healthy
     ports:
       - "${GRIM_PORT:-8080}:8080"
@@ -143,14 +113,11 @@ services:
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0
       - GRIM_REDIS_URL=redis://redis:6379/0
-      - IRONCLAW_URL=http://ironclaw:3100
-      - STAGING_PATH=/workspace/staging
-    command: ["sh", "-c", "chmod 1777 /workspace/staging && exec uvicorn server.app:app --host 0.0.0.0 --port 8080 --log-level info"]
+    command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
     volumes:
       - ${VAULT_PATH:-../kronos-vault}:/vault:ro
       - grim-sessions:/app/local/sessions
       - grim-evolution:/app/local/evolution
-      - ./staging:/workspace/staging
     networks:
       - grim-net
     restart: unless-stopped
@@ -163,6 +130,42 @@ services:
       driver: json-file
       options:
         max-size: "10m"
+        max-file: "3"
+
+  # ── GRIM Discord Bot ─────────────────────────────────────
+  grim-discord:
+    build:
+      context: .
+      dockerfile: Dockerfile.discord
+    image: grim-discord:latest
+    container_name: grim-discord
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - GRIM_DISCORD_TOKEN=${GRIM_DISCORD_TOKEN}
+      - GRIM_DISCORD_OWNER_ID=${GRIM_DISCORD_OWNER_ID:-}
+      - GRIM_DISCORD_GUILDS=${GRIM_DISCORD_GUILDS:-}
+      - GRIM_DISCORD_CHANNELS=${GRIM_DISCORD_CHANNELS:-}
+      - GRIM_ENV=${GRIM_ENV:-production}
+      - KRONOS_VAULT_PATH=/vault
+      - KRONOS_SKILLS_PATH=/app/skills
+      - KRONOS_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ${VAULT_PATH:-../kronos-vault}:/vault
+    networks:
+      - grim-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
         max-file: "3"
 
 networks:
@@ -179,5 +182,3 @@ volumes:
     name: grim-sessions
   grim-evolution:
     name: grim-evolution
-  ironclaw-logs:
-    name: ironclaw-logs

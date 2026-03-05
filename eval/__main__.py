@@ -109,11 +109,15 @@ async def _cmd_run(args) -> int:
     runner = EvalRunner(config)
 
     tier = args.tier
-    if tier not in ("all", "1", "2"):
+    if tier not in ("all", "1", "2", "3"):
         try:
             tier = int(tier)
         except ValueError:
             pass
+
+    # Tier 3 has its own execution path
+    if str(tier) == "3":
+        return await _cmd_run_tier3(args, config)
 
     print(f"\n  GRIM Evaluation — Tier {tier}")
     print(f"  {'=' * 40}\n")
@@ -165,6 +169,91 @@ async def _cmd_run(args) -> int:
                 print("  No regressions detected.")
 
     return 0 if run.pass_rate >= 0.99 else 1
+
+
+async def _cmd_run_tier3(args, config) -> int:
+    """Run Tier 3 live integration eval."""
+    from eval.tier3.executor import Tier3Executor
+    from eval.tier3.ground_truth import GroundTruthLoader
+    from eval.tier3.judges import create_default_judges
+
+    vault_path = config.ground_truth_vault_path
+    if vault_path is None:
+        workspace = Path(__file__).parent.parent.parent
+        vault_path = workspace / "kronos-vault"
+
+    gt_loader = GroundTruthLoader(vault_path) if vault_path.exists() else None
+
+    judges = create_default_judges(
+        model=config.tier3_judge_model,
+        ground_truth_loader=gt_loader,
+    )
+
+    def progress(event):
+        evt_type = event.get("type", "")
+        if evt_type == "tier3_start":
+            print(f"\n  Running {event['total_cases']} cases across {event['categories']}")
+        elif evt_type == "tier3_case_start":
+            print(f"  [{event['index']+1}/{event['total']}] {event['case_id']}...", end="", flush=True)
+        elif evt_type == "tier3_case_end":
+            icon = "PASS" if event["passed"] else "FAIL"
+            print(f" {icon} ({event['score']:.2f}, {event['duration_ms']}ms)")
+        elif evt_type == "tier3_end":
+            print(f"\n  Done: {event['passed']}/{event['total']} passed")
+
+    executor = Tier3Executor(config=config, judges=judges, progress_callback=progress)
+
+    print(f"\n  GRIM Evaluation — Tier 3 (Live Integration)")
+    print(f"  Target: {config.tier3_docker_url}")
+    print(f"  Sandbox: {config.tier3_sandbox}")
+    print(f"  {'=' * 50}\n")
+
+    results = await executor.run(categories=args.category)
+
+    if not results:
+        print("  No results — is the GRIM server running?")
+        return 1
+
+    # Summary
+    total = len(results)
+    passed = sum(1 for r in results if r.passed)
+
+    print(f"\n  {'=' * 50}")
+    print(f"  Results: {passed}/{total} passed ({passed/total*100:.1f}%)\n")
+
+    # Per-category breakdown
+    by_cat: dict[str, list] = {}
+    for r in results:
+        by_cat.setdefault(r.category, []).append(r)
+
+    for cat, cat_results in sorted(by_cat.items()):
+        cat_passed = sum(1 for r in cat_results if r.passed)
+        avg_score = sum(r.overall_score for r in cat_results) / len(cat_results)
+        print(f"  {cat:20s}: {cat_passed}/{len(cat_results)} passed, avg score {avg_score:.2f}")
+
+        # Show failures with details
+        for r in cat_results:
+            if not r.passed:
+                print(f"    FAIL {r.case_id}", end="")
+                if r.error:
+                    print(f": {r.error}", end="")
+                else:
+                    failed_judges = [j for j in r.judgments if not j.passed]
+                    if failed_judges:
+                        print(f": {', '.join(j.judge for j in failed_judges)}", end="")
+                print()
+
+    # Efficiency summary
+    print(f"\n  Efficiency Metrics:")
+    total_tokens = sum(r.metrics.total_tokens for r in results)
+    total_cost = sum(r.metrics.cost_estimate_usd for r in results)
+    total_time = sum(r.duration_ms for r in results)
+    print(f"    Total tokens: {total_tokens:,}")
+    print(f"    Total cost: ${total_cost:.4f}")
+    print(f"    Total time: {total_time/1000:.1f}s")
+    print()
+
+    return 0 if passed == total else 1
 
 
 def _cmd_list() -> int:

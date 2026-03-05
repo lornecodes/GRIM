@@ -3,7 +3,7 @@ version: "1.0"
 description: >
   How agents run shell commands safely. Covers command execution,
   output capture, environment management, and safety constraints.
-  All execution happens within IronClaw sandbox (Phase 2+).
+  All execution happens within a sandboxed environment.
 
 entry_point: protocol.md
 type: instruction-protocol
@@ -13,9 +13,9 @@ permissions:
   - sandbox:required
 
 consumers:
-  ironclaw-agent:
+  operate-agent:
     role: execution
-    description: Runs shell commands in sandboxed containers
+    description: Runs shell commands in sandboxed environment
     reads: [protocol.md, safety, allowed_categories]
 
 inputs:
@@ -73,7 +73,7 @@ safety:
   - "Never expose environment variables with secrets in command output"
   - "Always set reasonable timeouts"
   - "Capture both stdout and stderr"
-  - "Sandbox all execution in Phase 2+ (IronClaw)"
+  - "Sandbox all execution when available"
 
 quality_gates:
   - "Command matches allowed category"

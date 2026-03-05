@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from core.tools.context import tool_context
+from core.tools.sandbox import WRITE_TOOLS, _make_synthetic_response, is_sandbox_active
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,24 @@ def get_mcp_session() -> Any:
 
 
 async def _call_mcp(method: str, **kwargs: Any) -> Any:
-    """Call a Kronos MCP tool and return the result."""
+    """Call a Kronos MCP tool and return the result.
+
+    In sandbox mode, write tools are intercepted and return synthetic
+    success responses — reads pass through unchanged.
+    """
+    # Sandbox interception — block writes before they reach MCP
+    if is_sandbox_active() and method in WRITE_TOOLS:
+        logger.info("SANDBOX: blocking %s(%s)", method, list(kwargs.keys()))
+        result = _make_synthetic_response(method, kwargs)
+        if hasattr(result, "content") and result.content:
+            import json as _json
+            text = result.content[0].text
+            try:
+                return _json.loads(text)
+            except (ValueError, TypeError):
+                return {"text": text}
+        return {"status": "ok", "sandbox": True}
+
     session = tool_context.mcp_session
     if session is None:
         logger.warning("MCP session not initialized")

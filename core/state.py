@@ -603,6 +603,9 @@ class GrimState(TypedDict, total=False):
     # Tracing
     trace_id: str  # unique per invocation for log correlation
 
+    # Sandbox mode — blocks vault/memory writes for eval testing
+    sandbox: bool
+
     # NOTE: agent_event_queue is NOT in state — it's passed via
     # RunnableConfig["configurable"]["agent_event_queue"] to avoid
     # serialization by LangGraph's checkpointer (Queue is not serializable).

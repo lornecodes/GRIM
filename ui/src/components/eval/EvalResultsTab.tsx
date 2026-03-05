@@ -20,6 +20,35 @@ interface CaseResultData {
   tool_trace: string[];
   response_text: string;
   error?: string;
+  // Tier 3 extras
+  judgments?: Array<{
+    judge: string;
+    score: number;
+    passed: boolean;
+    rationale?: string;
+    details?: Record<string, unknown>;
+  }>;
+  routing_path?: string[];
+  subgraph_history?: string[];
+  metrics?: {
+    total_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    wall_time_ms: number;
+    turns: number;
+    llm_call_count: number;
+    tool_call_count: number;
+    cost_estimate_usd: number;
+    agent_traversal?: string[];
+    node_times?: Record<string, number>;
+  };
+  turn_results?: Array<{
+    turn_index: number;
+    response_text: string;
+    routing_path?: string[];
+    subgraph?: string;
+    tools_called?: string[];
+  }>;
 }
 
 interface SuiteData {
@@ -102,7 +131,7 @@ export function EvalResultsTab({ eval_ }: Props) {
           <option value="">Select a run...</option>
           {runs.map((r) => (
             <option key={r.run_id} value={r.run_id}>
-              {r.run_id} — {new Date(r.timestamp).toLocaleString()} ({r.total_cases} cases,{" "}
+              {r.run_id} — T{r.tier} — {new Date(r.timestamp).toLocaleString()} ({r.total_cases} cases,{" "}
               {(r.overall_score * 100).toFixed(0)}%)
             </option>
           ))}
@@ -118,6 +147,7 @@ export function EvalResultsTab({ eval_ }: Props) {
               <option value="">All tiers</option>
               <option value="1">Tier 1</option>
               <option value="2">Tier 2</option>
+              <option value="3">Tier 3</option>
             </select>
 
             <div className="flex gap-1">
@@ -187,10 +217,8 @@ export function EvalResultsTab({ eval_ }: Props) {
             </button>
           </div>
 
-          {/* Comparison results */}
           {comparison && (
             <div className="space-y-3">
-              {/* Summary bar */}
               <div className="flex items-center gap-4 text-xs">
                 <span className={`font-medium ${comparison.overall_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   Overall: {comparison.overall_delta >= 0 ? "+" : ""}{(comparison.overall_delta * 100).toFixed(1)}%
@@ -205,12 +233,9 @@ export function EvalResultsTab({ eval_ }: Props) {
                     {comparison.improvements.length} improvement{comparison.improvements.length !== 1 ? "s" : ""}
                   </span>
                 )}
-                <span className="text-grim-text-dim">
-                  {comparison.unchanged} unchanged
-                </span>
+                <span className="text-grim-text-dim">{comparison.unchanged} unchanged</span>
               </div>
 
-              {/* Regressions */}
               {comparison.regressions.length > 0 && (
                 <div>
                   <div className="text-[10px] text-red-400 font-medium mb-1 uppercase tracking-wider">Regressions</div>
@@ -228,7 +253,6 @@ export function EvalResultsTab({ eval_ }: Props) {
                         <span className="text-grim-text-dim">{r.category}</span>
                         <span className="ml-auto text-red-400 font-mono">
                           {(r.base_score * 100).toFixed(0)}% → {(r.target_score * 100).toFixed(0)}%
-                          ({(r.delta * 100).toFixed(0)}%)
                         </span>
                       </div>
                     ))}
@@ -236,7 +260,6 @@ export function EvalResultsTab({ eval_ }: Props) {
                 </div>
               )}
 
-              {/* Improvements */}
               {comparison.improvements.length > 0 && (
                 <div>
                   <div className="text-[10px] text-emerald-400 font-medium mb-1 uppercase tracking-wider">Improvements</div>
@@ -247,7 +270,6 @@ export function EvalResultsTab({ eval_ }: Props) {
                         <span className="text-grim-text-dim">{r.category}</span>
                         <span className="ml-auto text-emerald-400 font-mono">
                           {(r.base_score * 100).toFixed(0)}% → {(r.target_score * 100).toFixed(0)}%
-                          (+{(r.delta * 100).toFixed(0)}%)
                         </span>
                       </div>
                     ))}
@@ -350,6 +372,9 @@ function CaseRow({
 }
 
 function CaseDetail({ case_ }: { case_: CaseResultData }) {
+  const [expandedTurn, setExpandedTurn] = useState<number | null>(null);
+  const isTier3 = !!case_.judgments && case_.judgments.length > 0;
+
   return (
     <div className="space-y-3 text-xs">
       {/* Tags */}
@@ -373,8 +398,172 @@ function CaseDetail({ case_ }: { case_: CaseResultData }) {
         </div>
       )}
 
-      {/* Checks */}
-      {case_.checks?.length > 0 && (
+      {/* Tier 3: Judges */}
+      {isTier3 && case_.judgments && (
+        <div>
+          <div className="text-grim-text-dim mb-2 font-medium">Judges</div>
+          <div className="space-y-1.5">
+            {case_.judgments.map((j) => (
+              <div key={j.judge} className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <span className="text-grim-text w-20 font-mono">{j.judge}</span>
+                  <div className="flex-1 h-2 bg-grim-border rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        j.score >= 0.8 ? "bg-emerald-400" :
+                        j.score >= 0.5 ? "bg-amber-400" :
+                        "bg-red-400"
+                      }`}
+                      style={{ width: `${j.score * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-grim-text-dim w-10 text-right font-mono">
+                    {(j.score * 100).toFixed(0)}%
+                  </span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                    j.passed ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                  }`}>
+                    {j.passed ? "PASS" : "FAIL"}
+                  </span>
+                </div>
+                {j.rationale && (
+                  <div className="ml-[92px] text-[10px] text-grim-text-dim">
+                    {j.rationale}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tier 3: Routing Path */}
+      {isTier3 && case_.routing_path && case_.routing_path.length > 0 && (
+        <div>
+          <div className="text-grim-text-dim mb-1 font-medium">Routing Path</div>
+          <div className="flex gap-1 items-center flex-wrap">
+            {case_.routing_path.map((node, i) => (
+              <span key={`${node}-${i}`} className="flex items-center gap-1">
+                {i > 0 && <span className="text-grim-text-dim text-[10px]">→</span>}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                  node === "conversation" || node === "companion" || node === "personal_companion"
+                    ? "bg-blue-500/15 text-blue-400"
+                    : node === "planning" || node === "planning_companion"
+                      ? "bg-purple-500/15 text-purple-400"
+                      : node === "research" || node === "dispatch"
+                        ? "bg-emerald-500/15 text-emerald-400"
+                        : node === "code"
+                          ? "bg-orange-500/15 text-orange-400"
+                          : "bg-grim-bg text-grim-text-dim"
+                }`}>
+                  {node}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tier 3: Efficiency Metrics */}
+      {isTier3 && case_.metrics && (
+        <div>
+          <div className="text-grim-text-dim mb-1 font-medium">Efficiency</div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+            <MetricCell
+              label="Tokens"
+              value={`${case_.metrics.total_tokens.toLocaleString()}`}
+              sub={`in: ${(case_.metrics.input_tokens / 1000).toFixed(1)}K / out: ${(case_.metrics.output_tokens / 1000).toFixed(1)}K`}
+            />
+            <MetricCell
+              label="Cost"
+              value={`$${case_.metrics.cost_estimate_usd.toFixed(4)}`}
+            />
+            <MetricCell
+              label="Wall Time"
+              value={`${(case_.metrics.wall_time_ms / 1000).toFixed(1)}s`}
+            />
+            <MetricCell
+              label="Loops"
+              value={`${case_.metrics.turns}`}
+            />
+            <MetricCell
+              label="LLM Calls"
+              value={`${case_.metrics.llm_call_count}`}
+            />
+            <MetricCell
+              label="Tool Calls"
+              value={`${case_.metrics.tool_call_count}`}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Tier 3: Per-Turn Detail */}
+      {isTier3 && case_.turn_results && case_.turn_results.length > 1 && (
+        <div>
+          <div className="text-grim-text-dim mb-1 font-medium">
+            Turns ({case_.turn_results.length})
+          </div>
+          <div className="space-y-1">
+            {case_.turn_results.map((tr) => (
+              <div key={tr.turn_index} className="border border-grim-border/50 rounded-lg overflow-hidden">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpandedTurn(expandedTurn === tr.turn_index ? null : tr.turn_index);
+                  }}
+                  className="w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-grim-bg/30"
+                >
+                  <span className="text-grim-text-dim font-mono">T{tr.turn_index + 1}</span>
+                  {tr.subgraph && (
+                    <span className="px-1.5 py-0.5 bg-grim-accent/10 text-grim-accent rounded text-[9px]">
+                      {tr.subgraph}
+                    </span>
+                  )}
+                  {tr.tools_called && tr.tools_called.length > 0 && (
+                    <span className="text-grim-text-dim text-[10px]">
+                      {tr.tools_called.length} tools
+                    </span>
+                  )}
+                  <span className="ml-auto text-grim-text-dim text-[10px]">
+                    {expandedTurn === tr.turn_index ? "▼" : "▶"}
+                  </span>
+                </button>
+                {expandedTurn === tr.turn_index && (
+                  <div className="px-3 py-2 border-t border-grim-border/50 space-y-2">
+                    {tr.response_text && (
+                      <pre className="bg-grim-bg border border-grim-border rounded p-2 text-[10px] whitespace-pre-wrap max-h-32 overflow-y-auto">
+                        {tr.response_text}
+                      </pre>
+                    )}
+                    {tr.routing_path && tr.routing_path.length > 0 && (
+                      <div className="flex gap-1 items-center flex-wrap">
+                        {tr.routing_path.map((node, i) => (
+                          <span key={`${node}-${i}`} className="text-[9px] text-grim-text-dim font-mono">
+                            {i > 0 && " → "}{node}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {tr.tools_called && tr.tools_called.length > 0 && (
+                      <div className="flex gap-1 flex-wrap">
+                        {tr.tools_called.map((t, i) => (
+                          <span key={i} className="px-1.5 py-0.5 bg-grim-surface border border-grim-border rounded text-[9px] font-mono">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tier 1/2: Checks */}
+      {!isTier3 && case_.checks?.length > 0 && (
         <div>
           <div className="text-grim-text-dim mb-1 font-medium">Checks</div>
           <div className="space-y-1">
@@ -395,8 +584,8 @@ function CaseDetail({ case_ }: { case_: CaseResultData }) {
         </div>
       )}
 
-      {/* Dimensions */}
-      {case_.dimensions?.length > 0 && (
+      {/* Tier 1/2: Dimensions */}
+      {!isTier3 && case_.dimensions?.length > 0 && (
         <div>
           <div className="text-grim-text-dim mb-1 font-medium">Dimensions</div>
           <div className="space-y-1">
@@ -450,6 +639,24 @@ function CaseDetail({ case_ }: { case_: CaseResultData }) {
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+function MetricCell({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="bg-grim-bg border border-grim-border/50 rounded-lg px-3 py-2">
+      <div className="text-[9px] text-grim-text-dim uppercase tracking-wider">{label}</div>
+      <div className="text-grim-text font-mono text-[11px] font-medium">{value}</div>
+      {sub && <div className="text-[9px] text-grim-text-dim">{sub}</div>}
     </div>
   );
 }

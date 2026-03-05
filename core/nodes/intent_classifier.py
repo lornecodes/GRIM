@@ -52,7 +52,7 @@ HINT_TO_TARGET: dict[str, str] = {
     "research": "research",
     "ironclaw": "code",
     "code": "code",
-    "operate": "operations",
+    "operate": "code",         # operate replaced ironclaw — code execution path
     "audit": "code",           # audit is part of code pipeline
     "codebase": "research",    # codebase exploration = research
     "planning": "planning",
@@ -63,7 +63,7 @@ DELEGATION_TO_TARGET: dict[str, str] = {
     "memory": "operations",
     "research": "research",
     "ironclaw": "code",
-    "operate": "operations",
+    "operate": "code",         # operate replaced ironclaw
     "audit": "code",
     "codebase": "research",
 }
@@ -259,10 +259,27 @@ def _keyword_fallback(message_text: str, is_continuation: bool = False) -> Routi
     """Fallback to keyword matching when LLM classification fails.
 
     Maps existing keyword_router results to RoutingDecision format.
+
+    Priority order matches the old graph_router:
+      1. Planning signals (exact substring, checked first)
+      2. Delegation keywords → target mapping
+      3. Action-intent patterns → code
+      4. Personal signals (with research overrides)
     """
     message = message_text.lower()
 
-    # Keyword match → delegation type → target
+    # 1. Planning signals — checked first (highest priority intent)
+    from core.nodes.graph_router import PLANNING_SIGNALS
+    if any(sig in message for sig in PLANNING_SIGNALS):
+        logger.info("Intent classifier: keyword fallback → planning")
+        return RoutingDecision(
+            target_subgraph="planning",
+            confidence=0.7,
+            reasoning="Planning signal match",
+            is_continuation=is_continuation,
+        )
+
+    # 2. Keyword match → delegation type → target
     kw_match = match_keywords(message)
     if kw_match:
         target = DELEGATION_TO_TARGET.get(kw_match, "research")
@@ -274,7 +291,7 @@ def _keyword_fallback(message_text: str, is_continuation: bool = False) -> Routi
             is_continuation=is_continuation,
         )
 
-    # Action-intent match → code
+    # 3. Action-intent match → code
     if match_action_intent(message):
         logger.info("Intent classifier: keyword fallback → code (action-intent)")
         return RoutingDecision(
@@ -284,7 +301,7 @@ def _keyword_fallback(message_text: str, is_continuation: bool = False) -> Routi
             is_continuation=is_continuation,
         )
 
-    # Personal signals (imported from graph_router for completeness)
+    # 4. Personal signals (with research overrides)
     from core.nodes.graph_router import PERSONAL_SIGNALS, _RESEARCH_OVERRIDES
     if any(sig in message for sig in PERSONAL_SIGNALS):
         if not any(ovr in message for ovr in _RESEARCH_OVERRIDES):
@@ -295,17 +312,6 @@ def _keyword_fallback(message_text: str, is_continuation: bool = False) -> Routi
                 reasoning="Personal signal match",
                 is_continuation=is_continuation,
             )
-
-    # Planning signals
-    from core.nodes.graph_router import PLANNING_SIGNALS
-    if any(sig in message for sig in PLANNING_SIGNALS):
-        logger.info("Intent classifier: keyword fallback → planning")
-        return RoutingDecision(
-            target_subgraph="planning",
-            confidence=0.7,
-            reasoning="Planning signal match",
-            is_continuation=is_continuation,
-        )
 
     # Default → conversation for short messages, research for longer
     if len(message_text.split()) < 5:

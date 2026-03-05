@@ -708,22 +708,22 @@ class TestRouterMemory(unittest.TestCase):
         self.assertEqual(result["delegation_type"], "code")
 
     def test_keyword_my_ip(self):
-        """v0.0.6: 'my ip' keyword routes to ironclaw (execution)."""
+        """'my ip' keyword routes to operate (execution)."""
         result = self._route("whats my ip")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "ironclaw")
+        self.assertEqual(result["delegation_type"], "operate")
 
     def test_keyword_ip_address(self):
-        """v0.0.6: 'ip address' keyword routes to ironclaw (execution)."""
+        """'ip address' keyword routes to operate (execution)."""
         result = self._route("show me my ip address")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "ironclaw")
+        self.assertEqual(result["delegation_type"], "operate")
 
     def test_action_intent_cli(self):
-        """v0.0.6: action-intent routes to ironclaw (execution)."""
+        """action-intent routes to operate (execution)."""
         result = self._route("check my cli setup")
         self.assertEqual(result["mode"], "delegate")
-        self.assertEqual(result["delegation_type"], "ironclaw")
+        self.assertEqual(result["delegation_type"], "operate")
 
     def test_no_followup_without_last_delegation(self):
         """Follow-up signals don't trigger without last_delegation_type."""
@@ -1327,7 +1327,7 @@ class TestReleaseScript(unittest.TestCase):
                 continue
             # This is a heuristic — the key ones in clean/purge should be safe
         # Just verify the specific known patterns are safe
-        self.assertIn('grep -E "(grim|ironclaw)" | awk \'{print $1}\' || true', content)
+        self.assertIn('grep -E "(grim)" | awk \'{print $1}\' || true', content)
         self.assertIn('grep -E "^[0-9a-f]{64}$" || true', content)
 
     def test_clean_removes_anonymous_volumes(self):

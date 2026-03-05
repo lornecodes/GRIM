@@ -77,6 +77,14 @@ class GrimConfig:
     workspace_root: Path = field(default_factory=lambda: Path(".."))
     repos_manifest: str = "repos.yaml"  # relative to workspace_root
 
+    # Execution Pool (Project Charizard)
+    pool_enabled: bool = False
+    pool_num_slots: int = 2
+    pool_poll_interval: float = 2.0
+    pool_db_path: Path = field(default_factory=lambda: Path("local/pool.db"))
+    pool_max_turns_per_job: int = 20
+    pool_job_timeout_secs: int = 300
+
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
 
@@ -142,6 +150,7 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.evolution_dir = _resolve(cfg.evolution_dir, grim_root)
     cfg.objectives_path = _resolve(cfg.objectives_path, grim_root)
     cfg.workspace_root = _resolve(cfg.workspace_root, grim_root)
+    cfg.pool_db_path = _resolve(cfg.pool_db_path, grim_root)
 
     # Redis URL
     redis_override = os.getenv("GRIM_REDIS_URL", os.getenv("KRONOS_REDIS_URL", ""))
@@ -243,6 +252,21 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.objectives_path = Path(objectives["path"])
     if "max_active" in objectives:
         cfg.objectives_max_active = objectives["max_active"]
+
+    # Execution Pool (Project Charizard)
+    pool = raw.get("pool", {})
+    if "enabled" in pool:
+        cfg.pool_enabled = pool["enabled"]
+    if "num_slots" in pool:
+        cfg.pool_num_slots = pool["num_slots"]
+    if "poll_interval" in pool:
+        cfg.pool_poll_interval = pool["poll_interval"]
+    if "db_path" in pool:
+        cfg.pool_db_path = Path(pool["db_path"])
+    if "max_turns_per_job" in pool:
+        cfg.pool_max_turns_per_job = pool["max_turns_per_job"]
+    if "job_timeout_secs" in pool:
+        cfg.pool_job_timeout_secs = pool["job_timeout_secs"]
 
 
 def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:

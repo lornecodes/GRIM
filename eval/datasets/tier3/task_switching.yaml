@@ -1,0 +1,75 @@
+version: "1.0"
+tier: 3
+category: task_switching
+description: "Task switching — transitions between subgraphs across turns"
+
+cases:
+  - id: t3-switch-convo-to-code
+    category: task_switching
+    tags: [task_switching, conversation, code]
+    description: "Casual chat then coding request — should switch subgraphs"
+    turns:
+      - role: user
+        message: "Hey GRIM, how's it going?"
+        expected_routing:
+          subgraph: conversation
+      - role: user
+        message: "OK cool, now write me a Python function to compute factorial"
+        expected_routing:
+          subgraph: code
+
+  - id: t3-switch-planning-to-code
+    category: task_switching
+    tags: [task_switching, planning, code]
+    description: "Planning then 'build it' should transition to code"
+    turns:
+      - role: user
+        message: "Let's plan a new utility for PAC calculations"
+        expected_routing:
+          subgraph: planning
+      - role: user
+        message: "That plan looks good. Start implementing it."
+        expected_routing:
+          subgraph: code
+
+  - id: t3-switch-venting-to-planning
+    category: task_switching
+    tags: [task_switching, conversation, planning]
+    description: "Emotional venting then planning request"
+    turns:
+      - role: user
+        message: "Ugh, I'm so frustrated with how slow this project is going"
+        expected_routing:
+          subgraph: conversation
+      - role: user
+        message: "OK I feel better. Let's plan the next steps for the reality engine"
+        expected_routing:
+          subgraph: planning
+
+  - id: t3-switch-research-to-code
+    category: task_switching
+    tags: [task_switching, research, code]
+    description: "Research then implementation request"
+    turns:
+      - role: user
+        message: "What do we know about the Poincaré activation function in the vault?"
+        expected_routing:
+          subgraph: research
+      - role: user
+        message: "Great, now implement that activation function in Python"
+        expected_routing:
+          subgraph: code
+
+  - id: t3-switch-code-to-research
+    category: task_switching
+    tags: [task_switching, code, research]
+    description: "Coding then research request — should switch cleanly"
+    turns:
+      - role: user
+        message: "Write a hello world function in Python"
+        expected_routing:
+          subgraph: code
+      - role: user
+        message: "Now search the vault for information about SEC derivation"
+        expected_routing:
+          subgraph: research

@@ -19,7 +19,7 @@ consumers:
     role: recognition
     description: Recognizes when user wants to run eval or check quality
     reads: [triggers, quality_gates]
-  ironclaw-agent:
+  operate-agent:
     role: execution
     description: Executes eval runner and reports results
     reads: [protocol.md, safety, quality_gates]

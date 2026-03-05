@@ -90,7 +90,7 @@ INFRA_NODE_METADATA: dict[str, dict] = {
             "When a match is found, loads the full skill protocol text from the skills/ directory "
             "and injects it into state.skill_protocols. Multiple skills can match simultaneously.\n\n"
             "Also sets state.matched_skills with skill metadata for routing decisions. "
-            "If a skill has a delegation_hint (e.g. 'memory', 'ironclaw'), it flows to the router "
+            "If a skill has a delegation_hint (e.g. 'memory', 'research'), it flows to the router "
             "as skill_delegation_hint to bias delegation."
         ),
         "tools": [],
@@ -159,7 +159,7 @@ INFRA_NODE_METADATA: dict[str, dict] = {
             "3. Keyword matching — scans for delegation keywords per agent category\n"
             "4. Action-intent — verb + target patterns (e.g. 'run the command')\n"
             "5. Default → companion (think mode)\n\n"
-            "Delegation targets: memory, research, ironclaw (code/shell/git operations)."
+            "Delegation targets: memory, research, codebase."
         ),
         "tools": [],
         "color": "#f59e0b",
@@ -168,7 +168,7 @@ INFRA_NODE_METADATA: dict[str, dict] = {
         "node_type": "routing",
         "routing_rules": [
             {"condition": "reflection / synthesis needed", "target": "companion"},
-            {"condition": "action / tool execution needed", "target": "dispatch"},
+            {"condition": "action / tool execution needed", "target": "companion"},
         ],
         "signals": {
             "memory": [
@@ -180,77 +180,7 @@ INFRA_NODE_METADATA: dict[str, dict] = {
                 "analyze this", "ingest", "deep dive",
                 "research this", "investigate", "find papers on",
             ],
-            "ironclaw": [
-                "ironclaw", "write code", "implement", "create file",
-                "fix this code", "refactor", "run command", "run pytest",
-                "git commit", "git push", "docker",
-            ],
         },
-    },
-    "dispatch": {
-        "id": "dispatch",
-        "name": "Dispatch",
-        "role": "dispatcher",
-        "description": "Delegates work to specialist agents (memory, coder, research, operator, etc.)",
-        "detail": (
-            "Instantiates and runs the selected specialist agent. The agent to dispatch is "
-            "determined by state.delegation_type (set by Router).\n\n"
-            "Available agents: memory, research, codebase, operator, ironclaw, audit, code (disabled).\n\n"
-            "Each agent gets:\n"
-            "- A skill protocol (from skill_match) or its default_protocol\n"
-            "- The user's task (with conversation context for reference resolution)\n"
-            "- Knowledge context from the memory node\n"
-            "- Up to 10 tool-call round trips to complete the task\n\n"
-            "Agent output flows to audit_gate for security review before integration."
-        ),
-        "tools": [],
-        "color": "#f59e0b",
-        "tier": "grim",
-        "toggleable": False,
-        "node_type": "routing",
-    },
-    "audit_gate": {
-        "id": "audit_gate",
-        "name": "Audit Gate",
-        "role": "gate",
-        "description": "Checks if IronClaw artifacts require zero-trust audit before integration",
-        "detail": (
-            "Security checkpoint after agent execution. Checks if the dispatched agent was "
-            "IronClaw (tier: ironclaw) and produced artifacts that need review.\n\n"
-            "- IronClaw artifacts present → route to audit agent for zero-trust review\n"
-            "- GRIM-tier agent or no artifacts → skip directly to integrate\n"
-            "- Audit disabled (agent toggled off) → skip to integrate\n\n"
-            "Part of the IronClaw security pipeline: dispatch → audit_gate → audit → re_dispatch cycle."
-        ),
-        "tools": [],
-        "color": "#ef4444",
-        "tier": "grim",
-        "toggleable": False,
-        "node_type": "infra",
-        "routing_rules": [
-            {"condition": "IronClaw artifacts present", "target": "audit"},
-            {"condition": "no artifacts / GRIM-only", "target": "integrate (skip)"},
-        ],
-    },
-    "re_dispatch": {
-        "id": "re_dispatch",
-        "name": "Re-Dispatch",
-        "role": "loop",
-        "description": "Re-queues failed audit to dispatch for retry (max 3 cycles)",
-        "detail": (
-            "Handles audit failures by re-dispatching to the agent with feedback. "
-            "The audit agent's rejection reason is passed back as context so the agent "
-            "can correct its output.\n\n"
-            "- Maximum 3 retry cycles before escalating to the user\n"
-            "- Each retry increments state.re_dispatch_count\n"
-            "- If max retries exceeded, integrates with a failure notice\n\n"
-            "This creates the re_dispatch → dispatch loop visible in the graph."
-        ),
-        "tools": [],
-        "color": "#ef4444",
-        "tier": "grim",
-        "toggleable": False,
-        "node_type": "infra",
     },
     "integrate": {
         "id": "integrate",
@@ -307,16 +237,8 @@ STATIC_EDGES: list[dict] = [
     {"source": "graph_router", "target": "router",             "type": "conditional", "label": "research"},
     {"source": "graph_router", "target": "personal_companion", "type": "conditional", "label": "personal"},
     {"source": "graph_router", "target": "planning_companion", "type": "conditional", "label": "planning"},
-    # Research branch: router → companion or dispatch
+    # Research branch: router → companion
     {"source": "router",      "target": "companion",           "type": "conditional", "label": "think"},
-    {"source": "router",      "target": "dispatch",            "type": "conditional", "label": "delegate"},
-    # Agent delegation path
-    {"source": "dispatch",    "target": "audit_gate",          "type": "static"},
-    {"source": "audit_gate",  "target": "audit",               "type": "conditional", "label": "artifacts"},
-    {"source": "audit_gate",  "target": "integrate",           "type": "conditional", "label": "skip"},
-    {"source": "audit",       "target": "integrate",           "type": "conditional", "label": "pass"},
-    {"source": "audit",       "target": "re_dispatch",         "type": "conditional", "label": "fail"},
-    {"source": "re_dispatch", "target": "dispatch",            "type": "static",      "label": "retry"},
     # Companion paths to postprocessing
     {"source": "companion",          "target": "integrate",    "type": "static"},
     {"source": "personal_companion", "target": "integrate",    "type": "static"},
@@ -342,29 +264,15 @@ NODE_POSITIONS: dict[str, tuple[int, int]] = {
     "personal_companion":   (5, -1),
     "router":               (5, 0),
     "planning_companion":   (5, 1),
-    # Research branch inner nodes (col 6-8)
+    # Research branch inner nodes (col 6)
     "companion":            (6, -1),
-    "dispatch":             (6, 1),
-    "audit_gate":           (7, 1),
-    "audit":                (8, 1),
-    "re_dispatch":          (8, 2),
-    # Postprocessing (col 9-10)
-    "integrate":            (9, 0),
-    "evolve":               (10, 0),
-    # v0.10 subgraph nodes (alternative topology — shares cols with v0.0.6
-    # nodes that don't coexist in the same graph)
-    "companion_router":     (4, 3),   # replaces graph_router
-    "conversation":         (5, 3),   # replaces personal_companion / companion
-    "planning":             (6, 3),   # replaces planning_companion
-    "research":             (5, 4),   # replaces router → dispatch (research)
-    "code":                 (6, 4),   # replaces dispatch (ironclaw)
-    "response_generator":   (8, 3),   # new — loop heartbeat
+    # Postprocessing (col 7-8)
+    "integrate":            (7, 0),
+    "evolve":               (8, 0),
 }
 
 # All known graph node IDs (for validation)
 ALL_NODE_IDS: frozenset[str] = frozenset(
     list(INFRA_NODE_METADATA.keys())
     + ["companion", "personal_companion", "planning_companion"]
-    + ["companion_router", "conversation", "planning", "research", "code",
-       "response_generator"]
 )

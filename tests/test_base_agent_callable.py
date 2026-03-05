@@ -337,8 +337,6 @@ class TestMetadata:
         ("core.agents.codebase_agent", "CodebaseAgent", "Codebase"),
         ("core.agents.operator_agent", "OperatorAgent", "Operator"),
         ("core.agents.coder_agent", "CoderAgent", "Coder"),
-        ("core.agents.ironclaw_agent", "IronClawAgent", "IronClaw"),
-        ("core.agents.audit_agent", "AuditAgent", "Audit"),
     ])
     def test_all_agents_have_display_name(self, agent_mod, cls_name, expected_name):
         """Every agent subclass declares a display name."""
@@ -346,15 +344,6 @@ class TestMetadata:
         mod = importlib.import_module(agent_mod)
         cls = getattr(mod, cls_name)
         assert cls.agent_display_name == expected_name
-
-    def test_ironclaw_tier_agents_are_toggleable(self):
-        """IronClaw and Audit agents are toggleable."""
-        from core.agents.ironclaw_agent import IronClawAgent
-        from core.agents.audit_agent import AuditAgent
-        assert IronClawAgent.agent_toggleable is True
-        assert IronClawAgent.agent_tier == "ironclaw"
-        assert AuditAgent.agent_toggleable is True
-        assert AuditAgent.agent_tier == "ironclaw"
 
     def test_grim_tier_agents_not_toggleable(self):
         """GRIM-tier agents are not toggleable."""

@@ -15,7 +15,7 @@ permissions:
   - docker:run
 
 consumers:
-  ironclaw-agent:
+  operate-agent:
     role: execution
     description: Runs Docker build/test/deploy commands via release.sh
     reads: [protocol.md, safety, quality_gates]
@@ -38,7 +38,7 @@ outputs:
   error: string
 
 triggers:
-  - delegation: "GRIM routes a Docker/release task to ironclaw-agent"
+  - delegation: "GRIM routes a Docker/release task to operate-agent"
   - explicit: "User asks to build, deploy, release, or redeploy GRIM"
   - keywords:
       strong: ["docker build", "release grim", "deploy grim", "rebuild grim", "redeploy"]
