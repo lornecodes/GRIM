@@ -5,6 +5,7 @@ dispatched to AgentSlots, and executed with configurable tool permissions.
 """
 from __future__ import annotations
 
+from core.pool.audit import AuditResult, ToolVerdict, can_use_tool, is_safe_bash
 from core.pool.events import PoolEvent, PoolEventBus, PoolEventType
 from core.pool.models import Job, JobResult, JobStatus, JobType, JobPriority
 from core.pool.pool import ExecutionPool
