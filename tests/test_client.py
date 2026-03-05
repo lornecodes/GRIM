@@ -252,6 +252,107 @@ class TestGrimClientLifecycle:
             await client.stop()
 
 
+class TestGrimClientSkillMatching:
+    """Test skill matching + protocol injection in _prepare_message."""
+
+    def test_no_skills_returns_message_unchanged(self, config):
+        client = GrimClient(config)
+        client._skill_registry = None
+        result = client._prepare_message("hello world")
+        assert result == "hello world"
+
+    def test_no_match_returns_message_unchanged(self, config, tmp_path):
+        # Create empty skill registry
+        from core.skills.registry import SkillRegistry
+        client = GrimClient(config)
+        client._skill_registry = SkillRegistry()
+        result = client._prepare_message("hello world")
+        assert result == "hello world"
+
+    def test_match_prepends_protocol(self, config):
+        from core.skills.registry import Skill, SkillRegistry
+
+        registry = SkillRegistry()
+        registry.register(Skill(
+            name="vault-sync",
+            version="1.0",
+            description="Sync vault after changes",
+            protocol="## Steps\n1. Update FDOs\n2. Validate",
+            triggers={"keywords": ["vault sync", "vault-sync"], "intents": []},
+        ))
+
+        client = GrimClient(config)
+        client._skill_registry = registry
+
+        result = client._prepare_message("please vault sync the changes")
+        assert '<skill name="vault-sync"' in result
+        assert "## Steps" in result
+        assert "please vault sync the changes" in result
+
+    def test_match_uses_top_skill_only(self, config):
+        from core.skills.registry import Skill, SkillRegistry
+
+        registry = SkillRegistry()
+        registry.register(Skill(
+            name="skill-a",
+            version="1.0",
+            description="First skill",
+            protocol="Protocol A",
+            triggers={"keywords": ["deploy", "release"], "intents": []},
+        ))
+        registry.register(Skill(
+            name="skill-b",
+            version="1.0",
+            description="Second skill",
+            protocol="Protocol B",
+            triggers={"keywords": ["deploy"], "intents": []},
+        ))
+
+        client = GrimClient(config)
+        client._skill_registry = registry
+
+        result = client._prepare_message("deploy the release")
+        # Should contain only one <skill> tag
+        assert result.count("<skill") == 1
+
+    def test_match_respects_disabled_skills(self, config):
+        from core.skills.registry import Skill, SkillRegistry
+
+        registry = SkillRegistry()
+        registry.register(Skill(
+            name="vault-sync",
+            version="1.0",
+            description="Sync vault",
+            protocol="Protocol content",
+            triggers={"keywords": ["vault sync", "vault-sync"], "intents": []},
+        ))
+
+        client = GrimClient(config)
+        client._skill_registry = registry
+        client._skills_disabled = ["vault-sync"]
+
+        result = client._prepare_message("vault sync now")
+        assert "<skill" not in result
+
+    def test_match_empty_protocol_returns_unchanged(self, config):
+        from core.skills.registry import Skill, SkillRegistry
+
+        registry = SkillRegistry()
+        registry.register(Skill(
+            name="empty-skill",
+            version="1.0",
+            description="A skill with no protocol",
+            protocol="",
+            triggers={"keywords": ["empty skill", "empty-skill"], "intents": []},
+        ))
+
+        client = GrimClient(config)
+        client._skill_registry = registry
+
+        result = client._prepare_message("run empty skill")
+        assert "<skill" not in result
+
+
 class TestGrimClientMCPSetup:
     def test_no_mcp_when_command_empty(self, config):
         """When kronos_mcp_command is empty, no Kronos MCP configured."""

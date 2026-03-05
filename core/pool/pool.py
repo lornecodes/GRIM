@@ -7,15 +7,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 from core.pool.models import (
     ClarificationNeeded,
     Job,
     JobStatus,
+    JobType,
 )
 from core.pool.queue import JobQueue
 from core.pool.slot import AgentSlot
+from core.pool.workspace import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +42,26 @@ class ExecutionPool:
         self._loop_task: Optional[asyncio.Task] = None
         self._running = False
 
+        # Workspace manager for git worktree isolation
+        workspace_root = getattr(config, "workspace_root", None)
+        worktree_base = Path(workspace_root) / ".grim" / "worktrees" if workspace_root else None
+        self._workspace_mgr: WorkspaceManager | None = (
+            WorkspaceManager(worktree_base) if worktree_base else None
+        )
+        self._job_workspace_map: dict[str, str] = {}  # job_id → workspace_id
+
         # Build Kronos MCP env from config
         self._kronos_mcp_command = getattr(config, "kronos_mcp_command", "")
         self._kronos_mcp_env: dict[str, str] = {}
         vault_path = getattr(config, "vault_path", None)
         skills_path = getattr(config, "skills_path", None)
-        workspace_root = getattr(config, "workspace_root", None)
         if vault_path:
             self._kronos_mcp_env["KRONOS_VAULT_PATH"] = str(vault_path)
         if skills_path:
             self._kronos_mcp_env["KRONOS_SKILLS_PATH"] = str(skills_path)
         if workspace_root:
             self._kronos_mcp_env["KRONOS_WORKSPACE_ROOT"] = str(workspace_root)
+        self._workspace_root = Path(workspace_root) if workspace_root else None
 
     async def start(self) -> None:
         """Initialize queue and start the dispatch loop."""
@@ -100,6 +111,13 @@ class ExecutionPool:
                     task.cancel()
 
         self._tasks.clear()
+
+        # Cleanup remaining workspaces
+        if self._workspace_mgr:
+            count = await self._workspace_mgr.destroy_all()
+            if count:
+                logger.info("Cleaned up %d workspaces on shutdown", count)
+
         logger.info("ExecutionPool stopped")
 
     async def submit(self, job: Job) -> str:
@@ -125,6 +143,7 @@ class ExecutionPool:
             "running": self._running,
             "slots": slots_info,
             "active_jobs": len(self._tasks),
+            "active_workspaces": self._workspace_mgr.active_count if self._workspace_mgr else 0,
         }
 
     # ── Main dispatch loop ───────────────────────────────────────
@@ -193,6 +212,22 @@ class ExecutionPool:
             job.id, JobStatus.RUNNING, assigned_slot=slot.slot_id,
         )
 
+        # Create workspace for code jobs (git worktree isolation)
+        workspace_id: str | None = None
+        if (
+            job.job_type == JobType.CODE
+            and self._workspace_mgr
+            and self._workspace_root
+        ):
+            try:
+                ws = await self._workspace_mgr.create(job.id, self._workspace_root)
+                workspace_id = ws.id
+                self._job_workspace_map[job.id] = ws.id
+                slot.cwd = str(ws.worktree_path)
+                logger.info("Job %s using workspace %s", job.id, ws.id)
+            except Exception as e:
+                logger.warning("Failed to create workspace for %s: %s — running in main repo", job.id, e)
+
         try:
             result = await asyncio.wait_for(
                 slot.execute(job),
@@ -216,6 +251,13 @@ class ExecutionPool:
             return
         finally:
             self._task_workspaces.pop(slot.slot_id, None)
+            slot.cwd = None  # Reset slot working directory
+
+        # Cleanup workspace on failure/cancel (keep on success for PR review)
+        if workspace_id and self._workspace_mgr:
+            # If job failed, destroy the worktree
+            # If succeeded, leave it for potential PR/merge
+            pass  # Cleanup handled below per-outcome
 
         # Handle result
         if result.success:
@@ -246,3 +288,7 @@ class ExecutionPool:
                     transcript=result.transcript,
                 )
                 logger.info("Job %s failed after %d retries", job.id, job.max_retries)
+                # Destroy workspace on final failure
+                if workspace_id and self._workspace_mgr:
+                    await self._workspace_mgr.destroy(workspace_id)
+                    self._job_workspace_map.pop(job.id, None)

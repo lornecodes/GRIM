@@ -18,6 +18,9 @@ from typing import Any, AsyncIterator, Callable, Optional
 
 from core.config import GrimConfig
 from core.personality.prompt_builder import build_system_prompt_parts, load_field_state
+from core.skills.loader import load_skills
+from core.skills.matcher import match_skills
+from core.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +238,12 @@ class GrimClient:
         self._system_prompt: str = ""
         self._started: bool = False
 
+        # Skill matching (loaded at start)
+        self._skill_registry: SkillRegistry | None = None
+        self._skills_disabled: list[str] = list(
+            getattr(config, "skills_disabled", [])
+        )
+
     async def start(self) -> None:
         """Initialize the SDK client with MCP servers and identity prompt."""
         if self._started:
@@ -242,10 +251,18 @@ class GrimClient:
 
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-        # 1. Build system prompt from identity files
+        # 1. Load skill registry
+        try:
+            self._skill_registry = load_skills(self.config.skills_path)
+            logger.info("GrimClient loaded %s", self._skill_registry)
+        except Exception as e:
+            logger.warning("Could not load skills: %s", e)
+            self._skill_registry = SkillRegistry()
+
+        # 2. Build system prompt from identity files
         self._system_prompt = self._build_system_prompt()
 
-        # 2. Configure MCP servers
+        # 3. Configure MCP servers
         mcp_servers: dict[str, Any] = {}
 
         # Kronos MCP (external stdio)
@@ -268,14 +285,14 @@ class GrimClient:
             except Exception as e:
                 logger.warning("Could not build pool MCP server: %s", e)
 
-        # 3. Build allowed tools list
+        # 4. Build allowed tools list
         tools = self._allowed_tools
         if tools is None:
             tools = list(KRONOS_TOOLS)
             if self.config.pool_enabled:
                 tools.extend(POOL_TOOLS)
 
-        # 4. Create SDK client
+        # 5. Create SDK client
         options = ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             mcp_servers=mcp_servers if mcp_servers else None,
@@ -330,7 +347,8 @@ class GrimClient:
 
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 
-        await self._client.query(message)
+        prepared = self._prepare_message(message)
+        await self._client.query(prepared)
         self._turn_count += 1
 
         messages: list[Any] = []
@@ -376,7 +394,8 @@ class GrimClient:
 
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 
-        await self._client.query(message)
+        prepared = self._prepare_message(message)
+        await self._client.query(prepared)
         self._turn_count += 1
 
         async for msg in self._client.receive_response():
@@ -428,6 +447,35 @@ class GrimClient:
         await self.stop()
 
     # ── Private ──────────────────────────────────────────────────
+
+    def _prepare_message(self, message: str) -> str:
+        """Preprocess a user message: match skills and inject protocols.
+
+        If a skill matches, its protocol is prepended as context so the
+        SDK agent can follow the skill's instructions. This replaces the
+        LangGraph skill_match → router → companion pipeline.
+        """
+        if not self._skill_registry:
+            return message
+
+        matched = match_skills(
+            message, self._skill_registry, disabled=self._skills_disabled,
+        )
+        if not matched:
+            return message
+
+        # Take the top-scoring skill's protocol
+        skill = matched[0]
+        if not skill.protocol:
+            return message
+
+        logger.info("GrimClient skill match: %s", skill.name)
+        return (
+            f"<skill name=\"{skill.name}\" version=\"{skill.version}\">\n"
+            f"{skill.protocol}\n"
+            f"</skill>\n\n"
+            f"{message}"
+        )
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt using the existing prompt builder."""

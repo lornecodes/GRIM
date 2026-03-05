@@ -9,6 +9,7 @@ from core.pool.models import Job, JobResult, JobStatus, JobType, JobPriority
 from core.pool.pool import ExecutionPool
 from core.pool.queue import JobQueue
 from core.pool.slot import AgentSlot
+from core.pool.workspace import Workspace, WorkspaceManager
 
 __all__ = [
     "ExecutionPool",
@@ -19,4 +20,6 @@ __all__ = [
     "JobStatus",
     "JobType",
     "JobPriority",
+    "Workspace",
+    "WorkspaceManager",
 ]
