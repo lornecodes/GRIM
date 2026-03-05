@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
+from core.pool.events import PoolEvent, PoolEventBus, PoolEventType
 from core.pool.models import (
     ClarificationNeeded,
     Job,
@@ -49,6 +50,9 @@ class ExecutionPool:
             WorkspaceManager(worktree_base) if worktree_base else None
         )
         self._job_workspace_map: dict[str, str] = {}  # job_id → workspace_id
+
+        # Event bus for push notifications
+        self.events = PoolEventBus()
 
         # Build Kronos MCP env from config
         self._kronos_mcp_command = getattr(config, "kronos_mcp_command", "")
@@ -122,7 +126,13 @@ class ExecutionPool:
 
     async def submit(self, job: Job) -> str:
         """Submit a job to the queue. Returns job_id."""
-        return await self._queue.submit(job)
+        job_id = await self._queue.submit(job)
+        await self.events.emit(PoolEvent(
+            type=PoolEventType.JOB_SUBMITTED,
+            job_id=job_id,
+            data={"job_type": job.job_type.value, "priority": job.priority.value},
+        ))
+        return job_id
 
     @property
     def queue(self) -> JobQueue:
@@ -211,6 +221,11 @@ class ExecutionPool:
         await self._queue.update_status(
             job.id, JobStatus.RUNNING, assigned_slot=slot.slot_id,
         )
+        await self.events.emit(PoolEvent(
+            type=PoolEventType.JOB_STARTED,
+            job_id=job.id,
+            data={"slot_id": slot.slot_id},
+        ))
 
         # Create workspace for code jobs (git worktree isolation)
         workspace_id: str | None = None
@@ -235,18 +250,33 @@ class ExecutionPool:
             )
         except ClarificationNeeded as e:
             await self._queue.request_clarification(job.id, e.question)
+            await self.events.emit(PoolEvent(
+                type=PoolEventType.JOB_BLOCKED,
+                job_id=job.id,
+                data={"question": e.question},
+            ))
             logger.info("Job %s blocked for clarification: %s", job.id, e.question)
             return
         except asyncio.TimeoutError:
             await self._queue.update_status(
                 job.id, JobStatus.FAILED, error="Job timed out",
             )
+            await self.events.emit(PoolEvent(
+                type=PoolEventType.JOB_FAILED,
+                job_id=job.id,
+                data={"error": "Job timed out"},
+            ))
             logger.error("Job %s timed out", job.id)
             return
         except Exception as e:
             await self._queue.update_status(
                 job.id, JobStatus.FAILED, error=str(e),
             )
+            await self.events.emit(PoolEvent(
+                type=PoolEventType.JOB_FAILED,
+                job_id=job.id,
+                data={"error": str(e)},
+            ))
             logger.error("Job %s crashed: %s", job.id, e)
             return
         finally:
@@ -267,6 +297,15 @@ class ExecutionPool:
                 result=result.result,
                 transcript=result.transcript,
             )
+            await self.events.emit(PoolEvent(
+                type=PoolEventType.JOB_COMPLETE,
+                job_id=job.id,
+                data={
+                    "result_preview": (result.result or "")[:200],
+                    "cost_usd": result.cost_usd,
+                    "num_turns": result.num_turns,
+                },
+            ))
             logger.info("Job %s complete", job.id)
         else:
             # Retry logic
@@ -287,6 +326,11 @@ class ExecutionPool:
                     error=result.error,
                     transcript=result.transcript,
                 )
+                await self.events.emit(PoolEvent(
+                    type=PoolEventType.JOB_FAILED,
+                    job_id=job.id,
+                    data={"error": result.error, "retries": job.max_retries},
+                ))
                 logger.info("Job %s failed after %d retries", job.id, job.max_retries)
                 # Destroy workspace on final failure
                 if workspace_id and self._workspace_mgr:

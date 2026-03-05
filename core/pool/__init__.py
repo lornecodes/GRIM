@@ -5,6 +5,7 @@ dispatched to AgentSlots, and executed with configurable tool permissions.
 """
 from __future__ import annotations
 
+from core.pool.events import PoolEvent, PoolEventBus, PoolEventType
 from core.pool.models import Job, JobResult, JobStatus, JobType, JobPriority
 from core.pool.pool import ExecutionPool
 from core.pool.queue import JobQueue
@@ -20,6 +21,9 @@ __all__ = [
     "JobStatus",
     "JobType",
     "JobPriority",
+    "PoolEvent",
+    "PoolEventBus",
+    "PoolEventType",
     "Workspace",
     "WorkspaceManager",
 ]

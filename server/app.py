@@ -27,7 +27,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -101,6 +101,7 @@ _execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
 _active_ws_sessions: set[str] = set()  # live WebSocket session IDs (for Graph Studio)
 _session_knowledge: dict[str, list] = {}  # session_id → list of KnowledgeEntry.to_dict()
 _session_manager: Any = None  # SessionManager for v2 SDK sessions
+_v2_websockets: set = set()  # active v2 WebSocket connections for pool push
 
 
 def _grim_root() -> Path:
@@ -194,6 +195,10 @@ async def lifespan(app: FastAPI):
                 _execution_pool = ExecutionPool(queue, _config)
                 await _execution_pool.start()
                 tool_context.execution_pool = _execution_pool
+
+                # Subscribe to pool events for WebSocket push
+                _execution_pool.events.subscribe(_broadcast_pool_event)
+
                 logger.info("Execution pool started: %d slots", _config.pool_num_slots)
             except Exception as exc:
                 logger.warning("Could not start execution pool: %s", exc)
@@ -1539,6 +1544,24 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Pool event → WebSocket push
+# ---------------------------------------------------------------------------
+
+async def _broadcast_pool_event(event) -> None:
+    """Push pool events to all connected v2 WebSocket clients."""
+    if not _v2_websockets:
+        return
+    msg = {"type": "pool_event", **event.to_dict()}
+    dead = set()
+    for ws in _v2_websockets:
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead.add(ws)
+    _v2_websockets.difference_update(dead)
+
+
+# ---------------------------------------------------------------------------
 # v2 WebSocket — GrimClient SDK sessions
 # ---------------------------------------------------------------------------
 
@@ -1561,6 +1584,7 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
         return
 
     await ws.accept()
+    _v2_websockets.add(ws)
     logger.info("WS v2 connected: %s", session_id)
 
     try:
@@ -1671,6 +1695,8 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         logger.info("WS v2 disconnected: %s", session_id)
+    finally:
+        _v2_websockets.discard(ws)
 
 
 # ---------------------------------------------------------------------------
@@ -2490,6 +2516,32 @@ async def api_pool_cancel(job_id: str):
     if success:
         return JSONResponse({"ok": True, "job_id": job_id})
     return JSONResponse({"error": "Cannot cancel — job may be running or finished"}, status_code=409)
+
+
+@app.post("/api/pool/jobs/{job_id}/clarify")
+async def api_pool_clarify(request: Request, job_id: str):
+    """Provide clarification for a blocked pool job."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    body = await request.json()
+    answer = body.get("answer", "")
+    if not answer:
+        return JSONResponse({"error": "Missing 'answer' field"}, status_code=400)
+
+    await _execution_pool.queue.provide_clarification(job_id, answer)
+    return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@app.get("/api/pool/events/info")
+async def api_pool_events_info():
+    """Get pool event bus info (subscriber count, active WS connections)."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    return JSONResponse({
+        "subscribers": _execution_pool.events.subscriber_count,
+        "active_ws": len(_v2_websockets),
+    })
 
 
 # ---------------------------------------------------------------------------
