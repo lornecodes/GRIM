@@ -5,7 +5,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d  (production)
 #
 # Requires:
-#   - ../kronos-vault directory (or set VAULT_PATH)
+#   - Parent directory is the core_workspace root (or set WORKSPACE_PATH)
 #   - CLIProxyAPI OAuth login (one-time):
 #       docker exec -it cliproxyapi /CLIProxyAPI/CLIProxyAPI --claude-login
 
@@ -108,14 +108,14 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-placeholder-for-proxy}
       - ANTHROPIC_BASE_URL=http://ai-bridge:8318
       - GRIM_ENV=${GRIM_ENV:-debug}
-      - GRIM_VAULT_PATH=/vault
-      - KRONOS_VAULT_PATH=/vault
+      - GRIM_VAULT_PATH=/workspace/kronos-vault
+      - KRONOS_VAULT_PATH=/workspace/kronos-vault
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0
       - GRIM_REDIS_URL=redis://redis:6379/0
     command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
     volumes:
-      - ${VAULT_PATH:-../kronos-vault}:/vault:ro
+      - ${WORKSPACE_PATH:-..}:/workspace:ro
       - grim-sessions:/app/local/sessions
       - grim-evolution:/app/local/evolution
     networks:
@@ -155,12 +155,12 @@ services:
       - GRIM_DISCORD_CHANNELS=${GRIM_DISCORD_CHANNELS:-}
       - GRIM_ENV=${GRIM_ENV:-production}
       - GRIM_SERVER_URL=http://grim:8080
-      - GRIM_VAULT_PATH=/vault
-      - KRONOS_VAULT_PATH=/vault
+      - GRIM_VAULT_PATH=/workspace/kronos-vault
+      - KRONOS_VAULT_PATH=/workspace/kronos-vault
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0
     volumes:
-      - ${VAULT_PATH:-../kronos-vault}:/vault
+      - ${WORKSPACE_PATH:-..}:/workspace
       - grim-discord-sessions:/app/local
     networks:
       - grim-net

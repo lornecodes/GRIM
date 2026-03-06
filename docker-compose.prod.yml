@@ -40,11 +40,13 @@ services:
     environment:
       - GRIM_ENV=production
       - GRIM_WORKSPACE_ROOT=/workspace
+      # Vault inside workspace so MCP source tools resolve repos via Path(vault).parent
+      - KRONOS_VAULT_PATH=/workspace/kronos-vault
+      - GRIM_VAULT_PATH=/workspace/kronos-vault
     restart: always
     ports:
       - "8080:8080"   # LAN accessible (all interfaces)
     volumes:
-      - ${VAULT_PATH:-../kronos-vault}:/vault:ro
       - ${WORKSPACE_PATH:-/home/peter/repos/core_workspace}:/workspace
       - grim-sessions:/app/local/sessions
       - grim-evolution:/app/local/evolution
@@ -60,7 +62,11 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # Discord bot excluded from prod — run locally for testing.
+  # To include: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d grim-discord
   grim-discord:
+    profiles:
+      - discord   # Only starts with --profile discord
     environment:
       - GRIM_ENV=production
     restart: always

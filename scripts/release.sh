@@ -6,7 +6,9 @@
 #
 # Usage:
 #   ./scripts/release.sh setup     Full local setup (Python + UI + tests)
-#   ./scripts/release.sh build     Build GRIM Docker image
+#   ./scripts/release.sh build     Build GRIM Docker image (no Discord)
+#   ./scripts/release.sh build-discord  Build Discord bot image only
+#   ./scripts/release.sh build-all      Build both GRIM + Discord
 #   ./scripts/release.sh unit      Run host-side unit tests (no Docker)
 #   ./scripts/release.sh test      Run all tests inside container
 #   ./scripts/release.sh up        Start GRIM (detached)
@@ -86,25 +88,39 @@ cmd_build() {
     _ok "Built: $IMAGE_NAME:$tag + $IMAGE_NAME:latest"
 
     _clean_old_images "$IMAGE_NAME"
+    _clean_dangling
 
-    # ── Build Discord bot image ──
+    _log "── Images ──"
+    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null
+}
+
+cmd_build_discord() {
+    local tag
+    tag=$(_version_tag)
+
     _log "Building grim-discord:$tag ..."
     docker build -f "$GRIM_DIR/Dockerfile.discord" \
         -t "grim-discord:$tag" -t "grim-discord:latest" "$GRIM_DIR"
     _ok "Built: grim-discord:$tag + grim-discord:latest"
 
     _clean_old_images "grim-discord"
+    _clean_dangling
 
-    # Remove dangling images from this build
+    _log "── Images ──"
+    docker images "grim-discord" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null
+}
+
+cmd_build_all() {
+    cmd_build
+    cmd_build_discord
+}
+
+_clean_dangling() {
     local dangling
     dangling=$(docker images -f "dangling=true" -q 2>/dev/null)
     if [[ -n "$dangling" ]]; then
         echo "$dangling" | xargs docker rmi -f 2>/dev/null || true
     fi
-
-    _log "── Images ──"
-    docker images "$IMAGE_NAME" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null
-    docker images "grim-discord" --format "table {{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" 2>/dev/null || true
 }
 
 _clean_old_images() {
@@ -594,20 +610,22 @@ cmd_setup() {
 # ── Main ──────────────────────────────────────────────────────
 
 case "${1:-up}" in
-    build)       cmd_build ;;
-    test)        cmd_test ;;
-    unit)        cmd_unit ;;
-    up)          cmd_up ;;
-    down)        cmd_down ;;
-    logs)        cmd_logs ;;
-    status)      cmd_status ;;
-    clean)       cmd_clean ;;
-    purge)       cmd_purge ;;
-    rebuild)     cmd_rebuild ;;
-    deploy)      cmd_deploy ;;
-    integration) cmd_integration ;;
-    setup)       cmd_setup ;;
-    prod)        cmd_prod ;;
+    build)         cmd_build ;;
+    build-discord) cmd_build_discord ;;
+    build-all)     cmd_build_all ;;
+    test)          cmd_test ;;
+    unit)          cmd_unit ;;
+    up)            cmd_up ;;
+    down)          cmd_down ;;
+    logs)          cmd_logs ;;
+    status)        cmd_status ;;
+    clean)         cmd_clean ;;
+    purge)         cmd_purge ;;
+    rebuild)       cmd_rebuild ;;
+    deploy)        cmd_deploy ;;
+    integration)   cmd_integration ;;
+    setup)         cmd_setup ;;
+    prod)          cmd_prod ;;
     help|-h|--help)
         echo ""
         echo "GRIM Release Manager"
@@ -617,7 +635,9 @@ case "${1:-up}" in
         echo "Commands:"
         echo "  setup         Full local setup: Python deps + UI build + tests"
         echo "  up            Start GRIM (default — docker compose up -d)"
-        echo "  build         Build GRIM Docker image with version tag"
+        echo "  build         Build GRIM Docker image (no Discord)"
+        echo "  build-discord Build Discord bot image only"
+        echo "  build-all     Build both GRIM + Discord images"
         echo "  unit          Run host-side unit tests (no Docker)"
         echo "  test          Run unit + handler tests inside container"
         echo "  integration   Run integration tests against live containers"
