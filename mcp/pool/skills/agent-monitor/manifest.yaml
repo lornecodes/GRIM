@@ -1,0 +1,52 @@
+name: agent-monitor
+version: "1.0"
+description: >
+  Monitor running pool agents. Read live transcripts, check progress,
+  track costs, and diagnose stuck or slow agents.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - pool:read
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes agent monitoring requests
+    reads: [triggers, phases]
+  any-agent:
+    role: execution
+    description: Monitors agents via pool MCP read tools
+    reads: [protocol.md, phases]
+
+inputs:
+  action:
+    type: enum
+    values: [watch, progress, diagnose, summary]
+    required: true
+    description: >
+      watch: Follow an agent's live output
+      progress: Check how far along an agent is
+      diagnose: Investigate a stuck or slow agent
+      summary: Overview of all running agents
+
+triggers:
+  - explicit: "User asks what agents are doing or how jobs are progressing"
+  - proactive: "Long-running job detected, user hasn't checked in a while"
+  - keywords:
+      strong: ["what's the agent doing", "agent progress", "show transcript",
+               "agent logs", "is it stuck", "how long has it been running"]
+      weak: ["progress", "transcript", "logs", "output", "stuck", "slow"]
+
+phases:
+  1_identify: "Identify which agent(s) to monitor"
+  2_read: "Fetch transcript and status via pool_job_logs / pool_job_detail"
+  3_analyze: "Interpret the output — is it making progress? stuck? erroring?"
+  4_report: "Summarize findings and suggest next steps"
+
+quality_gates:
+  monitoring:
+    - "Check transcript tail (last 10-20 lines) for recent activity"
+    - "Compare updated_at timestamp to detect stale agents"
+    - "Look for error patterns or retry loops in transcript"

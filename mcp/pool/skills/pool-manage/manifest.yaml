@@ -1,0 +1,67 @@
+name: pool-manage
+version: "1.0"
+description: >
+  Manage the GRIM execution pool. Submit jobs, check status, cancel jobs,
+  handle clarifications, retry failures, and review completed work.
+  The pool runs Claude Code agents in isolated workspaces.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - pool:read
+  - pool:write
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes pool/job/agent references and suggests actions
+    reads: [triggers, phases]
+  any-agent:
+    role: execution
+    description: Manages pool jobs via MCP tools
+    reads: [protocol.md, phases, quality_gates]
+
+inputs:
+  action:
+    type: enum
+    values: [submit, status, cancel, clarify, retry, review, list]
+    required: true
+    description: >
+      submit: Submit a new job to the pool
+      status: Check pool overview or specific job status
+      cancel: Cancel a queued or blocked job
+      clarify: Answer a blocked job's clarification question
+      retry: Re-queue a failed job
+      review: Approve or reject a completed job
+      list: List jobs with filters
+
+triggers:
+  - explicit: "User asks to submit, check, cancel, or review pool jobs"
+  - proactive: "User mentions running agents, job status, or work queue"
+  - keywords:
+      strong: ["submit job", "run agent", "pool status", "cancel job",
+               "retry job", "review job", "approve job", "reject job",
+               "what's running", "show agents", "dispatch"]
+      weak: ["pool", "job", "agent", "queue", "running", "blocked"]
+
+phases:
+  1_assess: "Understand the request — which action, which job"
+  2_context: "Check current pool state via pool_status or pool_list_jobs"
+  3_execute: "Perform the action via the appropriate pool MCP tool"
+  4_report: "Show results — job ID, status change, or pool overview"
+
+safety:
+  - "Always confirm before cancelling running jobs"
+  - "Show job details before approving reviews (merging code)"
+  - "Warn if submitting a duplicate job (same instructions as a queued/running job)"
+
+quality_gates:
+  submit:
+    - "Instructions are clear and actionable (>20 chars)"
+    - "Job type matches the work (code for coding, research for investigation)"
+    - "Priority is appropriate (don't submit everything as critical)"
+  review:
+    - "Read the workspace diff before approving"
+    - "Check transcript for errors or warnings before approving"
+    - "Reject if tests failed or code quality is poor"

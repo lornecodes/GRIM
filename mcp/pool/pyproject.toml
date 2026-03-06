@@ -1,0 +1,20 @@
+[project]
+name = "pool-mcp"
+version = "0.1.0"
+description = "MCP server for GRIM execution pool — job introspection, workspace management, agent control"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.1.0",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+pool-mcp = "pool_mcp:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pool_mcp"]

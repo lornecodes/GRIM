@@ -1,0 +1,56 @@
+name: workspace-manage
+version: "1.0"
+description: >
+  Manage git worktree workspaces created by pool agents. Review diffs,
+  approve merges, inspect changed files, and clean up abandoned workspaces.
+
+entry_point: protocol.md
+type: instruction-protocol
+
+permissions:
+  - pool:read
+  - pool:write
+
+consumers:
+  grim:
+    role: recognition
+    description: Recognizes workspace/merge/diff references
+    reads: [triggers, phases]
+  any-agent:
+    role: execution
+    description: Manages workspaces via pool MCP tools
+    reads: [protocol.md, phases, quality_gates]
+
+inputs:
+  action:
+    type: enum
+    values: [list, diff, review, cleanup]
+    required: true
+    description: >
+      list: List active workspaces
+      diff: Show changes in a workspace
+      review: Approve (merge) or reject (destroy) a workspace
+      cleanup: Destroy abandoned or rejected workspaces
+
+triggers:
+  - explicit: "User asks about workspaces, diffs, merges, or code changes"
+  - keywords:
+      strong: ["show diff", "workspace diff", "merge workspace", "approve changes",
+               "reject changes", "list workspaces", "cleanup workspaces"]
+      weak: ["workspace", "diff", "merge", "changes", "branch"]
+
+phases:
+  1_discover: "List workspaces and their associated jobs"
+  2_inspect: "Read diffs and changed files"
+  3_decide: "Approve, reject, or flag for human review"
+  4_execute: "Merge or destroy as decided"
+
+quality_gates:
+  before_merge:
+    - "Diff has been read and understood"
+    - "No obvious errors or security issues in changes"
+    - "Associated job completed successfully"
+    - "Tests pass (if verifiable)"
+  cleanup:
+    - "Only destroy workspaces for failed/cancelled jobs"
+    - "Never destroy workspaces for running jobs"
