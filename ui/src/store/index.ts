@@ -30,7 +30,7 @@ interface ChatSlice {
 
 type UICommandHandler = (cmd: UICommand) => void;
 
-type DashboardTab = "overview" | "pool";
+type DashboardTab = "overview" | "pool" | "daemon";
 type AgentsTab = "team" | "jobs" | "studio" | "graph";
 
 interface UISlice {

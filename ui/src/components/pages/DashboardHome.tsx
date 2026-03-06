@@ -18,6 +18,8 @@ import { MetricsBar } from "./mission/MetricsBar";
 import { SlotGrid } from "./mission/SlotGrid";
 import { JobKanban } from "./mission/JobKanban";
 import { SubmitJobDialog } from "./mission/SubmitJobDialog";
+import { useDaemonStatus } from "@/hooks/useDaemonStatus";
+import { EscalationsPanel } from "./daemon/EscalationsPanel";
 
 // ---------------------------------------------------------------------------
 // Trace category colors (matches TraceEntry.tsx)
@@ -63,6 +65,7 @@ function StatusDot({ ok, neutral }: { ok: boolean; neutral?: boolean }) {
 const DASHBOARD_TABS = [
   { id: "overview", label: "Overview" },
   { id: "pool", label: "Pool" },
+  { id: "daemon", label: "Daemon" },
 ] as const;
 
 export function DashboardHome() {
@@ -71,6 +74,8 @@ export function DashboardHome() {
   const poolEnabled = useGrimStore((s) => s.poolEnabled);
   const poolRunning = useGrimStore((s) => s.poolStatus?.running ?? false);
   const [showSubmit, setShowSubmit] = useState(false);
+  const { status: daemonStatus, daemonEnabled } = useDaemonStatus();
+  const daemonRunning = daemonStatus?.running ?? false;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-8">
@@ -105,6 +110,11 @@ export function DashboardHome() {
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${poolEnabled && poolRunning ? "bg-green-400" : "bg-grim-border"}`} />
               </span>
             )}
+            {tab.id === "daemon" && (
+              <span className="ml-1.5">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${daemonEnabled && daemonRunning ? "bg-green-400" : "bg-grim-border"}`} />
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -114,6 +124,7 @@ export function DashboardHome() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <HealthWidgetTile />
           <PoolWidgetTile />
+          <DaemonWidgetTile />
           <MemoryWidgetTile />
           <ActiveAgentsTile />
           <TokenUsageTile />
@@ -133,6 +144,9 @@ export function DashboardHome() {
           setShowSubmit={setShowSubmit}
         />
       )}
+
+      {/* Daemon tab */}
+      {dashboardTab === "daemon" && <DaemonTabContent />}
     </div>
   );
 }
@@ -906,5 +920,201 @@ function SettingsRow({ label, value }: { label: string; value: string }) {
       <span className="text-grim-text-dim w-12">{label}</span>
       <span className="text-grim-text font-mono truncate">{value}</span>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Daemon Tab Content
+// ---------------------------------------------------------------------------
+
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function formatRelativeTime(isoStr: string | null): string {
+  if (!isoStr) return "—";
+  const ms = Date.now() - new Date(isoStr).getTime();
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  return `${Math.floor(ms / 3_600_000)}h ago`;
+}
+
+const PIPELINE_DOT_COLORS: Record<string, string> = {
+  backlog: "bg-gray-400",
+  ready: "bg-blue-400",
+  dispatched: "bg-yellow-400",
+  review: "bg-purple-400",
+  merged: "bg-green-400",
+  failed: "bg-red-400",
+  blocked: "bg-orange-400",
+};
+
+function DaemonTabContent() {
+  const {
+    status, pipeline, escalations, daemonEnabled,
+    approveItem, rejectItem, retryItem, resolveEscalation,
+  } = useDaemonStatus();
+
+  if (!daemonEnabled) {
+    return (
+      <div className="bg-grim-surface border border-grim-border rounded-lg p-6 text-center">
+        <div className="text-grim-text-dim text-[12px] mb-2">Daemon Offline</div>
+        <div className="text-[11px] text-grim-text-dim">
+          Enable the management daemon in <span className="font-mono text-grim-accent">grim.yaml</span> with{" "}
+          <span className="font-mono text-grim-accent">daemon.enabled: true</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Health bar */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-2 h-2 rounded-full ${status?.running ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+          <span className="text-[10px] text-grim-text-dim">
+            {status?.running ? "Daemon Active" : "Daemon Stopped"}
+          </span>
+        </div>
+        {status && (
+          <>
+            <MiniStat label="Uptime" value={formatUptime(status.uptime_seconds)} />
+            <MiniStat label="Scans" value={status.scan_count} />
+            <MiniStat label="Dispatches" value={status.dispatch_count} />
+            <div className="text-[10px] text-grim-text-dim">
+              Last scan: {formatRelativeTime(status.last_scan_at)}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Pipeline summary dots */}
+      {status?.pipeline && (
+        <div className="flex items-center gap-3 flex-wrap">
+          {Object.entries(status.pipeline).map(([key, count]) => (
+            <div key={key} className="flex items-center gap-1 text-[10px]">
+              <div className={`w-2 h-2 rounded-full ${PIPELINE_DOT_COLORS[key] ?? "bg-gray-400"}`} />
+              <span className="text-grim-text-dim capitalize">{key}</span>
+              <span className="text-grim-text font-mono">{count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Unified kanban with pipeline data */}
+      <JobKanban
+        pipelineItems={pipeline}
+        onApprove={approveItem}
+        onReject={rejectItem}
+      />
+
+      {/* Escalations */}
+      {escalations.length > 0 && (
+        <EscalationsPanel
+          escalations={escalations}
+          onResolve={resolveEscalation}
+          onRetry={retryItem}
+        />
+      )}
+
+      {/* Recent errors */}
+      {status?.recent_errors && status.recent_errors.length > 0 && (
+        <DashboardTile title="Recent Errors">
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {status.recent_errors.map((err, i) => (
+              <div key={i} className="text-[10px] text-red-300 font-mono truncate">
+                {err}
+              </div>
+            ))}
+          </div>
+        </DashboardTile>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Daemon Widget Tile (Dashboard Overview)
+// ---------------------------------------------------------------------------
+
+function DaemonWidgetTile() {
+  const { status, escalations, daemonEnabled } = useDaemonStatus();
+  const setDashboardTab = useGrimStore((s) => s.setDashboardTab);
+  const running = status?.running ?? false;
+  const escCount = escalations.length;
+
+  return (
+    <DashboardTile
+      title="Management Daemon"
+      headerRight={
+        <div className="flex items-center gap-2">
+          <StatusDot ok={daemonEnabled && running} neutral={!daemonEnabled} />
+          <button
+            onClick={() => setDashboardTab("daemon")}
+            className="text-[10px] text-grim-accent hover:underline"
+          >
+            view all
+          </button>
+        </div>
+      }
+    >
+      {!daemonEnabled ? (
+        <div className="text-xs text-grim-text-dim py-4 text-center">
+          Daemon offline
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {/* Pipeline counts */}
+          {status?.pipeline && (
+            <div className="grid grid-cols-4 gap-1">
+              {Object.entries(status.pipeline)
+                .filter(([, count]) => count > 0)
+                .map(([key, count]) => (
+                  <div key={key} className="flex items-center gap-1 text-[10px]">
+                    <div className={`w-1.5 h-1.5 rounded-full ${PIPELINE_DOT_COLORS[key] ?? "bg-gray-400"}`} />
+                    <span className="text-grim-text-dim capitalize">{key}</span>
+                    <span className="text-grim-text font-mono">{count}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* Metrics row */}
+          {status && (
+            <div className="grid grid-cols-3 gap-2">
+              <MiniStat label="Scans" value={status.scan_count} />
+              <MiniStat label="Dispatches" value={status.dispatch_count} />
+              <MiniStat label="Uptime" value={formatUptime(status.uptime_seconds)} />
+            </div>
+          )}
+
+          {/* Escalation alert */}
+          {escCount > 0 && (
+            <button
+              onClick={() => setDashboardTab("daemon")}
+              className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded bg-orange-400/10 border border-orange-400/20 hover:bg-orange-400/15 transition-colors"
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+              <span className="text-[10px] text-orange-400">
+                {escCount} escalation{escCount !== 1 ? "s" : ""} need attention
+              </span>
+            </button>
+          )}
+
+          {/* Open link */}
+          <button
+            onClick={() => setDashboardTab("daemon")}
+            className="text-[10px] text-grim-accent hover:underline w-full text-center pt-1"
+          >
+            Open Daemon
+          </button>
+        </div>
+      )}
+    </DashboardTile>
   );
 }

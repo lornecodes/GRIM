@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useGrimStore } from "@/store";
 import type { TranscriptEntry, JobStatus } from "@/lib/poolTypes";
+import { triggerDaemonRefetch } from "./useDaemonStatus";
 
 /** Build pool WebSocket URL from env or window origin. */
 function getPoolWsUrl(): string {
@@ -194,6 +195,16 @@ export function usePoolSocket() {
             outputPreview: JSON.stringify(data).slice(0, 500),
           };
           store.getState().appendTranscriptEntry(jobId, entry);
+          break;
+        }
+
+        // Daemon events — trigger pipeline data refetch
+        case "daemon_approved":
+        case "daemon_rejected":
+        case "daemon_escalation":
+        case "daemon_auto_resolved": {
+          triggerDaemonRefetch();
+          fetchPoolState(); // Also refresh pool state (job status changes)
           break;
         }
       }

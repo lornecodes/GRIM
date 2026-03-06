@@ -87,7 +87,13 @@ export type PoolEventType =
   | "job_cancelled"
   | "job_review"
   | "agent_output"
-  | "agent_tool_result";
+  | "agent_tool_result"
+  // Daemon intelligence events (Mewtwo Phase 3)
+  | "daemon_escalation"
+  | "daemon_auto_resolved"
+  // Daemon PR lifecycle events (Mewtwo Phase 4)
+  | "daemon_approved"
+  | "daemon_rejected";
 
 export interface PoolWsEvent {
   type: "pool_event";
