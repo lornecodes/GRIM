@@ -303,6 +303,8 @@ def test_all_event_types():
         "job_submitted", "job_started", "job_complete",
         "job_failed", "job_blocked", "job_cancelled", "job_review",
         "agent_output", "agent_tool_result",  # Phase 9 streaming events
+        "daemon_escalation", "daemon_auto_resolved",  # Mewtwo Phase 3
+        "daemon_approved", "daemon_rejected",  # Mewtwo Phase 4
     }
     actual = {e.value for e in PoolEventType}
     assert expected == actual

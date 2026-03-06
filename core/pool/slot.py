@@ -147,6 +147,7 @@ class AgentSlot:
     kronos_mcp_env: dict[str, str] = field(default_factory=dict)
     max_turns: int = 20
     cwd: Optional[str] = None
+    add_dirs: list[str] = field(default_factory=list)
 
     async def execute(
         self,
@@ -205,6 +206,8 @@ class AgentSlot:
                 can_use_tool=permission_cb,
                 max_turns=self.max_turns,
                 model=config.get("model"),
+                cwd=self.cwd,
+                add_dirs=self.add_dirs if self.add_dirs else [],
             )
 
             # Must unset CLAUDECODE to spawn child sessions from Claude Code

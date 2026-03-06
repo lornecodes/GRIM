@@ -30,6 +30,9 @@ _EMBED_COLORS = {
     # Daemon intelligence events (Project Mewtwo Phase 3)
     PoolEventType.DAEMON_ESCALATION: 0xE67E22,      # Orange
     PoolEventType.DAEMON_AUTO_RESOLVED: 0x27AE60,   # Dark green
+    # Daemon PR lifecycle events (Project Mewtwo Phase 4)
+    PoolEventType.DAEMON_APPROVED: 0x2ECC71,         # Green (same as complete)
+    PoolEventType.DAEMON_REJECTED: 0xE74C3C,         # Red (same as failed)
 }
 
 
@@ -134,7 +137,15 @@ class DiscordWebhookNotifier:
             ws_id = event.data.get("workspace_id", "")
             changed = event.data.get("changed_files", [])
             diff_stat = event.data.get("diff_stat", "")
-            description = f"**Workspace:** {ws_id}"
+            story_id = event.data.get("story_id", "")
+            pr_number = event.data.get("pr_number")
+            pr_url = event.data.get("pr_url", "")
+            description = ""
+            if story_id:
+                description += f"**Story:** {story_id}\n"
+            if pr_url:
+                description += f"**PR:** [#{pr_number}]({pr_url})\n"
+            description += f"**Workspace:** {ws_id}"
             if changed:
                 description += f"\n**Files changed:** {len(changed)}"
             if diff_stat:
@@ -186,6 +197,34 @@ class DiscordWebhookNotifier:
             )
             return {
                 "title": f"Daemon Resolved: {job_id}",
+                "description": description,
+                "color": color,
+                "timestamp": event.timestamp.isoformat(),
+            }
+
+        elif event.type == PoolEventType.DAEMON_APPROVED:
+            story_id = event.data.get("story_id", "")
+            pr_number = event.data.get("pr_number")
+            pr_url = event.data.get("pr_url", "")
+            description = f"**Story:** {story_id}"
+            if pr_url:
+                description += f"\n**PR:** [#{pr_number}]({pr_url}) — merged"
+            return {
+                "title": f"Approved → MERGED: {job_id}",
+                "description": description,
+                "color": color,
+                "timestamp": event.timestamp.isoformat(),
+            }
+
+        elif event.type == PoolEventType.DAEMON_REJECTED:
+            story_id = event.data.get("story_id", "")
+            reason = event.data.get("reason", "Rejected")
+            pr_number = event.data.get("pr_number")
+            description = f"**Story:** {story_id}\n**Reason:** {reason}"
+            if pr_number:
+                description += f"\nPR #{pr_number} closed"
+            return {
+                "title": f"Rejected → FAILED: {job_id}",
                 "description": description,
                 "color": color,
                 "timestamp": event.timestamp.isoformat(),

@@ -99,6 +99,10 @@ class GrimConfig:
     daemon_resolve_model: str = "claude-sonnet-4-6"
     daemon_validate_model: str = "claude-opus-4-6"
     daemon_resolve_confidence_threshold: float = 0.7
+    # Phase 4: PR Lifecycle
+    daemon_auto_pr: bool = True              # create PRs on REVIEW for CODE jobs
+    daemon_github_repo: str = ""             # default repo for gh CLI
+    daemon_pr_poll_interval: int = 300       # seconds between PR comment polls
 
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
@@ -311,6 +315,13 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.daemon_validate_model = daemon["validate_model"]
     if "resolve_confidence_threshold" in daemon:
         cfg.daemon_resolve_confidence_threshold = daemon["resolve_confidence_threshold"]
+    # Phase 4: PR Lifecycle
+    if "auto_pr" in daemon:
+        cfg.daemon_auto_pr = daemon["auto_pr"]
+    if "github_repo" in daemon:
+        cfg.daemon_github_repo = daemon["github_repo"]
+    if "pr_poll_interval" in daemon:
+        cfg.daemon_pr_poll_interval = daemon["pr_poll_interval"]
 
 
 def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:

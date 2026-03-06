@@ -223,6 +223,7 @@ async def lifespan(app: FastAPI):
                 config=_config,
                 pool_queue=_execution_pool.queue,
                 pool_events=_execution_pool.events,
+                workspace_manager=_execution_pool.workspace_manager,
             )
             await _daemon_engine.start()
             logger.info("Management daemon started")
@@ -2675,6 +2676,36 @@ async def retry_pipeline_item(item_id: str):
     from core.daemon.models import PipelineStatus, InvalidTransition
     try:
         item = await _daemon_engine.store.advance(item_id, PipelineStatus.READY)
+        return JSONResponse(item.model_dump(mode="json"))
+    except InvalidTransition as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.post("/api/daemon/pipeline/{item_id}/approve")
+async def approve_pipeline_item(item_id: str):
+    """Approve a REVIEW item — merge PR + workspace, advance to MERGED."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    from core.daemon.models import InvalidTransition
+    try:
+        item = await _daemon_engine.approve_item(item_id)
+        return JSONResponse(item.model_dump(mode="json"))
+    except InvalidTransition as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.post("/api/daemon/pipeline/{item_id}/reject")
+async def reject_pipeline_item(item_id: str):
+    """Reject a REVIEW item — close PR, destroy workspace, advance to FAILED."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    from core.daemon.models import InvalidTransition
+    try:
+        item = await _daemon_engine.reject_item(item_id)
         return JSONResponse(item.model_dump(mode="json"))
     except InvalidTransition as e:
         return JSONResponse({"error": str(e)}, status_code=400)

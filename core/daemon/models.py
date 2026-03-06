@@ -36,7 +36,11 @@ VALID_TRANSITIONS: dict[PipelineStatus, frozenset[PipelineStatus]] = {
         PipelineStatus.FAILED,
         PipelineStatus.BLOCKED,
     }),
-    PipelineStatus.REVIEW: frozenset({PipelineStatus.MERGED, PipelineStatus.FAILED}),
+    PipelineStatus.REVIEW: frozenset({
+        PipelineStatus.MERGED,
+        PipelineStatus.FAILED,
+        PipelineStatus.DISPATCHED,  # re-dispatch from review (comment feedback)
+    }),
     PipelineStatus.BLOCKED: frozenset({
         PipelineStatus.READY,       # clarification provided → re-queue
         PipelineStatus.FAILED,      # give up
@@ -87,6 +91,11 @@ class PipelineItem(BaseModel):
     error: Optional[str] = None
     attempts: int = 0
     daemon_retries: int = 0              # Phase 3: daemon-level retry count
+
+    # Phase 4: PR lifecycle
+    pr_number: Optional[int] = None
+    pr_url: Optional[str] = None
+    pr_comment_count: int = 0
 
 
 class InvalidTransition(Exception):

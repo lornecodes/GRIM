@@ -42,6 +42,10 @@ class PoolEventType(str, Enum):
     DAEMON_ESCALATION = "daemon_escalation"        # daemon needs human input
     DAEMON_AUTO_RESOLVED = "daemon_auto_resolved"  # daemon answered a question
 
+    # Daemon PR lifecycle events (Project Mewtwo Phase 4)
+    DAEMON_APPROVED = "daemon_approved"            # reviewer approved → MERGED
+    DAEMON_REJECTED = "daemon_rejected"            # reviewer rejected → FAILED
+
     # Streaming events — emitted per-message during agent execution
     AGENT_OUTPUT = "agent_output"
     AGENT_TOOL_RESULT = "agent_tool_result"

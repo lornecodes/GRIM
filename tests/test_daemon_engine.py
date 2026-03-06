@@ -77,6 +77,10 @@ class MockConfig:
     daemon_resolve_model: str = "claude-sonnet-4-6"
     daemon_validate_model: str = "claude-opus-4-6"
     daemon_resolve_confidence_threshold: float = 0.7
+    # Phase 4 PR lifecycle (disabled by default in unit tests)
+    daemon_auto_pr: bool = False
+    daemon_github_repo: str = ""
+    daemon_pr_poll_interval: int = 999
 
 
 # ── Fixtures ─────────────────────────────────────────────────────
@@ -376,6 +380,11 @@ class TestPoolEventHandler:
 
     @pytest.mark.asyncio
     async def test_job_complete_to_review(self, engine, event_bus, mock_queue):
+        # Mock queue returns a CODE job so _handle_review stays in REVIEW
+        # (auto_pr=False and github=None → stays in REVIEW for manual handling)
+        code_job = Job(job_type=JobType.CODE, instructions="code task")
+        mock_queue.get = AsyncMock(return_value=code_job)
+
         job_id = await self._setup_dispatched(engine, event_bus)
 
         event = PoolEvent(
@@ -508,3 +517,568 @@ class TestFullCycle:
 
         job = mock_queue.submit.call_args[0][0]
         assert job.job_type == JobType.RESEARCH
+
+
+# ── Phase 4: PR Lifecycle tests ───────────────────────────────
+
+
+def _make_review_engine(
+    tmp_path: Path,
+    mock_queue: AsyncMock,
+    event_bus: PoolEventBus,
+    *,
+    auto_pr: bool = True,
+    github_client: Any = None,
+    workspace_manager: Any = None,
+    validate_output: bool = False,
+    stories: list[dict] | None = None,
+) -> ManagementEngine:
+    """Create an engine configured for Phase 4 review tests."""
+    vault = _make_vault(tmp_path, stories=stories)
+    db = tmp_path / "review.db"
+    config = MockConfig(
+        daemon_db_path=db,
+        vault_path=vault,
+        daemon_poll_interval=999,
+        daemon_auto_pr=auto_pr,
+        daemon_validate_output=validate_output,
+    )
+    engine = ManagementEngine(
+        config, mock_queue, event_bus,
+        vault_path=vault,
+        workspace_manager=workspace_manager,
+    )
+    # Inject mock github client
+    if github_client is not None:
+        engine._github = github_client
+    elif auto_pr:
+        engine._github = AsyncMock()
+    return engine
+
+
+class TestHandleReview:
+    """Tests for _handle_review() — PR creation vs direct merge."""
+
+    @pytest.mark.asyncio
+    async def test_non_code_job_skips_pr(self, tmp_path, event_bus):
+        """RESEARCH jobs advance directly to MERGED, no PR."""
+        mock_queue = AsyncMock()
+        research_job = Job(job_type=JobType.RESEARCH, instructions="research")
+        mock_queue.get = AsyncMock(return_value=research_job)
+
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-1")
+        item = await engine.store.get(item.id)  # refetch with job_id
+
+        await engine._handle_review(item, "ws-1")
+        updated = await engine.store.get(item.id)
+        assert updated.status == PipelineStatus.MERGED
+
+    @pytest.mark.asyncio
+    async def test_code_job_no_workspace_skips_pr(self, tmp_path, event_bus):
+        """CODE jobs without workspace advance directly to MERGED."""
+        mock_queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="code")
+        mock_queue.get = AsyncMock(return_value=code_job)
+
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW)
+        item = await engine.store.get(item.id)
+
+        await engine._handle_review(item, None)
+        updated = await engine.store.get(item.id)
+        assert updated.status == PipelineStatus.MERGED
+
+    @pytest.mark.asyncio
+    async def test_code_job_creates_pr(self, tmp_path, event_bus):
+        """CODE job with workspace creates PR and emits JOB_REVIEW event."""
+        mock_queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="code")
+        mock_queue.get = AsyncMock(return_value=code_job)
+
+        mock_github = AsyncMock()
+        mock_github.push_branch = AsyncMock()
+        mock_github.create_pr = AsyncMock(return_value=(42, "https://github.com/o/r/pull/42"))
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.worktree_path = Path("/fake/worktree")
+        mock_ws.branch_name = "grim/ws-abc"
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.get_branch_diff = AsyncMock(return_value="+1 -0")
+
+        events_received = []
+        event_bus.subscribe(lambda e: events_received.append(e))
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-abc")
+        item = await engine.store.get(item.id)
+
+        await engine._handle_review(item, "ws-abc")
+
+        # PR was created
+        mock_github.push_branch.assert_called_once()
+        mock_github.create_pr.assert_called_once()
+
+        # PR info persisted
+        updated = await engine.store.get(item.id)
+        assert updated.pr_number == 42
+        assert updated.pr_url == "https://github.com/o/r/pull/42"
+
+        # JOB_REVIEW event emitted
+        await asyncio.sleep(0.05)
+        review_events = [e for e in events_received if e.type == PoolEventType.JOB_REVIEW]
+        assert len(review_events) == 1
+        assert review_events[0].data["pr_number"] == 42
+
+    @pytest.mark.asyncio
+    async def test_auto_pr_disabled_stays_in_review(self, tmp_path, event_bus):
+        """With auto_pr=False, CODE jobs stay in REVIEW."""
+        mock_queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="code")
+        mock_queue.get = AsyncMock(return_value=code_job)
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus, auto_pr=False,
+        )
+        engine._github = None  # ensure no github client
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-1")
+        item = await engine.store.get(item.id)
+
+        await engine._handle_review(item, "ws-1")
+
+        # Still in REVIEW — no PR, no auto-merge
+        updated = await engine.store.get(item.id)
+        assert updated.status == PipelineStatus.REVIEW
+
+    @pytest.mark.asyncio
+    async def test_pr_creation_failure_stays_in_review(self, tmp_path, event_bus):
+        """PR creation failure leaves item in REVIEW (doesn't crash)."""
+        mock_queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="code")
+        mock_queue.get = AsyncMock(return_value=code_job)
+
+        mock_github = AsyncMock()
+        mock_github.push_branch = AsyncMock(side_effect=Exception("push failed"))
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.worktree_path = Path("/fake/worktree")
+        mock_ws.branch_name = "grim/ws-abc"
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-1")
+        item = await engine.store.get(item.id)
+
+        await engine._handle_review(item, "ws-1")
+
+        updated = await engine.store.get(item.id)
+        assert updated.status == PipelineStatus.REVIEW  # didn't crash, stayed
+
+    @pytest.mark.asyncio
+    async def test_handle_complete_wires_to_handle_review(self, tmp_path, event_bus):
+        """_handle_complete calls _handle_review for non-validated jobs."""
+        mock_queue = AsyncMock()
+        research_job = Job(job_type=JobType.RESEARCH, instructions="research")
+        mock_queue.get = AsyncMock(return_value=research_job)
+
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+
+        # Simulate JOB_COMPLETE event
+        await engine._handle_complete(item, "job-1", {"workspace_id": "ws-1"})
+
+        # Non-validated research job should go REVIEW → MERGED
+        updated = await engine.store.get(item.id)
+        assert updated.status == PipelineStatus.MERGED
+
+
+class TestApproveReject:
+    """Tests for approve_item() and reject_item()."""
+
+    @pytest.mark.asyncio
+    async def test_approve_merges_pr_and_workspace(self, tmp_path, event_bus):
+        """Approve merges PR, merges workspace, advances to MERGED."""
+        mock_queue = AsyncMock()
+        mock_github = AsyncMock()
+        mock_github.merge_pr = AsyncMock()
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.merge_to_base = AsyncMock()
+        mock_ws_mgr.destroy = AsyncMock()
+
+        events_received = []
+        event_bus.subscribe(lambda e: events_received.append(e))
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(
+            item.id, PipelineStatus.REVIEW,
+            workspace_id="ws-1", pr_number=42, pr_url="https://github.com/o/r/pull/42",
+        )
+
+        result = await engine.approve_item(item.id)
+        assert result.status == PipelineStatus.MERGED
+        mock_github.merge_pr.assert_called_once()
+        mock_ws_mgr.merge_to_base.assert_called_once_with("ws-1")
+        mock_ws_mgr.destroy.assert_called_once_with("ws-1")
+
+        # DAEMON_APPROVED event emitted
+        await asyncio.sleep(0.05)
+        approved = [e for e in events_received if e.type == PoolEventType.DAEMON_APPROVED]
+        assert len(approved) == 1
+        assert approved[0].data["story_id"] == "story-test-001"
+
+    @pytest.mark.asyncio
+    async def test_approve_without_pr(self, tmp_path, event_bus):
+        """Approve without PR just merges workspace + cleans up."""
+        mock_queue = AsyncMock()
+        mock_ws_mgr = MagicMock()
+        mock_ws_mgr.merge_to_base = AsyncMock()
+        mock_ws_mgr.destroy = AsyncMock()
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            workspace_manager=mock_ws_mgr,
+        )
+        engine._github = None
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-1")
+
+        result = await engine.approve_item(item.id)
+        assert result.status == PipelineStatus.MERGED
+        mock_ws_mgr.merge_to_base.assert_called_once()
+        mock_ws_mgr.destroy.assert_called_once_with("ws-1")
+
+    @pytest.mark.asyncio
+    async def test_approve_wrong_status_raises(self, tmp_path, event_bus):
+        """Approve on non-REVIEW item raises InvalidTransition."""
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+
+        from core.daemon.models import InvalidTransition
+        with pytest.raises(InvalidTransition):
+            await engine.approve_item(item.id)
+
+    @pytest.mark.asyncio
+    async def test_approve_not_found_raises(self, tmp_path, event_bus):
+        """Approve on nonexistent item raises ValueError."""
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        with pytest.raises(ValueError, match="not found"):
+            await engine.approve_item("pipeline-nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_reject_closes_pr_and_destroys_workspace(self, tmp_path, event_bus):
+        """Reject closes PR, destroys workspace, advances to FAILED, emits event."""
+        mock_queue = AsyncMock()
+        mock_github = AsyncMock()
+        mock_github.close_pr = AsyncMock()
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.destroy = AsyncMock()
+
+        events_received = []
+        event_bus.subscribe(lambda e: events_received.append(e))
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(
+            item.id, PipelineStatus.REVIEW,
+            workspace_id="ws-1", pr_number=42,
+        )
+
+        result = await engine.reject_item(item.id)
+        assert result.status == PipelineStatus.FAILED
+        assert result.error == "Rejected by reviewer"
+        mock_github.close_pr.assert_called_once()
+        mock_ws_mgr.destroy.assert_called_once_with("ws-1")
+
+        # DAEMON_REJECTED event emitted
+        await asyncio.sleep(0.05)
+        rejected = [e for e in events_received if e.type == PoolEventType.DAEMON_REJECTED]
+        assert len(rejected) == 1
+        assert rejected[0].data["story_id"] == "story-test-001"
+
+    @pytest.mark.asyncio
+    async def test_reject_wrong_status_raises(self, tmp_path, event_bus):
+        """Reject on non-REVIEW item raises InvalidTransition."""
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+
+        from core.daemon.models import InvalidTransition
+        with pytest.raises(InvalidTransition):
+            await engine.reject_item(item.id)
+
+
+class TestPRCommentPolling:
+    """Tests for _poll_pr_comments()."""
+
+    @pytest.mark.asyncio
+    async def test_new_comments_emit_escalation(self, tmp_path, event_bus):
+        """New PR comments are detected and emitted as escalation events."""
+        mock_queue = AsyncMock()
+
+        mock_github = AsyncMock()
+        mock_github.list_pr_comments = AsyncMock(return_value=[
+            {"author": "peter", "body": "Looks good", "createdAt": "2026-03-06T10:00:00Z"},
+        ])
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+
+        events_received = []
+        event_bus.subscribe(lambda e: events_received.append(e))
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(
+            item.id, PipelineStatus.REVIEW,
+            workspace_id="ws-1", pr_number=42,
+        )
+
+        await engine._poll_pr_comments()
+        await asyncio.sleep(0.05)
+
+        escalations = [e for e in events_received if e.type == PoolEventType.DAEMON_ESCALATION]
+        assert len(escalations) == 1
+        assert escalations[0].data["comment_author"] == "peter"
+        assert escalations[0].data["comment_body"] == "Looks good"
+
+        # Count updated
+        updated = await engine.store.get(item.id)
+        assert updated.pr_comment_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_new_comments_no_event(self, tmp_path, event_bus):
+        """No new comments → no escalation emitted."""
+        mock_queue = AsyncMock()
+        mock_github = AsyncMock()
+        mock_github.list_pr_comments = AsyncMock(return_value=[])
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+
+        events_received = []
+        event_bus.subscribe(lambda e: events_received.append(e))
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(
+            item.id, PipelineStatus.REVIEW,
+            workspace_id="ws-1", pr_number=42,
+        )
+
+        await engine._poll_pr_comments()
+        await asyncio.sleep(0.05)
+
+        escalations = [e for e in events_received if e.type == PoolEventType.DAEMON_ESCALATION]
+        assert len(escalations) == 0
+
+    @pytest.mark.asyncio
+    async def test_poll_skips_items_without_pr(self, tmp_path, event_bus):
+        """Items without pr_number are skipped during poll."""
+        mock_queue = AsyncMock()
+        mock_github = AsyncMock()
+        mock_github.list_pr_comments = AsyncMock()
+
+        mock_ws_mgr = MagicMock()
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(item.id, PipelineStatus.REVIEW, workspace_id="ws-1")
+
+        await engine._poll_pr_comments()
+
+        # list_pr_comments should NOT have been called
+        mock_github.list_pr_comments.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_poll_error_doesnt_crash(self, tmp_path, event_bus):
+        """Poll errors are caught and logged, not raised."""
+        mock_queue = AsyncMock()
+        mock_github = AsyncMock()
+        mock_github.list_pr_comments = AsyncMock(side_effect=Exception("API error"))
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus,
+            github_client=mock_github,
+            workspace_manager=mock_ws_mgr,
+        )
+        await engine.store.initialize()
+
+        item = await engine.store.add("story-test-001", "proj-test")
+        await engine.store.advance(item.id, PipelineStatus.READY)
+        await engine.store.advance(item.id, PipelineStatus.DISPATCHED, job_id="job-1")
+        await engine.store.advance(
+            item.id, PipelineStatus.REVIEW,
+            workspace_id="ws-1", pr_number=42,
+        )
+
+        # Should not raise
+        await engine._poll_pr_comments()
+
+
+class TestBuildPRBody:
+    """Tests for _build_pr_body()."""
+
+    def test_body_includes_story_and_project(self, tmp_path, event_bus):
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        item = MagicMock(story_id="story-test-001", project_id="proj-test")
+        body = engine._build_pr_body(item, None)
+        assert "story-test-001" in body
+        assert "proj-test" in body
+
+    def test_body_includes_acceptance_criteria(self, tmp_path, event_bus):
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(tmp_path, mock_queue, event_bus)
+        item = MagicMock(story_id="story-test-001", project_id="proj-test")
+        story_data = {
+            "title": "Test",
+            "description": "A description",
+            "acceptance_criteria": ["criterion 1", "criterion 2"],
+        }
+        body = engine._build_pr_body(item, story_data)
+        assert "- [ ] criterion 1" in body
+        assert "- [ ] criterion 2" in body
+        assert "A description" in body
+
+
+class TestPRPollLoop:
+    """Tests for _pr_poll_loop lifecycle."""
+
+    @pytest.mark.asyncio
+    async def test_pr_poll_task_starts_with_github(self, tmp_path, event_bus):
+        """PR poll task is started when github client exists."""
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus, auto_pr=True,
+        )
+        await engine.start()
+
+        assert engine._pr_poll_task is not None
+        assert not engine._pr_poll_task.done()
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_pr_poll_task_not_started_without_github(self, tmp_path, event_bus):
+        """PR poll task is not started when no github client."""
+        mock_queue = AsyncMock()
+        engine = _make_review_engine(
+            tmp_path, mock_queue, event_bus, auto_pr=False,
+        )
+        engine._github = None
+        await engine.start()
+
+        assert engine._pr_poll_task is None
+
+        await engine.stop()

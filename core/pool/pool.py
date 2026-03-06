@@ -302,9 +302,16 @@ class ExecutionPool:
                 workspace_id = ws.id
                 self._job_workspace_map[job.id] = ws.id
                 slot.cwd = str(ws.worktree_path)
+                # Give CODE agents read access to full workspace alongside their worktree
+                if self._workspace_root:
+                    slot.add_dirs = [str(self._workspace_root)]
                 logger.info("Job %s using workspace %s", job.id, ws.id)
             except Exception as e:
                 logger.warning("Failed to create workspace for %s: %s — running in main repo", job.id, e)
+
+        # Non-CODE jobs get workspace root as cwd (full access to core_workspace)
+        if job.job_type != JobType.CODE and self._workspace_root and not slot.cwd:
+            slot.cwd = str(self._workspace_root)
 
         try:
             result = await asyncio.wait_for(
@@ -345,6 +352,7 @@ class ExecutionPool:
         finally:
             self._task_workspaces.pop(slot.slot_id, None)
             slot.cwd = None  # Reset slot working directory
+            slot.add_dirs = []  # Reset additional directories
 
         # Handle result
         if result.success:

@@ -19,6 +19,7 @@ from core.daemon.models import PipelineItem, PipelineStatus, InvalidTransition
 from core.daemon.pipeline import PipelineStore
 from core.daemon.scanner import ProjectScanner
 from core.pool.events import PoolEvent, PoolEventBus, PoolEventType
+from core.pool.models import Job, JobType
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -61,6 +62,10 @@ def _make_config(vault_path: Path, db_path: Path, **overrides):
     cfg.daemon_resolve_model = "claude-sonnet-4-6"
     cfg.daemon_validate_model = "claude-opus-4-6"
     cfg.daemon_resolve_confidence_threshold = 0.7
+    # Phase 4: PR lifecycle
+    cfg.daemon_auto_pr = overrides.get("auto_pr", False)
+    cfg.daemon_github_repo = overrides.get("github_repo", "")
+    cfg.daemon_pr_poll_interval = 999
     return cfg
 
 
@@ -111,6 +116,9 @@ def pool_queue():
     """Mock pool job queue."""
     q = AsyncMock()
     q.submit = AsyncMock()
+    # Return a CODE job from get() so _handle_review knows the job type
+    code_job = Job(job_type=JobType.CODE, instructions="mock")
+    q.get = AsyncMock(return_value=code_job)
     return q
 
 
@@ -716,3 +724,359 @@ class TestMewtwoCharizardSeam:
         # Verify clarification was written to the real queue
         job = await queue.get(job_id)
         assert job.clarification_answer == "Use pattern B."
+
+
+# ── Phase 4: PR Lifecycle E2E ────────────────────────────────────
+
+
+class TestPRLifecycleE2E:
+    """End-to-end tests for Phase 4 PR lifecycle flows."""
+
+    @pytest.mark.asyncio
+    async def test_code_job_full_pr_lifecycle(self, tmp_path):
+        """CODE job: BACKLOG → DISPATCHED → REVIEW (PR created) → approve → MERGED."""
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-alpha", [
+            {
+                "id": "story-alpha-010",
+                "title": "Add feature Z",
+                "status": "active",
+                "priority": "high",
+                "assignee": "code",
+                "description": "Build feature Z",
+                "acceptance_criteria": ["Tests pass"],
+            },
+        ])
+
+        db = tmp_path / "pr_lifecycle.db"
+        config = _make_config(vault_path, db, auto_pr=True)
+        queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="build Z")
+        queue.get = AsyncMock(return_value=code_job)
+        events = PoolEventBus()
+
+        mock_github = AsyncMock()
+        mock_github.push_branch = AsyncMock()
+        mock_github.create_pr = AsyncMock(return_value=(99, "https://github.com/o/r/pull/99"))
+        mock_github.merge_pr = AsyncMock()
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.worktree_path = Path("/fake/worktree")
+        mock_ws.branch_name = "grim/ws-z"
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.get_branch_diff = AsyncMock(return_value="+10 -2")
+        mock_ws_mgr.merge_to_base = AsyncMock()
+
+        events_received = []
+        events.subscribe(lambda e: events_received.append(e))
+
+        engine = ManagementEngine(
+            config, queue, events,
+            vault_path=vault_path,
+            workspace_manager=mock_ws_mgr,
+        )
+        engine._github = mock_github
+
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        # Cycle: BACKLOG → READY → DISPATCHED
+        await engine._cycle()
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        assert len(dispatched) == 1
+        job_id = dispatched[0].job_id
+
+        # Simulate JOB_COMPLETE → REVIEW → PR created
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-z"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.REVIEW
+        assert item.pr_number == 99
+        assert item.pr_url == "https://github.com/o/r/pull/99"
+
+        # JOB_REVIEW event emitted
+        await asyncio.sleep(0.05)
+        review_events = [e for e in events_received if e.type == PoolEventType.JOB_REVIEW]
+        assert len(review_events) >= 1
+        assert review_events[0].data["pr_number"] == 99
+
+        # Approve → MERGED
+        result = await engine.approve_item(item.id)
+        assert result.status == PipelineStatus.MERGED
+        mock_github.merge_pr.assert_called_once()
+        mock_ws_mgr.merge_to_base.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_research_job_auto_merges(self, tmp_path):
+        """RESEARCH job: BACKLOG → DISPATCHED → REVIEW → auto-MERGED (no PR)."""
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-alpha", [
+            {
+                "id": "story-alpha-011",
+                "title": "Research topic Q",
+                "status": "active",
+                "priority": "medium",
+                "assignee": "research",
+            },
+        ])
+
+        db = tmp_path / "research.db"
+        config = _make_config(vault_path, db, auto_pr=True)
+        queue = AsyncMock()
+        research_job = Job(job_type=JobType.RESEARCH, instructions="research Q")
+        queue.get = AsyncMock(return_value=research_job)
+        events = PoolEventBus()
+
+        engine = ManagementEngine(
+            config, queue, events, vault_path=vault_path,
+        )
+        engine._github = AsyncMock()  # github exists but shouldn't be used
+
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        # Cycle
+        await engine._cycle()
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        assert len(dispatched) == 1
+        job_id = dispatched[0].job_id
+
+        # JOB_COMPLETE → should auto-merge (no PR for research)
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-q"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.MERGED
+
+        # GitHub should NOT have been called for push/create_pr
+        engine._github.push_branch.assert_not_called()
+        engine._github.create_pr.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reject_flow(self, tmp_path):
+        """REVIEW → reject → FAILED with PR closed."""
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-alpha", [
+            {
+                "id": "story-alpha-012",
+                "title": "Bad feature",
+                "status": "active",
+                "priority": "low",
+                "assignee": "code",
+            },
+        ])
+
+        db = tmp_path / "reject.db"
+        config = _make_config(vault_path, db, auto_pr=True)
+        queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="bad code")
+        queue.get = AsyncMock(return_value=code_job)
+        events = PoolEventBus()
+
+        mock_github = AsyncMock()
+        mock_github.push_branch = AsyncMock()
+        mock_github.create_pr = AsyncMock(return_value=(55, "https://github.com/o/r/pull/55"))
+        mock_github.close_pr = AsyncMock()
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.worktree_path = Path("/fake/worktree")
+        mock_ws.branch_name = "grim/ws-bad"
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.get_branch_diff = AsyncMock(return_value="+5 -0")
+        mock_ws_mgr.destroy = AsyncMock()
+
+        engine = ManagementEngine(
+            config, queue, events,
+            vault_path=vault_path,
+            workspace_manager=mock_ws_mgr,
+        )
+        engine._github = mock_github
+
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        # Cycle + complete
+        await engine._cycle()
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-bad"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.REVIEW
+
+        # Reject
+        result = await engine.reject_item(item.id)
+        assert result.status == PipelineStatus.FAILED
+        assert result.error == "Rejected by reviewer"
+        mock_github.close_pr.assert_called_once()
+        mock_ws_mgr.destroy.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_github_unavailable_stays_in_review(self, tmp_path):
+        """When GitHub is unavailable, CODE jobs stay in REVIEW (no crash)."""
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-alpha", [
+            {
+                "id": "story-alpha-013",
+                "title": "Offline feature",
+                "status": "active",
+                "priority": "high",
+                "assignee": "code",
+            },
+        ])
+
+        db = tmp_path / "offline.db"
+        config = _make_config(vault_path, db, auto_pr=False)
+        queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="offline")
+        queue.get = AsyncMock(return_value=code_job)
+        events = PoolEventBus()
+
+        engine = ManagementEngine(config, queue, events, vault_path=vault_path)
+        engine._github = None  # no github
+
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        await engine._cycle()
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-offline"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.REVIEW  # stays, no crash
+
+    @pytest.mark.asyncio
+    async def test_comment_polling_emits_escalation(self, tmp_path):
+        """PR comment polling detects new comments and emits DAEMON_ESCALATION."""
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-alpha", [
+            {
+                "id": "story-alpha-014",
+                "title": "Feature with comments",
+                "status": "active",
+                "priority": "high",
+                "assignee": "code",
+            },
+        ])
+
+        db = tmp_path / "comments.db"
+        config = _make_config(vault_path, db, auto_pr=True)
+        queue = AsyncMock()
+        code_job = Job(job_type=JobType.CODE, instructions="code")
+        queue.get = AsyncMock(return_value=code_job)
+        events = PoolEventBus()
+
+        mock_github = AsyncMock()
+        mock_github.push_branch = AsyncMock()
+        mock_github.create_pr = AsyncMock(return_value=(77, "https://github.com/o/r/pull/77"))
+        mock_github.list_pr_comments = AsyncMock(return_value=[
+            {"author": "reviewer", "body": "Please fix indent", "createdAt": "2026-03-06T12:00:00Z"},
+        ])
+
+        mock_ws_mgr = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.worktree_path = Path("/fake/worktree")
+        mock_ws.branch_name = "grim/ws-comments"
+        mock_ws.repo_path = Path("/fake/repo")
+        mock_ws_mgr.get = MagicMock(return_value=mock_ws)
+        mock_ws_mgr.get_branch_diff = AsyncMock(return_value="+3 -1")
+
+        events_received = []
+        events.subscribe(lambda e: events_received.append(e))
+
+        engine = ManagementEngine(
+            config, queue, events,
+            vault_path=vault_path,
+            workspace_manager=mock_ws_mgr,
+        )
+        engine._github = mock_github
+
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        # Cycle + complete → PR created
+        await engine._cycle()
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-comments"},
+        ))
+
+        # Poll for comments
+        await engine._poll_pr_comments()
+        await asyncio.sleep(0.05)
+
+        escalations = [e for e in events_received if e.type == PoolEventType.DAEMON_ESCALATION]
+        assert len(escalations) >= 1
+        assert escalations[0].data["comment_author"] == "reviewer"
+        assert escalations[0].data["comment_body"] == "Please fix indent"
+
+    @pytest.mark.asyncio
+    async def test_notifier_review_embed_has_pr_link(self, tmp_path):
+        """JOB_REVIEW Discord embed includes PR link and story_id."""
+        from core.pool.notifiers import DiscordWebhookNotifier
+
+        notifier = DiscordWebhookNotifier(webhook_url="https://fake.discord.com/webhook")
+        event = PoolEvent(
+            type=PoolEventType.JOB_REVIEW,
+            job_id="job-embed-test",
+            data={
+                "workspace_id": "ws-001",
+                "story_id": "story-alpha-010",
+                "pr_number": 42,
+                "pr_url": "https://github.com/o/r/pull/42",
+                "diff_stat": "+10 -2",
+            },
+        )
+        embed = notifier._build_embed(event)
+        assert "story-alpha-010" in embed["description"]
+        assert "#42" in embed["description"]
+        assert "https://github.com/o/r/pull/42" in embed["description"]
+        assert embed["color"] == 0x3498DB  # Blue
+
+    @pytest.mark.asyncio
+    async def test_notifier_escalation_embed_has_comment(self, tmp_path):
+        """DAEMON_ESCALATION embed for PR comments includes author + body."""
+        from core.pool.notifiers import DiscordWebhookNotifier
+
+        notifier = DiscordWebhookNotifier(webhook_url="https://fake.discord.com/webhook")
+        event = PoolEvent(
+            type=PoolEventType.DAEMON_ESCALATION,
+            job_id="job-comment-test",
+            data={
+                "story_id": "story-alpha-010",
+                "pr_number": 42,
+                "comment_author": "peter",
+                "comment_body": "LGTM",
+                "reason": "New PR comment",
+            },
+        )
+        embed = notifier._build_embed(event)
+        assert "story-alpha-010" in embed["description"]
+        assert "New PR comment" in embed["description"]
+        assert embed["color"] == 0xE67E22  # Orange

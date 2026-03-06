@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS pipeline (
     error TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
     daemon_retries INTEGER NOT NULL DEFAULT 0,
+    pr_number INTEGER,
+    pr_url TEXT,
+    pr_comment_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -70,6 +73,16 @@ class PipelineStore:
             await db.execute(_CREATE_TABLE)
             await db.execute(_CREATE_INDEX)
             await db.execute(_CREATE_STORY_INDEX)
+            # Phase 4 migration: add PR columns to existing DBs
+            for col, defn in [
+                ("pr_number", "INTEGER"),
+                ("pr_url", "TEXT"),
+                ("pr_comment_count", "INTEGER NOT NULL DEFAULT 0"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE pipeline ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass  # Column already exists
             await db.commit()
         logger.info("PipelineStore initialized: %s", self._db_path)
 
@@ -92,8 +105,9 @@ class PipelineStore:
                 """INSERT INTO pipeline
                    (id, story_id, project_id, status, priority, assignee,
                     job_id, workspace_id, error, attempts, daemon_retries,
+                    pr_number, pr_url, pr_comment_count,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     item.id,
                     item.story_id,
@@ -106,6 +120,9 @@ class PipelineStore:
                     item.error,
                     item.attempts,
                     item.daemon_retries,
+                    item.pr_number,
+                    item.pr_url,
+                    item.pr_comment_count,
                     item.created_at.isoformat(),
                     item.updated_at.isoformat(),
                 ),
@@ -147,11 +164,13 @@ class PipelineStore:
             sets = ["status = ?", "updated_at = ?"]
             params: list[Any] = [new_status.value, now]
 
+            _ALLOWED_FIELDS = {
+                "job_id", "workspace_id", "error",
+                "attempts", "daemon_retries",
+                "pr_number", "pr_url", "pr_comment_count",
+            }
             for key, value in fields.items():
-                if key in ("job_id", "workspace_id", "error"):
-                    sets.append(f"{key} = ?")
-                    params.append(value)
-                elif key in ("attempts", "daemon_retries"):
+                if key in _ALLOWED_FIELDS:
                     sets.append(f"{key} = ?")
                     params.append(value)
 
@@ -256,6 +275,47 @@ class PipelineStore:
             logger.info("Pruned %d merged pipeline items (older than %d days)", count, days)
         return count
 
+    async def update_fields(self, item_id: str, **fields: Any) -> PipelineItem:
+        """Update fields on an item WITHOUT changing status.
+
+        Raises ValueError if item_id not found.
+        Supported fields: job_id, workspace_id, error, attempts, daemon_retries,
+                          pr_number, pr_url, pr_comment_count.
+        """
+        _ALLOWED = {
+            "job_id", "workspace_id", "error",
+            "attempts", "daemon_retries",
+            "pr_number", "pr_url", "pr_comment_count",
+        }
+        now = datetime.now(timezone.utc).isoformat()
+        sets = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        for key, value in fields.items():
+            if key in _ALLOWED:
+                sets.append(f"{key} = ?")
+                params.append(value)
+
+        if len(sets) == 1:
+            # Only updated_at — nothing to change
+            item = await self.get(item_id)
+            if item is None:
+                raise ValueError(f"Pipeline item not found: {item_id}")
+            return item
+
+        params.append(item_id)
+        sql = f"UPDATE pipeline SET {', '.join(sets)} WHERE id = ?"
+
+        async with aiosqlite.connect(str(self._db_path)) as db:
+            cursor = await db.execute(sql, params)
+            if cursor.rowcount == 0:
+                raise ValueError(f"Pipeline item not found: {item_id}")
+            await db.commit()
+
+        item = await self.get(item_id)
+        assert item is not None
+        return item
+
     async def remove(self, item_id: str) -> bool:
         """Remove a pipeline item entirely. Returns True if deleted."""
         async with aiosqlite.connect(str(self._db_path)) as db:
@@ -292,6 +352,9 @@ def _row_to_item(row: aiosqlite.Row) -> PipelineItem:
         error=row["error"],
         attempts=row["attempts"],
         daemon_retries=row["daemon_retries"],
+        pr_number=row["pr_number"],
+        pr_url=row["pr_url"],
+        pr_comment_count=row["pr_comment_count"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
