@@ -645,6 +645,136 @@ def test_memory_system(port: int) -> int:
     return failed
 
 
+def test_pool_smoke(port: int) -> int:
+    """Tier 7: Pool smoke test — submit a lightweight job and verify completion.
+
+    Submits a minimal RESEARCH job (read-only, no file writes) with a trivial
+    instruction that should resolve in 1-2 turns. Verifies:
+    - Pool status endpoint works
+    - Job submission works
+    - Job completes within timeout
+    - Result has content
+    """
+    print("\n[7] Pool Smoke Test")
+    failed = 0
+
+    POOL_TIMEOUT = 120  # seconds to wait for job completion
+    POLL_INTERVAL = 3   # seconds between polls
+
+    # 7a. Check pool status
+    status, body, _ = http_get(port, "/api/pool/status", timeout=10)
+    if status == 503:
+        skip("pool smoke test", "Pool not enabled (503)")
+        return 0
+
+    try:
+        record("pool status returns 200", status == 200, f"status={status}")
+    except AssertionError:
+        failed += 1
+        return failed
+
+    try:
+        data = json.loads(body)
+        record("pool is running", data.get("running", False),
+               f"slots={len(data.get('slots', []))}")
+    except (json.JSONDecodeError, AssertionError) as e:
+        if isinstance(e, AssertionError):
+            failed += 1
+        else:
+            record("pool status JSON", False, f"body={body[:200]}")
+            failed += 1
+        return failed
+
+    # 7b. Check metrics endpoint works
+    status, body, _ = http_get(port, "/api/pool/metrics", timeout=10)
+    try:
+        record("pool metrics returns 200", status == 200, f"status={status}")
+    except AssertionError:
+        failed += 1
+
+    # 7c. Submit a minimal research job (cheapest — no file tools, just 1-2 turns)
+    status, data = http_post_json(port, "/api/pool/jobs", {
+        "job_type": "research",
+        "instructions": "What is 2 + 2? Reply with ONLY the number, nothing else.",
+        "priority": "low",
+    }, timeout=30)
+
+    try:
+        record("job submission returns 200", status == 200,
+               f"status={status}, data={str(data)[:200]}")
+    except AssertionError:
+        failed += 1
+        return failed
+
+    job_id = data.get("id", "")
+    try:
+        record("job has ID", len(job_id) > 0, f"id={job_id}")
+    except AssertionError:
+        failed += 1
+        return failed
+
+    print(f"    Submitted job: {job_id}")
+
+    # 7d. Poll until completion
+    t0 = time.monotonic()
+    final_status = None
+    final_data = None
+
+    while time.monotonic() - t0 < POOL_TIMEOUT:
+        time.sleep(POLL_INTERVAL)
+        s, body, _ = http_get(port, f"/api/pool/jobs/{job_id}", timeout=10)
+        if s == 200:
+            try:
+                jdata = json.loads(body)
+                js = jdata.get("status", "")
+                elapsed = round(time.monotonic() - t0, 1)
+                print(f"    [{elapsed}s] Job status: {js}")
+                if js in ("complete", "failed", "cancelled"):
+                    final_status = js
+                    final_data = jdata
+                    break
+            except json.JSONDecodeError:
+                pass
+
+    elapsed = round(time.monotonic() - t0, 1)
+
+    if final_status is None:
+        try:
+            record(f"job completed within {POOL_TIMEOUT}s", False,
+                   f"timed out after {elapsed}s")
+        except AssertionError:
+            failed += 1
+        return failed
+
+    try:
+        record("job completed successfully", final_status == "complete",
+               f"status={final_status}, elapsed={elapsed}s")
+    except AssertionError:
+        failed += 1
+        if final_data:
+            print(f"    Error: {final_data.get('error', 'none')}")
+
+    if final_data and final_status == "complete":
+        result = final_data.get("result", "")
+        try:
+            record("job has result content", len(result) > 0,
+                   f"length={len(result)}")
+        except AssertionError:
+            failed += 1
+
+        transcript = final_data.get("transcript", [])
+        try:
+            record("job has transcript entries", len(transcript) > 0,
+                   f"count={len(transcript)}")
+        except AssertionError:
+            failed += 1
+
+        print(f"    Result: {result[:200]}")
+        print(f"    Transcript entries: {len(transcript)}")
+
+    return failed
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def run_all(port: int, no_llm: bool = False) -> int:
@@ -672,6 +802,13 @@ def run_all(port: int, no_llm: bool = False) -> int:
 
     # Tier 6: Memory system (read-only, no API key needed)
     total_failed += test_memory_system(port)
+
+    # Tier 7: Pool smoke test (needs LLM — submits a real job)
+    if no_llm:
+        print("\n[7] Pool Smoke Test — SKIPPED (--no-llm)")
+        skip("Pool smoke test", "no-llm flag")
+    else:
+        total_failed += test_pool_smoke(port)
 
     return total_failed
 

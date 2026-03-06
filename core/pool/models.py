@@ -17,6 +17,7 @@ class JobType(str, Enum):
     RESEARCH = "research"
     AUDIT = "audit"
     PLAN = "plan"
+    INDEX = "index"
 
 
 class JobStatus(str, Enum):

@@ -12,9 +12,15 @@ from core.pool.pool import ExecutionPool
 from core.pool.queue import JobQueue
 from core.pool.slot import AgentSlot
 from core.pool.workspace import Workspace, WorkspaceManager
+from core.pool.codebase import CodebaseManager, RepoInfo
+from core.pool.inchat import InChatExecutionPool
+from core.pool.locks import ResourceLock, ResourceScope
 
 __all__ = [
     "ExecutionPool",
+    "InChatExecutionPool",
+    "ResourceLock",
+    "ResourceScope",
     "JobQueue",
     "AgentSlot",
     "Job",
@@ -27,4 +33,6 @@ __all__ = [
     "PoolEventType",
     "Workspace",
     "WorkspaceManager",
+    "CodebaseManager",
+    "RepoInfo",
 ]

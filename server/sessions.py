@@ -2,6 +2,7 @@
 
 Handles create/resume/destroy lifecycle for v2 WebSocket chat sessions.
 Each session gets its own GrimClient with persistent conversation context.
+Optionally backed by ConversationStore for durable message history.
 """
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from core.client import GrimClient
 from core.config import GrimConfig
@@ -51,6 +52,7 @@ class SessionManager:
     - Reuses existing sessions on reconnect (same session_id)
     - Reaps idle sessions after max_idle_seconds
     - Limits total concurrent sessions via max_sessions
+    - Optionally persists conversation history via ConversationStore
     """
 
     def __init__(
@@ -59,10 +61,12 @@ class SessionManager:
         *,
         max_sessions: int = 10,
         max_idle_seconds: float = 3600,  # 1 hour
+        conversation_store: Optional[Any] = None,
     ):
         self.config = config
         self.max_sessions = max_sessions
         self.max_idle_seconds = max_idle_seconds
+        self.store = conversation_store  # ConversationStore or None
         self._sessions: dict[str, SessionInfo] = {}
         self._lock = asyncio.Lock()
         self._reaper_task: asyncio.Task | None = None
@@ -121,6 +125,14 @@ class SessionManager:
                 caller_id=caller_id,
             )
             self._sessions[session_id] = info
+
+            # Persist session record
+            if self.store:
+                try:
+                    await self.store.save_session(session_id, caller_id=caller_id)
+                except Exception as e:
+                    logger.warning("Failed to persist session %s: %s", session_id, e)
+
             logger.info("Session created: %s (total=%d)", session_id, len(self._sessions))
             return client
 
@@ -130,6 +142,12 @@ class SessionManager:
             info = self._sessions.pop(session_id, None)
             if info:
                 await self._destroy_session(info)
+                # Mark closed in store (keep history)
+                if self.store:
+                    try:
+                        await self.store.close_session(session_id)
+                    except Exception as e:
+                        logger.warning("Failed to close session in store: %s", e)
                 return True
             return False
 
@@ -146,6 +164,41 @@ class SessionManager:
         info = self._sessions.get(session_id)
         if info:
             info.touch()
+
+    async def save_turn(
+        self,
+        session_id: str,
+        user_message: str,
+        assistant_message: str | None = None,
+        cost_usd: float | None = None,
+        tools_used: list[str] | None = None,
+    ) -> None:
+        """Persist a conversation turn to the store."""
+        if not self.store:
+            return
+        try:
+            # Get turn number from session info
+            info = self._sessions.get(session_id)
+            turn = info.client.session_info.get("turn_count", 1) if info else 1
+            await self.store.save_message(
+                session_id=session_id,
+                turn_number=turn,
+                user_message=user_message,
+                assistant_message=assistant_message,
+                cost_usd=cost_usd,
+                tools_used=tools_used,
+            )
+            await self.store.touch_session(session_id)
+        except Exception as e:
+            logger.warning("Failed to save turn for %s: %s", session_id, e)
+
+    async def get_history(
+        self, session_id: str, *, limit: int = 100, offset: int = 0,
+    ) -> list[dict]:
+        """Get conversation history from the store."""
+        if not self.store:
+            return []
+        return await self.store.get_messages(session_id, limit=limit, offset=offset)
 
     # ── Private ──────────────────────────────────────────────────
 

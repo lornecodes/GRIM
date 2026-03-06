@@ -113,79 +113,61 @@ cases:
       keyword_match: research
 
   # ══════════════════════════════════════════════════════════
-  # IronClaw delegation keywords
+  # Code/operate delegation keywords (formerly IronClaw)
   # ══════════════════════════════════════════════════════════
-  - id: kw-ironclaw-direct
-    tags: [keyword, ironclaw]
-    message: "use ironclaw to run this"
-    expected:
-      keyword_match: ironclaw
-
-  - id: kw-ironclaw-write-code
-    tags: [keyword, ironclaw]
+  - id: kw-operate-write-code
+    tags: [keyword, operate]
     message: "write code for the parser"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-implement
-    tags: [keyword, ironclaw]
+  - id: kw-operate-implement
+    tags: [keyword, operate]
     message: "implement the new endpoint"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-shell
-    tags: [keyword, ironclaw]
+  - id: kw-operate-shell
+    tags: [keyword, operate]
     message: "open a shell session"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-git-push
-    tags: [keyword, ironclaw]
+  - id: kw-operate-git-push
+    tags: [keyword, operate]
     message: "git push to origin"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-deploy
-    tags: [keyword, ironclaw]
+  - id: kw-operate-deploy
+    tags: [keyword, operate]
     message: "deploy the latest version"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-run-command
-    tags: [keyword, ironclaw]
-    message: "run command to check disk space"
-    expected:
-      keyword_match: ironclaw
-
-  - id: kw-ironclaw-refactor
-    tags: [keyword, ironclaw]
+  - id: kw-operate-refactor
+    tags: [keyword, operate]
     message: "refactor the authentication module"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-debug
-    tags: [keyword, ironclaw]
+  - id: kw-operate-debug
+    tags: [keyword, operate]
     message: "debug this function"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-curl
-    tags: [keyword, ironclaw]
+  - id: kw-operate-curl
+    tags: [keyword, operate]
     message: "curl the health endpoint"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-security-scan
-    tags: [keyword, ironclaw]
+  - id: kw-operate-security-scan
+    tags: [keyword, operate]
     message: "security scan the codebase"
     expected:
-      keyword_match: ironclaw
-
-  - id: kw-ironclaw-sandbox
-    tags: [keyword, ironclaw]
-    message: "run sandboxed execution"
-    expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
   # ══════════════════════════════════════════════════════════
   # Operate delegation keywords
@@ -263,43 +245,37 @@ cases:
       keyword_match: codebase
 
   # ══════════════════════════════════════════════════════════
-  # IronClaw — regression tests (v0.0.5.5 routing fix)
+  # Code/operate — regression tests (v0.0.5.5 routing fix)
   # ══════════════════════════════════════════════════════════
-  - id: kw-ironclaw-build-me-webserver
-    tags: [keyword, ironclaw, regression]
-    message: "have ironclaw build me a simple webserver in python"
+  - id: kw-operate-build-me-webserver
+    tags: [keyword, operate, regression]
+    message: "build me a simple webserver in python"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-build-me-script
-    tags: [keyword, ironclaw, regression]
+  - id: kw-operate-build-me-script
+    tags: [keyword, operate, regression]
     message: "build me a python script for data processing"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-code-me
-    tags: [keyword, ironclaw, regression]
+  - id: kw-operate-code-me
+    tags: [keyword, operate, regression]
     message: "code me a simple webserver"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-have-do-that
-    tags: [keyword, ironclaw, regression]
-    message: "have ironclaw do that"
-    expected:
-      keyword_match: ironclaw
-
-  - id: kw-ironclaw-run-pytest
-    tags: [keyword, ironclaw, regression]
+  - id: kw-operate-run-pytest
+    tags: [keyword, operate, regression]
     message: "run pytest on the tests"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
-  - id: kw-ironclaw-implement-rest
-    tags: [keyword, ironclaw, regression]
+  - id: kw-operate-implement-rest
+    tags: [keyword, operate, regression]
     message: "implement a REST API endpoint"
     expected:
-      keyword_match: ironclaw
+      keyword_match: operate
 
   # ══════════════════════════════════════════════════════════
   # No match (should return null)
@@ -326,34 +302,34 @@ cases:
   # Action-intent patterns
   # ══════════════════════════════════════════════════════════
   - id: ai-run-command
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "run a command to check the server"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-execute-shell
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "execute this in the terminal"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-check-network
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "check the network connection"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-test-server
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "test the server health"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-show-file
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "show me the file in the directory"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-no-match-question
     tags: [action_intent, negative]
@@ -369,25 +345,25 @@ cases:
 
   # ── Tool-pipeline action intents (v0.0.5.7) ──
   - id: ai-run-file-permissions
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "run a command to check the file permissions"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-execute-bash-deploy
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "execute the bash command for the deploy"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-test-dns-lookup
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "test the dns lookup for our domain"
     expected:
-      action_intent: ironclaw
+      action_intent: operate
 
   - id: ai-check-process-running
-    tags: [action_intent, ironclaw]
+    tags: [action_intent, operate]
     message: "check whether the process is alive"
     expected:
-      action_intent: ironclaw
+      action_intent: operate

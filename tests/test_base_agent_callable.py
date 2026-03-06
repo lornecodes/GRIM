@@ -35,12 +35,12 @@ class TestExtractTask:
         state = {"messages": [
             HumanMessage(content="code me a simple webserver"),
             AIMessage(content="Sure, here's a simple Python webserver..."),
-            HumanMessage(content="can you have ironclaw do that?"),
+            HumanMessage(content="can you have code do that?"),
         ]}
         result = BaseAgent._extract_task(state)
         assert "CONVERSATION CONTEXT" in result
         assert "CURRENT REQUEST" in result
-        assert "can you have ironclaw do that?" in result
+        assert "can you have code do that?" in result
         assert "simple webserver" in result
 
     def test_context_includes_prior_messages(self):

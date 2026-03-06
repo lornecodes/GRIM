@@ -95,7 +95,7 @@ def compile_user_cache(user_fdo: dict, cache_path: Path) -> None:
 def compile_caller_summary(caller_fdo: dict) -> str:
     """Compile a non-owner caller FDO into a prompt section (no disk cache).
 
-    Used for services (IronClaw) and friends — one-time vault lookup per session.
+    Used for services and friends — one-time vault lookup per session.
     """
     body = caller_fdo.get("body", "")
 

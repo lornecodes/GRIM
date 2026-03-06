@@ -13,8 +13,10 @@ Workspace lifecycle:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
+import tarfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -141,17 +143,92 @@ class WorkspaceManager:
         logger.info("Workspace destroyed: %s", workspace_id)
         return True
 
-    async def get_branch_diff(self, workspace_id: str) -> str | None:
-        """Get the diff of changes in a workspace branch vs its base."""
+    async def get_branch_diff(
+        self, workspace_id: str, base_branch: str = "main",
+    ) -> str | None:
+        """Get the diff stat of changes in a workspace branch vs its base."""
         ws = self._workspaces.get(workspace_id)
         if ws is None:
             return None
 
         try:
-            result = await _run_git(ws.worktree_path, "diff", "HEAD~1", "--stat")
+            result = await _run_git(
+                ws.worktree_path,
+                "diff", f"origin/{base_branch}...HEAD", "--stat",
+            )
             return result
         except RuntimeError:
             return None
+
+    async def get_full_diff(
+        self, workspace_id: str, base_branch: str = "main",
+    ) -> str | None:
+        """Get the full unified diff of changes vs base branch."""
+        ws = self._workspaces.get(workspace_id)
+        if ws is None:
+            return None
+
+        try:
+            return await _run_git(
+                ws.worktree_path,
+                "diff", f"origin/{base_branch}...HEAD",
+            )
+        except RuntimeError:
+            return None
+
+    async def list_changed_files(
+        self, workspace_id: str, base_branch: str = "main",
+    ) -> list[str] | None:
+        """List files changed in workspace branch vs base. Returns filenames."""
+        ws = self._workspaces.get(workspace_id)
+        if ws is None:
+            return None
+
+        try:
+            result = await _run_git(
+                ws.worktree_path,
+                "diff", "--name-only", f"origin/{base_branch}...HEAD",
+            )
+            return [f for f in result.splitlines() if f.strip()] if result else []
+        except RuntimeError:
+            return None
+
+    async def merge_to_base(
+        self, workspace_id: str, base_branch: str = "main",
+    ) -> bool:
+        """Squash-merge workspace branch into base and destroy workspace.
+
+        Returns True on success.
+        """
+        ws = self._workspaces.get(workspace_id)
+        if ws is None:
+            return False
+
+        try:
+            # Checkout base branch in main repo
+            await _run_git(ws.repo_path, "checkout", base_branch)
+            # Squash merge
+            await _run_git(
+                ws.repo_path,
+                "merge", "--squash", ws.branch_name,
+            )
+            # Commit with job reference
+            await _run_git(
+                ws.repo_path,
+                "commit", "-m", f"Squash merge from {ws.branch_name} (job: {ws.job_id})",
+            )
+            ws.status = "merged"
+            # Cleanup worktree
+            await self.destroy(workspace_id)
+            return True
+        except RuntimeError as e:
+            logger.error("Merge failed for %s: %s", workspace_id, e)
+            # Abort merge if in progress
+            try:
+                await _run_git(ws.repo_path, "merge", "--abort")
+            except RuntimeError:
+                pass
+            return False
 
     async def destroy_all(self) -> int:
         """Destroy all active workspaces. Returns count destroyed."""
@@ -173,6 +250,117 @@ class WorkspaceManager:
     @property
     def active_count(self) -> int:
         return len(self._workspaces)
+
+    # ── Snapshot / Restore ──────────────────────────────────────
+
+    async def snapshot(
+        self, workspace_id: str, snapshot_dir: Path,
+    ) -> Path | None:
+        """Save workspace state to a tar.gz archive with metadata.
+
+        Returns the snapshot path, or None if workspace not found.
+        """
+        ws = self._workspaces.get(workspace_id)
+        if ws is None:
+            return None
+
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        archive_name = f"{ws.id}_{ts}.tar.gz"
+        archive_path = snapshot_dir / archive_name
+
+        # Write metadata alongside the archive
+        metadata = {
+            **ws.to_dict(),
+            "snapshot_timestamp": ts,
+        }
+        meta_path = snapshot_dir / f"{ws.id}_{ts}.meta.json"
+
+        def _create_archive():
+            with tarfile.open(str(archive_path), "w:gz") as tar:
+                tar.add(str(ws.worktree_path), arcname=ws.id)
+            with open(meta_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+        await asyncio.to_thread(_create_archive)
+        logger.info("Snapshot created: %s", archive_path)
+        return archive_path
+
+    async def restore_snapshot(
+        self,
+        snapshot_path: Path,
+        job_id: str,
+        repo_path: Path,
+    ) -> Workspace | None:
+        """Restore a workspace from a tar.gz snapshot.
+
+        Creates a new workspace entry and extracts the archive.
+        Returns the restored Workspace, or None on failure.
+        """
+        if not snapshot_path.exists():
+            logger.error("Snapshot not found: %s", snapshot_path)
+            return None
+
+        # Read metadata
+        meta_path = snapshot_path.with_suffix("").with_suffix(".meta.json")
+        metadata: dict = {}
+        if meta_path.exists():
+            def _read_meta():
+                with open(meta_path) as f:
+                    return json.load(f)
+            metadata = await asyncio.to_thread(_read_meta)
+
+        # Create workspace entry
+        suffix = job_id.replace("job-", "")[:8]
+        ws_id = f"workspace-{suffix}"
+        branch_name = metadata.get("branch_name", f"grim/{ws_id}")
+        worktree_path = self._base_dir / ws_id
+
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+
+        def _extract():
+            with tarfile.open(str(snapshot_path), "r:gz") as tar:
+                tar.extractall(str(self._base_dir))
+            # Rename extracted dir to new ws_id if different
+            old_id = metadata.get("id", ws_id)
+            old_path = self._base_dir / old_id
+            if old_path.exists() and old_path != worktree_path:
+                old_path.rename(worktree_path)
+
+        try:
+            await asyncio.to_thread(_extract)
+        except Exception as e:
+            logger.error("Failed to extract snapshot: %s", e)
+            return None
+
+        ws = Workspace(
+            id=ws_id,
+            job_id=job_id,
+            repo_path=repo_path,
+            worktree_path=worktree_path,
+            branch_name=branch_name,
+            status="active",
+        )
+        self._workspaces[ws_id] = ws
+        logger.info("Workspace restored from snapshot: %s → %s", snapshot_path, ws_id)
+        return ws
+
+    def list_snapshots(self, snapshot_dir: Path) -> list[dict]:
+        """List available snapshots with metadata."""
+        if not snapshot_dir.exists():
+            return []
+        snapshots = []
+        for meta_file in sorted(snapshot_dir.glob("*.meta.json")):
+            try:
+                with open(meta_file) as f:
+                    metadata = json.load(f)
+                archive = meta_file.with_suffix("").with_suffix(".tar.gz")
+                metadata["archive_path"] = str(archive)
+                metadata["archive_exists"] = archive.exists()
+                snapshots.append(metadata)
+            except Exception:
+                continue
+        return snapshots
 
 
 # ── Git helpers ──────────────────────────────────────────────────

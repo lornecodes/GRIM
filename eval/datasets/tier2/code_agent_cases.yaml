@@ -1,11 +1,11 @@
 version: "1.0"
 tier: 2
-category: ironclaw_agent
-description: "IronClaw agent — sandboxed code execution, shell, file operations"
+category: code_agent
+description: "Code agent — code execution, shell, file operations"
 
 cases:
   - id: ic-write-function
-    tags: [ironclaw, code, single-turn]
+    tags: [code, code, single-turn]
     turn_type: single
     message: "Write a Python function that calculates the Fibonacci sequence"
     mock_tools:
@@ -21,7 +21,7 @@ cases:
       completeness: "Was the function correct and complete?"
 
   - id: ic-run-tests
-    tags: [ironclaw, shell, single-turn]
+    tags: [code, shell, single-turn]
     turn_type: single
     message: "Run the pytest suite for the GRIM project"
     mock_tools:
@@ -34,7 +34,7 @@ cases:
       verification: "Did it report the test results?"
 
   - id: ic-git-push
-    tags: [ironclaw, git, single-turn]
+    tags: [code, git, single-turn]
     turn_type: single
     message: "Commit the changes with message 'fix: eval framework' and push"
     mock_tools:
@@ -47,7 +47,7 @@ cases:
       verification: "Did it confirm the push succeeded?"
 
   - id: ic-security-scan
-    tags: [ironclaw, security, single-turn]
+    tags: [code, security, single-turn]
     turn_type: single
     message: "Scan the codebase for security vulnerabilities"
     mock_tools:
@@ -60,7 +60,7 @@ cases:
       completeness: "Did it report findings and risk score?"
 
   - id: ic-read-and-modify
-    tags: [ironclaw, code, multi-turn]
+    tags: [code, code, multi-turn]
     turn_type: multi
     turns:
       - role: user
@@ -81,7 +81,7 @@ cases:
       completeness: "Did the modification include eval_enabled?"
 
   - id: ic-deploy-workflow
-    tags: [ironclaw, deploy, single-turn]
+    tags: [code, deploy, single-turn]
     turn_type: single
     message: "Build and deploy the Docker image"
     mock_tools:
@@ -97,7 +97,7 @@ cases:
   # Code generation and verification (v0.0.5.5)
   # ══════════════════════════════════════════════════════════
   - id: ic-gen-webserver
-    tags: [ironclaw, code, codegen, single-turn]
+    tags: [code, code, codegen, single-turn]
     turn_type: single
     message: "Write a simple Python HTTP webserver that serves on port 8000 and returns 'Hello World' on GET /"
     mock_tools:
@@ -114,7 +114,7 @@ cases:
       verification: "Did it attempt to verify the server works (run it, curl it, or explain how to test)?"
 
   - id: ic-gen-cli-tool
-    tags: [ironclaw, code, codegen, single-turn]
+    tags: [code, code, codegen, single-turn]
     turn_type: single
     message: "Write a Python CLI tool with argparse that takes a --name flag and prints 'Hello, {name}!'"
     mock_tools:
@@ -131,7 +131,7 @@ cases:
       verification: "Did it run or explain how to test the CLI tool?"
 
   - id: ic-gen-test-suite
-    tags: [ironclaw, code, codegen, single-turn]
+    tags: [code, code, codegen, single-turn]
     turn_type: single
     message: "Write pytest tests for a calculator module with add, subtract, multiply, divide functions"
     mock_tools:
@@ -148,7 +148,7 @@ cases:
       verification: "Did it attempt to run the tests?"
 
   - id: ic-gen-data-processor
-    tags: [ironclaw, code, codegen, single-turn]
+    tags: [code, code, codegen, single-turn]
     turn_type: single
     message: "Write a Python script that reads a CSV file, filters rows where 'score' > 80, and writes the result to a new CSV"
     mock_tools:
@@ -164,7 +164,7 @@ cases:
       completeness: "Does the code handle file I/O, filtering logic, and output correctly?"
 
   - id: ic-gen-and-verify
-    tags: [ironclaw, code, codegen, multi-turn]
+    tags: [code, code, codegen, multi-turn]
     turn_type: multi
     turns:
       - role: user
@@ -190,7 +190,7 @@ cases:
   # Tool execution pipeline (v0.0.5.7)
   # ══════════════════════════════════════════════════════════
   - id: ic-tool-write-and-verify
-    tags: [ironclaw, tools, staging, single-turn]
+    tags: [code, tools, staging, single-turn]
     turn_type: single
     message: "Write a hello.py file to the staging directory and verify it exists"
     mock_tools:
@@ -205,7 +205,7 @@ cases:
       verification: "Did it confirm the file was written successfully, not just return a placeholder?"
 
   - id: ic-tool-shell-build
-    tags: [ironclaw, tools, staging, single-turn]
+    tags: [code, tools, staging, single-turn]
     turn_type: single
     message: "Install flask and run the webserver in the background"
     mock_tools:
@@ -219,7 +219,7 @@ cases:
       completeness: "Did it handle both installation and server startup?"
 
   - id: ic-tool-error-handling
-    tags: [ironclaw, tools, error, single-turn]
+    tags: [code, tools, error, single-turn]
     turn_type: single
     message: "Read the file /etc/shadow"
     mock_tools:
@@ -232,7 +232,7 @@ cases:
       error_handling: "Did it handle the denial gracefully and explain why?"
 
   - id: ic-gen-api-endpoint
-    tags: [ironclaw, code, codegen, single-turn]
+    tags: [code, code, codegen, single-turn]
     turn_type: single
     message: "Write a FastAPI app with a POST /items endpoint that accepts a JSON body with 'name' and 'price' fields and returns the item with an auto-generated 'id'"
     mock_tools:
@@ -252,7 +252,7 @@ cases:
   # Read-then-summarize and multi-file staging (v0.0.5.7)
   # ══════════════════════════════════════════════════════════
   - id: ic-read-summarize
-    tags: [ironclaw, code, analysis, single-turn]
+    tags: [code, code, analysis, single-turn]
     turn_type: single
     message: "Read the main.py file and give me a summary of its structure — classes, functions, imports"
     mock_tools:
@@ -266,7 +266,7 @@ cases:
       completeness: "Did it provide a structured summary (not just dump the code)?"
 
   - id: ic-multi-file-project
-    tags: [ironclaw, code, codegen, multi-turn]
+    tags: [code, code, codegen, multi-turn]
     turn_type: multi
     turns:
       - role: user
@@ -289,7 +289,7 @@ cases:
       verification: "Did it run and confirm the output?"
 
   - id: ic-denied-write-recovery
-    tags: [ironclaw, tools, error, single-turn]
+    tags: [code, tools, error, single-turn]
     turn_type: single
     message: "Write a config file to /etc/myapp/config.yaml"
     mock_tools:

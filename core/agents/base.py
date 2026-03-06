@@ -60,7 +60,7 @@ class BaseAgent:
     agent_role: str = ""
     agent_description: str = ""
     agent_color: str = "#6b7280"
-    agent_tier: str = "grim"       # "grim" or "ironclaw"
+    agent_tier: str = "grim"
     agent_toggleable: bool = False  # can be enabled/disabled from UI
     max_tool_steps: int = 30        # max tool-calling loop iterations
 
@@ -377,7 +377,7 @@ class BaseAgent:
         """Extract the user's request from state messages, with conversation context.
 
         Includes recent conversation history so agents can resolve references
-        like "do that", "the thing above", "can you have ironclaw do that?" etc.
+        like "do that", "the thing above", "can you do that?" etc.
         Without context, agents only see the latest message and lose track of
         what "that" refers to.
         """

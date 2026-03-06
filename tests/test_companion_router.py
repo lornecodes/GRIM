@@ -97,7 +97,7 @@ class TestCompanionRouterNode:
 
     @pytest.mark.asyncio
     async def test_code_routing(self):
-        """Code intent → research graph, delegate mode, ironclaw."""
+        """Code intent → research graph, delegate mode, code."""
         decision = RoutingDecision(
             target_subgraph="code", confidence=0.9, reasoning="code request",
         )
@@ -107,7 +107,7 @@ class TestCompanionRouterNode:
             result = await node(_state("implement auth"))
         assert result["graph_target"] == "research"
         assert result["mode"] == "delegate"
-        assert result["delegation_type"] == "ironclaw"
+        assert result["delegation_type"] == "code"
 
     @pytest.mark.asyncio
     async def test_planning_routing(self):
@@ -201,14 +201,14 @@ class TestCompanionRouterNode:
         )
         state = _state(
             "now do the next part",
-            last_delegation_type="ironclaw",
+            last_delegation_type="code",
         )
         with patch("core.nodes.companion_router.classify_intent", return_value=decision), \
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
             node = make_companion_router_node(_config())
             result = await node(state)
-        # "now " is in follow-up signals, last_delegation was ironclaw
-        assert result["delegation_type"] == "ironclaw"
+        # "now " is in follow-up signals, last_delegation was code
+        assert result["delegation_type"] == "code"
         assert result["mode"] == "delegate"
         assert result["graph_target"] == "research"
 
@@ -220,7 +220,7 @@ class TestCompanionRouterNode:
         )
         state = _state(
             "now how are you",
-            last_delegation_type="ironclaw",
+            last_delegation_type="code",
         )
         with patch("core.nodes.companion_router.classify_intent", return_value=decision), \
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
@@ -239,7 +239,7 @@ class TestCompanionRouterNode:
         state = _state(
             "also do this",
             skill_delegation_hint="memory",
-            last_delegation_type="ironclaw",
+            last_delegation_type="code",
         )
         with patch("core.nodes.companion_router.classify_intent", return_value=decision), \
              patch("core.nodes.companion_router.route_model", return_value=_mock_model_decision()):
@@ -271,9 +271,9 @@ class TestCompanionRouteDecision:
         state = {"graph_target": "research", "mode": "delegate", "delegation_type": "research"}
         assert companion_route_decision(state) == "research"
 
-    def test_research_delegate_ironclaw(self):
-        """Ironclaw delegation routes to code subgraph."""
-        state = {"graph_target": "research", "mode": "delegate", "delegation_type": "ironclaw"}
+    def test_research_delegate_code(self):
+        """Code delegation routes to code subgraph."""
+        state = {"graph_target": "research", "mode": "delegate", "delegation_type": "code"}
         assert companion_route_decision(state) == "code"
 
     def test_default_research_companion(self):

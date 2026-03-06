@@ -96,6 +96,10 @@ READ_ONLY_TOOLS = frozenset({
     "mcp__kronos__kronos_board_view",
     "mcp__kronos__kronos_backlog_view",
     "mcp__kronos__kronos_calendar_view",
+    "mcp__kronos__kronos_find_implementation",
+    "mcp__kronos__kronos_git_recent",
+    "mcp__kronos__kronos_validate_sources",
+    "mcp__kronos__kronos_tool_groups",
 })
 
 # Write tools (need explicit allowlisting)

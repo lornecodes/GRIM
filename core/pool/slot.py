@@ -12,8 +12,12 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Coroutine, Optional
 
+# Callback type for streaming agent output per-message
+OnMessage = Callable[[str, dict], Coroutine[Any, Any, None]]
+
+from core.pool.audit import ToolVerdict, can_use_tool
 from core.pool.models import (
     ClarificationNeeded,
     Job,
@@ -34,6 +38,8 @@ _CODE_TOOLS = [
     "mcp__kronos__kronos_get",
     "mcp__kronos__kronos_navigate",
     "mcp__kronos__kronos_read_source",
+    "mcp__kronos__kronos_find_implementation",
+    "mcp__kronos__kronos_update",
 ]
 
 _RESEARCH_TOOLS = [
@@ -46,6 +52,8 @@ _RESEARCH_TOOLS = [
     "mcp__kronos__kronos_navigate",
     "mcp__kronos__kronos_read_source",
     "mcp__kronos__kronos_search_source",
+    "mcp__kronos__kronos_find_implementation",
+    "mcp__kronos__kronos_git_recent",
 ]
 
 _AUDIT_TOOLS = [
@@ -63,12 +71,25 @@ _PLAN_TOOLS = [
     "mcp__kronos__kronos_navigate",
 ]
 
+_INDEX_TOOLS = [
+    "Read", "Glob",
+    "mcp__kronos__kronos_search",
+    "mcp__kronos__kronos_get",
+    "mcp__kronos__kronos_list",
+    "mcp__kronos__kronos_update",
+    "mcp__kronos__kronos_navigate",
+    "mcp__kronos__kronos_find_implementation",
+    "mcp__kronos__kronos_validate_sources",
+]
+
 _SYSTEM_PROMPTS: dict[JobType, str] = {
     JobType.CODE: (
         "You are a coding agent for the Dawn Field Institute. "
         "Write clean, tested code following project standards. "
         "Use Kronos to check project conventions before coding. "
-        "Always write tests for new functions."
+        "Always write tests for new functions. "
+        "After creating or modifying files, call kronos_update on the relevant FDO "
+        "to add new files to source_paths (repo, path, type fields)."
     ),
     JobType.RESEARCH: (
         "You are a research agent for the Dawn Field Institute. "
@@ -87,15 +108,23 @@ _SYSTEM_PROMPTS: dict[JobType, str] = {
         "Use Kronos to understand project state and propose implementation plans. "
         "Break complex tasks into concrete, actionable steps."
     ),
+    JobType.INDEX: (
+        "You are an indexing agent for the Dawn Field Institute. "
+        "Scan the given repository to discover source files and map them to Kronos FDOs. "
+        "Use kronos_find_implementation to discover symbols, then kronos_update to add "
+        "source_paths entries (repo, path, type) to the matching FDOs. "
+        "Match files to FDOs by tag/title similarity."
+    ),
 }
 
 # Model selection: Opus for high-stakes work (code, planning, audit),
 # Sonnet for fast/cheap research. Interactive GrimClient uses auto-detection.
 AGENT_CONFIGS: dict[JobType, dict[str, Any]] = {
-    JobType.CODE: {"allowed_tools": _CODE_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.CODE], "model": "claude-opus-4-6"},
-    JobType.RESEARCH: {"allowed_tools": _RESEARCH_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.RESEARCH], "model": "claude-sonnet-4-6"},
-    JobType.AUDIT: {"allowed_tools": _AUDIT_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.AUDIT], "model": "claude-opus-4-6"},
-    JobType.PLAN: {"allowed_tools": _PLAN_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.PLAN], "model": "claude-opus-4-6"},
+    JobType.CODE: {"allowed_tools": _CODE_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.CODE], "model": "claude-opus-4-6", "allow_writes": True, "allow_bash": True},
+    JobType.RESEARCH: {"allowed_tools": _RESEARCH_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.RESEARCH], "model": "claude-sonnet-4-6", "allow_writes": False, "allow_bash": False},
+    JobType.AUDIT: {"allowed_tools": _AUDIT_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.AUDIT], "model": "claude-opus-4-6", "allow_writes": False, "allow_bash": False},
+    JobType.PLAN: {"allowed_tools": _PLAN_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.PLAN], "model": "claude-opus-4-6", "allow_writes": False, "allow_bash": False},
+    JobType.INDEX: {"allowed_tools": _INDEX_TOOLS, "system_prompt": _SYSTEM_PROMPTS[JobType.INDEX], "model": "claude-sonnet-4-6", "allow_writes": True, "allow_bash": False},
 }
 
 
@@ -119,8 +148,18 @@ class AgentSlot:
     max_turns: int = 20
     cwd: Optional[str] = None
 
-    async def execute(self, job: Job) -> JobResult:
+    async def execute(
+        self,
+        job: Job,
+        on_message: OnMessage | None = None,
+    ) -> JobResult:
         """Execute a job using Claude Agent SDK.
+
+        Args:
+            job: The job to execute.
+            on_message: Optional async callback ``(job_id, captured_msg) -> None``
+                called for each SDK message as it arrives. Used for live
+                streaming to WebSocket clients.
 
         Returns a JobResult with transcript, cost, and outcome.
         Raises ClarificationNeeded if the agent can't proceed.
@@ -152,11 +191,18 @@ class AgentSlot:
                     "env": self.kronos_mcp_env,
                 }
 
+            # Build permission callback from audit gate config
+            allow_writes = config.get("allow_writes", False)
+            allow_bash = config.get("allow_bash", False)
+            permission_cb = _make_permission_callback(
+                allow_writes=allow_writes, allow_bash=allow_bash,
+            )
+
             options = ClaudeAgentOptions(
                 system_prompt=system,
                 mcp_servers=mcp_servers if mcp_servers else None,
                 allowed_tools=config["allowed_tools"],
-                permission_mode="bypassPermissions",
+                can_use_tool=permission_cb,
                 max_turns=self.max_turns,
                 model=config.get("model"),
             )
@@ -170,7 +216,13 @@ class AgentSlot:
                     await client.query(prompt)
                     async for msg in client.receive_response():
                         messages.append(msg)
-                        transcript.append(_capture_message(msg))
+                        captured = _capture_message(msg)
+                        transcript.append(captured)
+                        if on_message:
+                            try:
+                                await on_message(job.id, captured)
+                            except Exception:
+                                logger.debug("on_message callback error", exc_info=True)
             finally:
                 # Restore env var
                 if saved_claudecode is not None:
@@ -212,6 +264,33 @@ class AgentSlot:
 
 
 # ── Helpers ──────────────────────────────────────────────────────
+
+def _make_permission_callback(
+    *, allow_writes: bool, allow_bash: bool,
+):
+    """Build an async can_use_tool callback for the Claude Agent SDK.
+
+    Wraps audit.can_use_tool to gate tool calls based on job type permissions.
+    Returns PermissionResultAllow/Deny from claude_agent_sdk.
+    """
+    async def _permission_handler(tool_name, tool_input, context):
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+        result = can_use_tool(
+            tool_name,
+            tool_input if isinstance(tool_input, dict) else {},
+            allow_writes=allow_writes,
+            allow_bash=allow_bash,
+        )
+        if result.verdict == ToolVerdict.ALLOW:
+            return PermissionResultAllow()
+        return PermissionResultDeny(
+            behavior="deny",
+            message=f"Audit gate denied: {result.reason}",
+        )
+
+    return _permission_handler
+
 
 def _build_system_prompt(job: Job, base_prompt: str) -> str:
     """Build full system prompt with Kronos context."""

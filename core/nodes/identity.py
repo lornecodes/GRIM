@@ -156,7 +156,6 @@ def make_identity_node(config: GrimConfig, mcp_session: Any = None):
             "caller_id": caller_id,
             "caller_context": caller_context,
             "objectives": state_objectives,
-            "ironclaw_available": False,  # Legacy field — IronClaw removed
             "ux_mode": state.get("ux_mode", UXMode.FULLSCREEN.value),
             "loop_count": 0,
             "max_loops": 10,

@@ -21,8 +21,6 @@ _AGENT_CLASSES: dict[str, str] = {
     "codebase": "core.agents.codebase_agent.CodebaseAgent",
     "operator": "core.agents.operator_agent.OperatorAgent",
     "coder": "core.agents.coder_agent.CoderAgent",
-    "ironclaw": "core.agents.ironclaw_agent.IronClawAgent",
-    "audit": "core.agents.audit_agent.AuditAgent",
 }
 
 

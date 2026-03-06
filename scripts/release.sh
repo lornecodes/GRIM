@@ -189,26 +189,21 @@ cmd_test() {
         vault=""
     fi
 
-    # Core + model routing + agent integration tests — no vault needed
-    _log "── Core + routing + agent tests (container) ──"
+    # Container tests — SDK-compatible (no LangGraph dependency)
+    # Note: core tests (test_grim_core, test_agent_integration, etc.) require
+    # langgraph which is NOT installed in the SDK-based container.
+    # Run pool tests + vault endpoint tests + smoke tests that work standalone.
+    _log "── SDK-compatible container tests ──"
     docker run --rm \
         -e KRONOS_VAULT_PATH=/app/tests/vault \
         -e KRONOS_SKILLS_PATH=/app/skills \
         "$IMAGE_NAME:latest" \
         python -m pytest \
-            tests/test_grim_core.py \
-            tests/test_model_routing.py \
-            tests/test_agent_integration.py \
-            tests/test_memory_system.py \
-            tests/test_agent_registry.py \
-            tests/test_tool_registry.py \
-            tests/test_keyword_router.py \
+            tests/test_pool_smoke.py \
+            tests/test_pool_unit.py \
             tests/test_tool_context.py \
-            tests/test_base_agent_callable.py \
-            tests/test_notes_tools.py \
-            tests/test_graph_smoke.py \
-            tests/test_matcher_smoke.py \
             tests/test_vault_endpoints.py \
+            tests/test_matcher_smoke.py \
             -v --tb=short
 
     if [[ -n "$vault" ]]; then

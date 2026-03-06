@@ -16,6 +16,35 @@ import pytest
 GRIM_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(GRIM_ROOT))
 
+# Ensure Kronos MCP engines are initialized for tests that call handlers directly.
+# In production, initialization is deferred to first tool call to avoid blocking
+# the MCP init handshake. Tests bypass call_tool() so need explicit init.
+_kronos_src = GRIM_ROOT / "mcp" / "kronos" / "src"
+if _kronos_src.is_dir():
+    sys.path.insert(0, str(_kronos_src))
+    _vault = GRIM_ROOT.parent / "kronos-vault"
+    _skills = GRIM_ROOT / "skills"
+    if _vault.is_dir():
+        os.environ.setdefault("KRONOS_VAULT_PATH", str(_vault))
+    if _skills.is_dir():
+        os.environ.setdefault("KRONOS_SKILLS_PATH", str(_skills))
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _init_kronos_engines():
+    """Auto-initialize Kronos MCP engines for tests that call handlers directly.
+
+    In production, engines are lazy-initialized on first tool call to avoid
+    blocking the MCP stdio init handshake. Tests bypass call_tool(), so
+    we initialize here once per session.
+    """
+    try:
+        from kronos_mcp.server import _ensure_initialized, _engines_initialized
+        if not _engines_initialized:
+            _ensure_initialized()
+    except (ImportError, ValueError):
+        pass  # Not all test runs need kronos
+
 from core.config import GrimConfig
 from core.state import AgentResult, FDOSummary, FieldState, GrimState, SkillContext
 

@@ -41,12 +41,18 @@ sys.path.insert(0, str(grim_root / "mcp" / "kronos" / "src"))
 
 print("Importing server module (preload thread starts)...")
 t0 = time.time()
+import kronos_mcp.server as _server
 from kronos_mcp.server import (
     handle_get, handle_list, handle_graph, handle_validate,
     handle_search, handle_update, handle_create, handle_tags,
     handle_skills, handle_skill_load,
-    search_engine, vault,
+    handle_navigate, handle_read_source, handle_search_source,
+    handle_deep_dive, handle_validate_sources,
+    handle_find_implementation, handle_git_recent,
+    _ensure_initialized,
 )
+# Engines are lazy-initialized — trigger init for direct handler testing
+_ensure_initialized()
 import_time = time.time() - t0
 print(f"Import done in {import_time:.1f}s")
 
@@ -80,8 +86,8 @@ def cleanup_fdo(fdo_id: str, domain: str = "ai-systems"):
     path = Path(vault_path) / domain / f"{fdo_id}.md"
     if path.exists():
         path.unlink()
-    if vault._index is not None:
-        vault._index.pop(fdo_id, None)
+    if _server.vault is not None and _server.vault._index is not None:
+        _server.vault._index.pop(fdo_id, None)
 
 
 # -- Test 1: handle_get timing ------------------------------------------------
@@ -199,8 +205,8 @@ def test_get_during_semantic_preload():
     ms = (time.time() - t0) * 1000
     data = json.loads(resp)
 
-    sem_status = search_engine._semantic_indexed
-    sem_loading = search_engine._semantic_loading
+    sem_status = _server.search_engine._semantic_indexed
+    sem_loading = _server.search_engine._semantic_loading
     print(f"    handle_get in {ms:.0f}ms, semantic_indexed={sem_status}, loading={sem_loading}")
 
     record("get during preload -- correct data", data.get("id") == KNOWN_FDO_ID)
@@ -244,14 +250,14 @@ def test_write_then_read():
 def test_ensure_indexed_thread_safety():
     print("\n[7] _ensure_indexed() thread safety (20 concurrent threads)")
 
-    search_engine.invalidate()
+    _server.search_engine.invalidate()
 
     errors: list[str] = []
     lock = threading.Lock()
 
     def call_ensure_indexed():
         try:
-            search_engine._ensure_indexed()
+            _server.search_engine._ensure_indexed()
         except Exception as e:
             with lock:
                 errors.append(str(e))
@@ -263,8 +269,8 @@ def test_ensure_indexed_thread_safety():
             f.result(timeout=15)
     total_ms = (time.time() - t0) * 1000
 
-    bm25_count = len(search_engine._bm25._docs)
-    graph_count = len(search_engine._graph._adjacency)
+    bm25_count = len(_server.search_engine._bm25._docs)
+    graph_count = len(_server.search_engine._graph._adjacency)
     print(f"    Done in {total_ms:.0f}ms -- bm25={bm25_count}, graph={graph_count}")
 
     record("no exceptions in concurrent _ensure_indexed", len(errors) == 0, f"errors={errors}")
@@ -487,14 +493,14 @@ def test_write_does_not_rebuild_search_index():
     """After a write, BM25 index should stay initialized (no wipe+rebuild)."""
     print("\n[16] write handlers don't trigger full BM25 rebuild")
 
-    search_engine._ensure_indexed()
-    before_count = len(search_engine._bm25._docs)
-    before_initialized = search_engine._initialized
+    _server.search_engine._ensure_indexed()
+    before_count = len(_server.search_engine._bm25._docs)
+    before_initialized = _server.search_engine._initialized
 
     handle_update({"id": KNOWN_FDO_ID, "fields": {"status": "stable"}})
 
-    after_count = len(search_engine._bm25._docs)
-    after_initialized = search_engine._initialized
+    after_count = len(_server.search_engine._bm25._docs)
+    after_initialized = _server.search_engine._initialized
 
     print(f"    BM25 docs: before={before_count}, after={after_count}")
     print(f"    _initialized: before={before_initialized}, after={after_initialized}")
@@ -586,6 +592,202 @@ def test_create_then_search():
     cleanup_fdo(temp_id)
 
 
+# -- Test 20: handle_navigate ------------------------------------------------
+
+def test_navigate():
+    print("\n[20] handle_navigate")
+    import json
+
+    resp, ms = elapsed(handle_navigate, {"path": "GRIM/core/pool"})
+    ms *= 1000
+    data = json.loads(resp)
+    print(f"    Navigate GRIM/core/pool in {ms:.0f}ms")
+
+    record("navigate returns path", data.get("path") == "GRIM/core/pool")
+    record("navigate has listing", "listing" in data)
+    listing = data.get("listing", {})
+    record("navigate has files", len(listing.get("files", [])) > 0,
+           f"files={listing.get('files', [])}")
+    record("navigate < 500ms", ms < 500, f"ms={ms:.0f}")
+
+    # Non-existent path
+    resp2 = handle_navigate({"path": "nonexistent-repo-xyz/abc"})
+    data2 = json.loads(resp2)
+    record("navigate missing path returns error", "error" in data2)
+
+
+# -- Test 21: handle_read_source --------------------------------------------
+
+def test_read_source():
+    print("\n[21] handle_read_source")
+    import json
+
+    resp, ms = elapsed(handle_read_source, {
+        "repo": "GRIM", "path": "mcp/kronos/src/kronos_mcp/vault.py",
+    })
+    ms *= 1000
+    data = json.loads(resp)
+    print(f"    Read vault.py in {ms:.0f}ms, {data.get('total_lines', 0)} lines")
+
+    record("read_source returns content", len(data.get("content", "")) > 0)
+    record("read_source returns total_lines", data.get("total_lines", 0) > 0)
+    record("read_source offset is 0", data.get("offset") == 0)
+    record("read_source < 500ms", ms < 500, f"ms={ms:.0f}")
+
+    # Pagination test
+    resp2 = handle_read_source({
+        "repo": "GRIM", "path": "mcp/kronos/src/kronos_mcp/vault.py",
+        "offset": 10, "max_lines": 20,
+    })
+    data2 = json.loads(resp2)
+    record("read_source pagination offset works", data2.get("offset") == 10)
+    record("read_source pagination lines_returned", data2.get("lines_returned") == 20)
+
+    # Missing file
+    resp3 = handle_read_source({"repo": "GRIM", "path": "nonexistent_file.py"})
+    data3 = json.loads(resp3)
+    record("read_source missing file returns error", "error" in data3)
+
+
+# -- Test 22: handle_deep_dive ----------------------------------------------
+
+def test_deep_dive():
+    print("\n[22] handle_deep_dive")
+    import json
+
+    resp, ms = elapsed(handle_deep_dive, {"query": "grim-architecture"})
+    ms *= 1000
+    data = json.loads(resp)
+    root = data.get("root", "")
+    traversed = data.get("fdos_traversed", 0)
+    print(f"    Deep dive '{root}' in {ms:.0f}ms, {traversed} FDOs traversed")
+
+    record("deep_dive returns root", root == "grim-architecture")
+    record("deep_dive traverses FDOs", traversed > 0)
+    record("deep_dive has sources_by_fdo", "sources_by_fdo" in data)
+    record("deep_dive has sources_by_repo", "sources_by_repo" in data)
+    record("deep_dive < 2000ms", ms < 2000, f"ms={ms:.0f}")
+
+
+# -- Test 23: handle_validate_sources ---------------------------------------
+
+def test_validate_sources():
+    print("\n[23] handle_validate_sources")
+    import json
+
+    resp, ms = elapsed(handle_validate_sources, {})
+    ms *= 1000
+    data = json.loads(resp)
+    checked = data.get("total_fdos_checked", 0)
+    paths = data.get("total_paths_checked", 0)
+    broken = data.get("broken_count", 0)
+    print(f"    Validated {checked} FDOs, {paths} paths, {broken} broken in {ms:.0f}ms")
+
+    record("validate_sources checks FDOs", checked > 0, f"fdos={checked}")
+    record("validate_sources checks paths", paths > 0, f"paths={paths}")
+    record("validate_sources returns broken list", isinstance(data.get("broken"), list))
+    record("validate_sources < 5000ms", ms < 5000, f"ms={ms:.0f}")
+
+    # Domain filter
+    resp2 = handle_validate_sources({"domain": "ai-systems"})
+    data2 = json.loads(resp2)
+    record("validate_sources domain filter works", data2.get("domain_filter") == "ai-systems")
+
+    # Repo filter
+    resp3 = handle_validate_sources({"repo": "GRIM"})
+    data3 = json.loads(resp3)
+    record("validate_sources repo filter works", data3.get("repo_filter") == "GRIM")
+
+
+# -- Test 24: handle_find_implementation ------------------------------------
+
+def test_find_implementation():
+    print("\n[24] handle_find_implementation")
+    import json
+
+    # Find a known function
+    resp, ms = elapsed(handle_find_implementation, {
+        "repo": "GRIM", "symbol": "handle_search", "kind": "function",
+    })
+    ms *= 1000
+    data = json.loads(resp)
+    count = data.get("results_count", 0)
+    print(f"    Found {count} results for 'handle_search' in {ms:.0f}ms")
+
+    record("find_impl finds function", count > 0, f"count={count}")
+    if count > 0:
+        first = data["results"][0]
+        record("find_impl returns file path", "file" in first)
+        record("find_impl returns line number", first.get("line", 0) > 0)
+        record("find_impl returns kind", first.get("kind") == "function")
+        record("find_impl returns context", len(first.get("context", "")) > 0)
+
+    # Find a known class
+    resp2 = handle_find_implementation({
+        "repo": "GRIM", "symbol": "BM25Index", "kind": "class",
+    })
+    data2 = json.loads(resp2)
+    record("find_impl finds class", data2.get("results_count", 0) > 0)
+
+    # Path filter
+    resp3 = handle_find_implementation({
+        "repo": "GRIM", "symbol": "JobType", "path_filter": "core/pool",
+    })
+    data3 = json.loads(resp3)
+    record("find_impl path_filter works", data3.get("results_count", 0) > 0)
+    if data3.get("results"):
+        record("find_impl path_filter correct path",
+               "core/pool" in data3["results"][0].get("file", ""))
+
+    # Missing repo
+    resp4 = handle_find_implementation({"repo": "nonexistent-xyz", "symbol": "foo"})
+    data4 = json.loads(resp4)
+    record("find_impl missing repo returns error", "error" in data4)
+
+    # No results
+    resp5 = handle_find_implementation({
+        "repo": "GRIM", "symbol": "xyzzy_nonexistent_symbol_abc_999",
+    })
+    data5 = json.loads(resp5)
+    record("find_impl no results returns zero", data5.get("results_count") == 0)
+    record("find_impl no results no error", "error" not in data5)
+
+    record("find_impl < 10000ms", ms < 10000, f"ms={ms:.0f}")
+
+
+# -- Test 25: handle_git_recent ---------------------------------------------
+
+def test_git_recent():
+    print("\n[25] handle_git_recent")
+    import json
+
+    resp, ms = elapsed(handle_git_recent, {"repo": "GRIM", "days": 7})
+    ms *= 1000
+    data = json.loads(resp)
+    count = data.get("commits_count", 0)
+    print(f"    Got {count} commits from GRIM in {ms:.0f}ms")
+
+    record("git_recent returns commits", count >= 0)
+    record("git_recent returns repo", data.get("repo") == "GRIM")
+    if count > 0:
+        first = data["commits"][0]
+        record("git_recent commit has hash", len(first.get("hash", "")) > 0)
+        record("git_recent commit has message", len(first.get("message", "")) > 0)
+        record("git_recent commit has date", len(first.get("date", "")) > 0)
+
+    record("git_recent < 5000ms", ms < 5000, f"ms={ms:.0f}")
+
+    # Path filter
+    resp2 = handle_git_recent({"repo": "GRIM", "path": "core/pool", "days": 30})
+    data2 = json.loads(resp2)
+    record("git_recent path filter works", data2.get("path") == "core/pool")
+
+    # Missing repo
+    resp3 = handle_git_recent({"repo": "nonexistent-xyz"})
+    data3 = json.loads(resp3)
+    record("git_recent missing repo returns error", "error" in data3)
+
+
 # -- Final cleanup + runner ---------------------------------------------------
 
 def final_cleanup():
@@ -617,6 +819,12 @@ def run_all():
     test_skills()
     test_graph()
     test_create_then_search()
+    test_navigate()
+    test_read_source()
+    test_deep_dive()
+    test_validate_sources()
+    test_find_implementation()
+    test_git_recent()
 
     final_cleanup()
 

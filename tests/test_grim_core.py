@@ -807,7 +807,7 @@ class TestUserCache(unittest.TestCase):
         """compile_caller_summary produces compact prompt for a service caller."""
         from core.personality.user_cache import compile_caller_summary
         fdo = {
-            "id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service",
+            "id": "code-agent", "title": "Code Agent", "role": "service", "type": "service",
             "body": textwrap.dedent("""\
                 ## Context
                 - Rust-based physics engine for DFT simulations
@@ -819,7 +819,7 @@ class TestUserCache(unittest.TestCase):
             """),
         }
         result = compile_caller_summary(fdo)
-        self.assertIn("IronClaw", result)
+        self.assertIn("Code Agent", result)
         self.assertIn("service", result)
         self.assertIn("Rust-based physics engine", result)
         self.assertIn("Structured responses preferred", result)
@@ -850,15 +850,15 @@ class TestCallerResolution(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cache_path = Path(tmp) / "personality.cache.md"
             cfg = make_test_config(personality_cache_path=cache_path)
-            ironclaw_fdo = {
-                "id": "ironclaw", "title": "IronClaw", "role": "service", "type": "service",
+            code_agent_fdo = {
+                "id": "code-agent", "title": "Code Agent", "role": "service", "type": "service",
                 "body": "## Context\n- Rust engine\n\n## Communication Style\n- Structured\n",
             }
-            mcp = MockMCPSession({"kronos_get": ironclaw_fdo})
+            mcp = MockMCPSession({"kronos_get": code_agent_fdo})
             node = make_identity_node(cfg, mcp_session=mcp)
-            result = run_async(node({"caller_id": "ironclaw"}))
-            self.assertEqual(result["caller_id"], "ironclaw")
-            self.assertIn("IronClaw", result["caller_context"])
+            result = run_async(node({"caller_id": "code-agent"}))
+            self.assertEqual(result["caller_id"], "code-agent")
+            self.assertIn("Code Agent", result["caller_context"])
 
     def test_caller_unknown_fallback(self):
         """Unknown caller gets generic fallback when MCP lookup fails."""

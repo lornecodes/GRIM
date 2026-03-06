@@ -99,7 +99,7 @@ class TestMappings:
     def test_all_hints_have_target_mapping(self):
         """All known skill delegation hints map to a target."""
         known_hints = [
-            "memory", "research", "ironclaw", "code",
+            "memory", "research", "code",
             "operate", "audit", "codebase", "planning",
         ]
         for hint in known_hints:
@@ -115,7 +115,7 @@ class TestMappings:
         """Check specific delegation mappings."""
         assert TARGET_TO_DELEGATION["conversation"] is None
         assert TARGET_TO_DELEGATION["planning"] is None
-        assert TARGET_TO_DELEGATION["code"] == "ironclaw"
+        assert TARGET_TO_DELEGATION["code"] == "code"
         assert TARGET_TO_DELEGATION["research"] == "research"
         assert TARGET_TO_DELEGATION["operations"] == "memory"
 
@@ -135,8 +135,8 @@ class TestTier1HardOverrides:
         assert "skill" in result.reasoning.lower()
 
     @pytest.mark.asyncio
-    async def test_skill_hint_ironclaw(self):
-        state = _state("run this command", skill_delegation_hint="ironclaw")
+    async def test_skill_hint_code(self):
+        state = _state("run this command", skill_delegation_hint="code")
         result = await classify_intent(state)
         assert result.target_subgraph == "code"
         assert result.confidence == 1.0
@@ -231,7 +231,7 @@ class TestTier2LLMClassification:
         """If LLM throws, fall back to keyword matching."""
         with patch("core.nodes.intent_classifier._llm_classify", side_effect=Exception("API error")):
             result = await classify_intent(_state("write code for the auth module"))
-        # "write code" matches ironclaw keyword → code
+        # "write code" matches code keyword → code
         assert result.target_subgraph == "code"
         assert result.confidence < 1.0  # fallback confidence is lower
 
@@ -314,7 +314,7 @@ class TestTier3KeywordFallback:
         assert result.target_subgraph == "research"
         assert result.confidence == 0.7
 
-    def test_ironclaw_keyword(self):
+    def test_code_keyword(self):
         result = _keyword_fallback("write code for auth")
         assert result.target_subgraph == "code"
         assert result.confidence == 0.7
@@ -455,9 +455,9 @@ class TestResolveDelegationTarget:
         d = RoutingDecision(target_subgraph="planning", confidence=0.9, reasoning="plan")
         assert resolve_delegation_target(d) is None
 
-    def test_code_to_ironclaw(self):
+    def test_code_to_code(self):
         d = RoutingDecision(target_subgraph="code", confidence=0.9, reasoning="code")
-        assert resolve_delegation_target(d) == "ironclaw"
+        assert resolve_delegation_target(d) == "code"
 
     def test_research_to_research(self):
         d = RoutingDecision(target_subgraph="research", confidence=0.9, reasoning="research")
@@ -587,7 +587,7 @@ class TestIntegrationFlow:
         with patch("core.nodes.intent_classifier._llm_classify", return_value=expected):
             result = await classify_intent(_state("refactor the auth module to use JWT"))
         assert result.target_subgraph == "code"
-        assert resolve_delegation_target(result) == "ironclaw"
+        assert resolve_delegation_target(result) == "code"
         assert resolve_graph_target(result) == "research"
         assert resolve_mode(result) == "delegate"
 
@@ -642,7 +642,7 @@ class TestIntegrationFlow:
     @pytest.mark.asyncio
     async def test_skill_hint_overrides_everything(self):
         """Even with LLM mock, skill hint should win."""
-        state = _state("hello", skill_delegation_hint="ironclaw")
+        state = _state("hello", skill_delegation_hint="code")
         # Don't even patch LLM — it shouldn't be called
         result = await classify_intent(state)
         assert result.target_subgraph == "code"

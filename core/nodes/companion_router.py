@@ -159,7 +159,7 @@ def companion_route_decision(state: GrimState) -> str:
       graph_target="personal"                        → "conversation"
       graph_target="planning"                        → "planning"
       mode="companion" (no delegation)               → "conversation"
-      mode="delegate" + delegation_type="ironclaw"   → "code"
+      mode="delegate" + delegation_type="code"        → "code"
       mode="delegate" + other delegation             → "research"
     """
     graph_target = state.get("graph_target", "research")
@@ -176,6 +176,6 @@ def companion_route_decision(state: GrimState) -> str:
 
     # Delegate mode — split by delegation type
     delegation = state.get("delegation_type")
-    if delegation == "ironclaw":
+    if delegation == "code":
         return "code"
     return "research"

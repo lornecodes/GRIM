@@ -26,7 +26,7 @@ cases:
       verification: "Did it confirm the FDO creation?"
 
   - id: mt-plan-then-execute
-    tags: [multi-turn, planning, ironclaw]
+    tags: [multi-turn, planning, code]
     turn_type: multi
     turns:
       - role: user
@@ -45,7 +45,7 @@ cases:
       execution: "Did it write the file when instructed?"
 
   - id: mt-investigate-fix-verify
-    tags: [multi-turn, research, ironclaw, memory]
+    tags: [multi-turn, research, code, memory]
     turn_type: multi
     turns:
       - role: user

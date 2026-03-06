@@ -1,13 +1,11 @@
-"""GRIM Chat Server — FastAPI + WebSocket wrapping the LangGraph core.
+"""GRIM Chat Server — FastAPI + WebSocket wrapping GrimClient SDK.
 
 Provides:
   GET  /              → Chat UI (Next.js static build or legacy HTML)
   GET  /health        → Health check
-  WS   /ws/{sid}      → WebSocket chat (streaming-ready, LangGraph v1)
-  WS   /ws/v2/{sid}   → WebSocket chat (GrimClient SDK sessions)
-  POST /api/chat      → REST fallback (request/response)
-  GET  /api/sessions  → List session thread IDs
-  GET  /api/v2/sessions → List active SDK sessions
+  WS   /ws/{sid}      → WebSocket chat (GrimClient SDK sessions)
+  POST /api/chat      → REST chat (request/response)
+  GET  /api/sessions  → List active SDK sessions
 
 Startup:
   uvicorn server.app:app --host 0.0.0.0 --port 8080
@@ -31,47 +29,9 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
 from core.config import GrimConfig, load_config
-from core.graph import build_graph
-
-# ---------------------------------------------------------------------------
-# Monkey-patch: langchain-anthropic 1.3.4 context_management bug
-# The Anthropic API returns context_management as a dict, but
-# langchain-anthropic calls .model_dump() on it expecting a Pydantic model.
-# Patch until upstream fix lands.
-# ---------------------------------------------------------------------------
-try:
-    import langchain_anthropic.chat_models as _lcam
-
-    _orig_make_chunk = _lcam._make_message_chunk_from_anthropic_event
-
-    def _patched_make_chunk(*args, **kwargs):
-        try:
-            return _orig_make_chunk(*args, **kwargs)
-        except AttributeError as e:
-            if "model_dump" in str(e):
-                # Retry with context_management stripped from the event
-                event = args[0] if args else kwargs.get("event")
-                if hasattr(event, "context_management"):
-                    cm = event.context_management
-                    # Replace with a dict that has model_dump
-                    if isinstance(cm, dict):
-                        class _DictWrapper(dict):
-                            def model_dump(self):
-                                return dict(self)
-                        event.context_management = _DictWrapper(cm)
-                        return _orig_make_chunk(*args, **kwargs)
-            raise
-
-    _lcam._make_message_chunk_from_anthropic_event = _patched_make_chunk
-    logging.getLogger("grim.server").info("Patched langchain-anthropic context_management bug")
-except Exception:
-    pass  # don't crash on patch failure
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -91,17 +51,16 @@ logger = logging.getLogger("grim.server")
 # Globals set during lifespan
 # ---------------------------------------------------------------------------
 
-_graph: Any = None
 _config: GrimConfig | None = None
 _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
-_checkpointer: Any = None  # AsyncSqliteSaver — kept open for the server lifetime
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
 _execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
-_active_ws_sessions: set[str] = set()  # live WebSocket session IDs (for Graph Studio)
-_session_knowledge: dict[str, list] = {}  # session_id → list of KnowledgeEntry.to_dict()
-_session_manager: Any = None  # SessionManager for v2 SDK sessions
-_v2_websockets: set = set()  # active v2 WebSocket connections for pool push
+_session_manager: Any = None  # SessionManager for SDK sessions
+_ws_connections: set = set()  # active WebSocket connections for chat + pool events
+# Pool WebSocket connections: maps WebSocket → set of subscribed job IDs.
+# Empty set = lifecycle events only. Subscription enables streaming events.
+_pool_ws_subs: dict = {}  # WebSocket → set[str]  (job_id subscriptions)
 
 
 def _grim_root() -> Path:
@@ -114,8 +73,8 @@ def _grim_root() -> Path:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start Kronos MCP, build graph, serve until shutdown."""
-    global _graph, _config, _mcp_cleanup, _checkpointer
+    """Start Kronos MCP, boot SessionManager, serve until shutdown."""
+    global _config, _mcp_cleanup
 
     grim_root = _grim_root()
     load_dotenv(grim_root / ".env")
@@ -128,117 +87,188 @@ async def lifespan(app: FastAPI):
 
     logger.info("GRIM starting — env: %s, vault: %s", _config.env, _config.vault_path)
 
-    # Boot Kronos MCP
+    # Boot Kronos MCP (inline to avoid importing core.__main__ which pulls langgraph)
     mcp_session = None
     try:
-        from core.__main__ import kronos_mcp_session
+        import os as _os
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
 
-        _mcp_cm = kronos_mcp_session(_config)
-        mcp_session = await _mcp_cm.__aenter__()
-        _mcp_cleanup = _mcp_cm
+        server_params = StdioServerParameters(
+            command=_config.kronos_mcp_command,
+            args=_config.kronos_mcp_args,
+            env={
+                "KRONOS_VAULT_PATH": str(_config.vault_path),
+                "KRONOS_SKILLS_PATH": str(_config.skills_path),
+                **_os.environ,
+            },
+        )
+
+        _mcp_transport_cm = stdio_client(server_params)
+        _read, _write = await _mcp_transport_cm.__aenter__()
+        _mcp_session_cm = ClientSession(_read, _write)
+        mcp_session = await _mcp_session_cm.__aenter__()
+        await mcp_session.initialize()
+
+        # Store context managers for cleanup
+        _mcp_cleanup = (_mcp_session_cm, _mcp_transport_cm)
+
         if mcp_session:
-            logger.info("Kronos MCP connected")
+            tool_context.mcp_session = mcp_session
+            logger.info("Kronos MCP connected (wired to tool_context)")
         else:
             logger.info("Running without Kronos MCP")
+    except ImportError:
+        logger.warning("MCP library not installed — running without Kronos")
     except Exception as exc:
         logger.warning("Could not start Kronos MCP: %s", exc)
 
-    # SQLite session persistence — open for the full server lifetime
+    # Session storage directory
     sessions_dir = grim_root / "local" / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
-    db_path = sessions_dir / "grim.db"
-    logger.info("SQLite checkpointer: %s", db_path)
 
-    async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
-        _checkpointer = checkpointer
+    # Load skill registry for /api/skills endpoint
+    from core.skills.loader import load_skills
+    global _skill_registry
+    _skill_registry = load_skills(_config.skills_path)
 
-        # Initialize reasoning cache (Redis, optional)
-        from core.reasoning_cache import ReasoningCache
-        reasoning_cache = await ReasoningCache.from_env()
+    # Build dynamic agent roster metadata
+    global _agent_metadata
+    try:
+        from core.nodes.metadata import GRAPH_NODE_METADATA
+        from core.agents.registry import AgentRegistry
+        # Discover ALL agents (including disabled) for roster display
+        roster_registry = AgentRegistry.discover(_config, disabled=[])
+        agent_meta = roster_registry.build_metadata(_config)
+        _agent_metadata = list(GRAPH_NODE_METADATA) + agent_meta
+        logger.info("Agent roster: %d entries (dynamic)", len(_agent_metadata))
+    except Exception as exc:
+        logger.warning("Failed to build agent roster metadata: %s — using static fallback", exc)
+        # Static fallback — same schema as BaseAgent.metadata() / NODE_METADATA
+        _agent_metadata = [
+            {
+                "id": "companion",
+                "name": "companion",
+                "display_name": "Companion",
+                "description": "General-purpose research companion — Kronos vault, memory, skills",
+                "protocol_priority": 0,
+                "tools": ["kronos_search", "kronos_get", "kronos_graph", "kronos_deep_dive",
+                          "kronos_navigate", "kronos_read_source", "kronos_search_source",
+                          "kronos_memory_read", "kronos_memory_update", "kronos_skill_load",
+                          "kronos_note_append"],
+                "enabled": True,
+            },
+            {
+                "id": "personal_companion",
+                "name": "personal_companion",
+                "display_name": "Personal Companion",
+                "description": "Personal context — calendar, tasks, preferences, daily planning",
+                "protocol_priority": 0,
+                "tools": ["kronos_task_create", "kronos_task_update", "kronos_task_list",
+                          "kronos_board_view", "kronos_calendar_view", "kronos_calendar_add",
+                          "kronos_memory_read", "kronos_memory_update"],
+                "enabled": True,
+            },
+            {
+                "id": "planning_companion",
+                "name": "planning_companion",
+                "display_name": "Planning Companion",
+                "description": "Sprint planning, project lifecycle, architecture decisions",
+                "protocol_priority": 0,
+                "tools": ["kronos_task_create", "kronos_task_update", "kronos_task_list",
+                          "kronos_board_view", "kronos_backlog_view", "kronos_calendar_sync",
+                          "kronos_search", "kronos_get"],
+                "enabled": True,
+            },
+        ]
+        logger.info("Agent roster: %d entries (static fallback)", len(_agent_metadata))
 
-        # Load skill registry for /api/skills endpoint
-        from core.skills.loader import load_skills
-        global _skill_registry
-        _skill_registry = load_skills(_config.skills_path)
+    # Boot Execution Pool (Project Charizard) if enabled
+    global _execution_pool
+    if _config.pool_enabled:
+        try:
+            from core.pool import ExecutionPool, JobQueue
+            import core.tools.pool_tools  # triggers tool registration
 
-        # Build graph (once, shared across all connections)
-        _graph = build_graph(
-            _config,
-            mcp_session=mcp_session,
-            checkpointer=checkpointer,
-            reasoning_cache=reasoning_cache,
+            queue = JobQueue(_config.pool_db_path)
+            _execution_pool = ExecutionPool(queue, _config)
+            await _execution_pool.start()
+            tool_context.execution_pool = _execution_pool
+
+            # Subscribe to pool events for WebSocket push
+            _execution_pool.events.subscribe(_broadcast_pool_event)
+
+            # Register Discord webhook notifier if configured
+            webhook_url = _config.pool_discord_webhook_url
+            if webhook_url:
+                from core.pool.notifiers import DiscordWebhookNotifier
+                notifier = DiscordWebhookNotifier(webhook_url)
+                _execution_pool.events.subscribe(notifier)
+                logger.info("Discord webhook notifier registered")
+
+            logger.info("Execution pool started: %d slots", _config.pool_num_slots)
+        except Exception as exc:
+            logger.warning("Could not start execution pool: %s", exc)
+            _execution_pool = None
+    else:
+        logger.info("Execution pool disabled (pool.enabled: false)")
+
+    # Boot ConversationStore + SessionManager for SDK sessions
+    global _session_manager
+    _conversation_store = None
+    try:
+        from server.conversation_store import ConversationStore
+        conv_db = sessions_dir / "conversations.db"
+        _conversation_store = ConversationStore(conv_db)
+        await _conversation_store.init()
+        logger.info("ConversationStore ready: %s", conv_db)
+    except Exception as exc:
+        logger.warning("Could not start ConversationStore: %s", exc)
+
+    try:
+        from server.sessions import SessionManager
+        _session_manager = SessionManager(
+            _config, conversation_store=_conversation_store,
         )
-        logger.info("Graph built — server ready")
+        await _session_manager.start()
+    except Exception as exc:
+        logger.warning("Could not start SessionManager: %s", exc)
+        _session_manager = None
 
-        # Build dynamic agent roster metadata
-        global _agent_metadata
+    logger.info("GRIM server ready")
+
+    yield
+
+    # Shutdown SessionManager
+    if _session_manager:
         try:
-            from core.nodes.metadata import GRAPH_NODE_METADATA
-            from core.agents.registry import AgentRegistry
-            # Discover ALL agents (including disabled) for roster display
-            roster_registry = AgentRegistry.discover(_config, disabled=[])
-            agent_meta = roster_registry.build_metadata(_config)
-            _agent_metadata = list(GRAPH_NODE_METADATA) + agent_meta
-            logger.info("Agent roster: %d entries (dynamic)", len(_agent_metadata))
-        except Exception as exc:
-            logger.warning("Failed to build agent roster metadata: %s", exc)
+            await _session_manager.stop()
+        except Exception:
+            pass
 
-        # Boot Execution Pool (Project Charizard) if enabled
-        global _execution_pool
-        if _config.pool_enabled:
-            try:
-                from core.pool import ExecutionPool, JobQueue
-                from pathlib import Path as _Path
-                import core.tools.pool_tools  # triggers tool registration
-
-                queue = JobQueue(_config.pool_db_path)
-                _execution_pool = ExecutionPool(queue, _config)
-                await _execution_pool.start()
-                tool_context.execution_pool = _execution_pool
-
-                # Subscribe to pool events for WebSocket push
-                _execution_pool.events.subscribe(_broadcast_pool_event)
-
-                logger.info("Execution pool started: %d slots", _config.pool_num_slots)
-            except Exception as exc:
-                logger.warning("Could not start execution pool: %s", exc)
-                _execution_pool = None
-        else:
-            logger.info("Execution pool disabled (pool.enabled: false)")
-
-        # Boot SessionManager for v2 SDK sessions
-        global _session_manager
+    # Close ConversationStore
+    if _conversation_store:
         try:
-            from server.sessions import SessionManager
-            _session_manager = SessionManager(_config)
-            await _session_manager.start()
-        except Exception as exc:
-            logger.warning("Could not start SessionManager: %s", exc)
-            _session_manager = None
+            await _conversation_store.close()
+        except Exception:
+            pass
 
-        yield
+    # Shutdown Execution Pool
+    if _execution_pool:
+        try:
+            await _execution_pool.stop()
+        except Exception:
+            pass
 
-        # Shutdown SessionManager
-        if _session_manager:
-            try:
-                await _session_manager.stop()
-            except Exception:
-                pass
-
-        # Shutdown Execution Pool
-        if _execution_pool:
-            try:
-                await _execution_pool.stop()
-            except Exception:
-                pass
-
-        # Cleanup MCP on shutdown
-        if _mcp_cleanup:
-            try:
-                await _mcp_cleanup.__aexit__(None, None, None)
-            except Exception:
-                pass
-        logger.info("GRIM server stopped")
+    # Cleanup MCP on shutdown (session_cm, transport_cm)
+    if _mcp_cleanup:
+        try:
+            session_cm, transport_cm = _mcp_cleanup
+            await session_cm.__aexit__(None, None, None)
+            await transport_cm.__aexit__(None, None, None)
+        except Exception:
+            pass
+    logger.info("GRIM server stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -301,11 +331,13 @@ async def favicon():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    from core.tools.context import tool_context
     return JSONResponse({
         "status": "ok",
         "env": _config.env if _config else "unknown",
         "vault": str(_config.vault_path) if _config else None,
-        "graph": _graph is not None,
+        "graph": tool_context.mcp_session is not None,
+        "sdk_sessions": _session_manager is not None,
     })
 
 
@@ -554,7 +586,7 @@ async def toggle_model(tier: str):
 
 @app.post("/api/agents/{agent_id}/toggle")
 async def toggle_agent(agent_id: str):
-    """Toggle an agent's enabled/disabled state (IronClaw-tier only)."""
+    """Toggle an agent's enabled/disabled state (toggleable agents only)."""
     global _config
 
     if not _config:
@@ -564,7 +596,7 @@ async def toggle_agent(agent_id: str):
     toggleable = {m["id"] for m in (_agent_metadata or []) if m.get("toggleable")}
     if agent_id not in toggleable:
         return JSONResponse(
-            {"error": f"Agent '{agent_id}' is not toggleable (only IronClaw-tier agents can be toggled)"},
+            {"error": f"Agent '{agent_id}' is not toggleable"},
             status_code=400,
         )
 
@@ -669,23 +701,13 @@ async def update_identity(req: IdentityUpdateRequest):
 
 @app.get("/api/sessions")
 async def list_sessions():
-    """List unique session thread IDs from the checkpointer."""
-    if not _checkpointer:
-        return JSONResponse({"sessions": []})
-    try:
-        async with _checkpointer.conn.execute(
-            "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
-        ) as cursor:
-            rows = await cursor.fetchall()
-        sessions = [
-            row[0].removeprefix("grim-web-")
-            for row in rows
-            if row[0].startswith("grim-web-")
-        ]
-        return JSONResponse({"sessions": sessions})
-    except Exception as exc:
-        logger.warning("Failed to list sessions: %s", exc)
-        return JSONResponse({"sessions": []})
+    """List active SDK sessions (promoted from /api/v2/sessions)."""
+    if _session_manager is None:
+        return JSONResponse({"sessions": [], "error": "SDK sessions not available"}, status_code=503)
+    return JSONResponse({
+        "sessions": _session_manager.list_sessions(),
+        "count": _session_manager.active_count,
+    })
 
 
 @app.get("/api/test-mcp")
@@ -857,24 +879,26 @@ async def api_projects():
 
 
 @app.get("/api/tasks/board")
-async def api_board_view(project_id: str | None = None):
-    """Kanban board — columns with full story+task data."""
+async def api_board_view(project_id: str | None = None, domain: str | None = None):
+    """Kanban board — columns with full story data."""
     args: dict = {}
     if project_id:
         args["project_id"] = project_id
+    if domain:
+        args["domain"] = domain
     data = await _mcp_task_call("kronos_board_view", args)
     return _check_mcp_error(data) or JSONResponse(data)
 
 
 @app.get("/api/tasks/backlog")
-async def api_backlog_view(project_id: str | None = None, feat_id: str | None = None,
+async def api_backlog_view(project_id: str | None = None, domain: str | None = None,
                            priority: str | None = None):
     """Stories not on the board."""
     args: dict = {}
     if project_id:
         args["project_id"] = project_id
-    if feat_id:
-        args["feat_id"] = feat_id
+    if domain:
+        args["domain"] = domain
     if priority:
         args["priority"] = priority
     data = await _mcp_task_call("kronos_backlog_view", args)
@@ -883,15 +907,15 @@ async def api_backlog_view(project_id: str | None = None, feat_id: str | None = 
 
 @app.get("/api/tasks/list")
 async def api_task_list(status: str | None = None, priority: str | None = None,
-                        feat_id: str | None = None, project_id: str | None = None):
-    """List stories/tasks with optional filters."""
+                        domain: str | None = None, project_id: str | None = None):
+    """List stories with optional filters."""
     args: dict = {}
     if status:
         args["status"] = status
     if priority:
         args["priority"] = priority
-    if feat_id:
-        args["feat_id"] = feat_id
+    if domain:
+        args["domain"] = domain
     if project_id:
         args["project_id"] = project_id
     data = await _mcp_task_call("kronos_task_list", args)
@@ -900,28 +924,25 @@ async def api_task_list(status: str | None = None, priority: str | None = None,
 
 @app.get("/api/tasks/{item_id}")
 async def api_task_get(item_id: str):
-    """Get a single story or task by ID."""
+    """Get a single story by ID."""
     data = await _mcp_task_call("kronos_task_get", {"item_id": item_id})
     return _check_mcp_error(data) or JSONResponse(data)
 
 
 class TaskCreateRequest(BaseModel):
-    type: str  # "story" or "task"
     title: str
-    feat_id: str | None = None
-    story_id: str | None = None
+    proj_id: str
     priority: str | None = None
     estimate_days: float | None = None
     description: str | None = None
     acceptance_criteria: list[str] | None = None
     tags: list[str] | None = None
     assignee: str | None = None
-    notes: str | None = None
 
 
 @app.post("/api/tasks")
 async def api_task_create(req: TaskCreateRequest):
-    """Create a story or task."""
+    """Create a story in a project."""
     args = req.model_dump(exclude_none=True)
     data = await _mcp_task_call("kronos_task_create", args)
     return _check_mcp_error(data) or JSONResponse(data)
@@ -934,12 +955,13 @@ class TaskUpdateRequest(BaseModel):
     priority: str | None = None
     estimate_days: float | None = None
     description: str | None = None
-    notes: str | None = None
+    assignee: str | None = None
+    job_id: str | None = None
 
 
 @app.put("/api/tasks/{item_id}")
 async def api_task_update(item_id: str, req: TaskUpdateRequest):
-    """Update a story or task."""
+    """Update a story."""
     fields = req.model_dump(exclude_none=True)
     fields.pop("item_id", None)
     data = await _mcp_task_call("kronos_task_update", {
@@ -962,12 +984,26 @@ async def api_task_move(story_id: str, req: TaskMoveRequest):
     return _check_mcp_error(data) or JSONResponse(data)
 
 
+class TaskDispatchRequest(BaseModel):
+    override_assignee: str | None = None
+
+
+@app.post("/api/tasks/{story_id}/dispatch")
+async def api_task_dispatch(story_id: str, req: TaskDispatchRequest | None = None):
+    """Dispatch a story to the execution pool."""
+    args: dict = {"story_id": story_id}
+    if req and req.override_assignee:
+        args["override_assignee"] = req.override_assignee
+    data = await _mcp_task_call("kronos_task_dispatch", args)
+    return _check_mcp_error(data) or JSONResponse(data)
+
+
 @app.post("/api/tasks/archive")
-async def api_task_archive(feat_id: str | None = None):
+async def api_task_archive(proj_id: str | None = None):
     """Archive closed stories."""
     args: dict = {}
-    if feat_id:
-        args["feat_id"] = feat_id
+    if proj_id:
+        args["proj_id"] = proj_id
     data = await _mcp_task_call("kronos_task_archive", args)
     return _check_mcp_error(data) or JSONResponse(data)
 
@@ -1178,404 +1214,57 @@ class ChatRequest(BaseModel):
     sandbox: bool = False  # sandbox mode — blocks vault/memory writes for eval
 
 
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-    knowledge_count: int = 0
-    mode: str = "companion"
-    skills: list[str] = []
-
-
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat_rest(req: ChatRequest):
-    """REST endpoint — send a message, get a response."""
-    if not _graph:
-        return JSONResponse({"error": "Graph not ready"}, status_code=503)
+    """REST chat endpoint — send a message, get a response (SDK sessions)."""
+    if _session_manager is None:
+        return JSONResponse({"error": "SDK sessions not available"}, status_code=503)
 
     session_id = req.session_id or str(uuid.uuid4())[:8]
-    graph_config = {"configurable": {"thread_id": f"grim-web-{session_id}"}}
-
     caller_id = req.caller_id or "peter"
 
     try:
-        result = await _graph.ainvoke(
-            {
-                "messages": [HumanMessage(content=req.message)],
-                "session_start": datetime.now(),
-                "caller_id": caller_id,
-                "sandbox": req.sandbox,
-            },
-            config=graph_config,
+        client = await _session_manager.get_or_create(session_id, caller_id=caller_id)
+        resp = await client.send(req.message)
+
+        _session_manager.touch(session_id)
+
+        # Persist conversation turn
+        await _session_manager.save_turn(
+            session_id,
+            user_message=req.message,
+            assistant_message=resp.text,
+            cost_usd=resp.cost_usd,
+            tools_used=resp.tool_calls or None,
         )
-        return ChatResponse(
-            response=_extract_response(result),
-            session_id=session_id,
-            knowledge_count=len(result.get("knowledge_context", [])),
-            mode=result.get("mode", "companion"),
-            skills=[s.name for s in result.get("matched_skills", [])],
-        )
+
+        return JSONResponse({
+            "response": resp.text or "No response.",
+            "session_id": session_id,
+            "tool_calls": resp.tool_calls,
+            "cost_usd": resp.cost_usd,
+            "num_turns": resp.num_turns,
+        })
     except Exception as exc:
         logger.exception("Chat error")
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
-# WebSocket — real-time chat with session persistence
+# WebSocket — real-time chat (GrimClient SDK)
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(ws: WebSocket, session_id: str):
-    """WebSocket chat endpoint with token streaming and full trace.
+    """WebSocket chat endpoint — GrimClient SDK sessions.
 
     Protocol:
-      Client sends: {"message": "..."}
-      Server sends:
-        {"type": "trace", "cat": "...", "text": "...", ...}  — debug trace event
-        {"type": "stream", "token": "..."}                    — each LLM token
-        {"type": "response", "content": "...", "meta": {...}} — final response
-        {"type": "error", "content": "..."}                   — error
-    """
-    await ws.accept()
-    _active_ws_sessions.add(session_id)
-    logger.info("WS connected: %s", session_id)
-
-    graph_config = {"configurable": {"thread_id": f"grim-web-{session_id}"}}
-
-    try:
-        while True:
-            data = await ws.receive_text()
-            try:
-                payload = json.loads(data)
-                message = payload.get("message", data)
-                caller_id = payload.get("caller_id", "peter")
-                sandbox_mode = payload.get("sandbox", False)
-            except json.JSONDecodeError:
-                message = data
-                caller_id = "peter"
-                sandbox_mode = False
-
-            if not message:
-                continue
-
-            try:
-                import time as _time
-                _t0 = _time.monotonic()
-
-                full_response = ""
-                last_knowledge = []
-                last_session_knowledge_count = 0
-                last_mode = "companion"
-                last_skills = []
-                streaming_started = False
-                seen_nodes = set()
-                _node_times: dict[str, float] = {}
-                _current_node: str = ""
-                _node_text: dict[str, str] = {}  # per-node LLM output
-                _node_stream_text: dict[str, str] = {}  # per-node streamed tokens
-
-                async def _trace(cat: str, text: str, **extra):
-                    """Emit a trace event to the client."""
-                    elapsed = round((_time.monotonic() - _t0) * 1000)
-                    msg = {"type": "trace", "cat": cat, "text": text, "ms": elapsed}
-                    msg.update(extra)
-                    await ws.send_json(msg)
-
-                await _trace("graph", "Graph invocation started")
-                _event_count = 0
-
-                # Agent live-monitoring queue — agents push events here,
-                # we drain them concurrently alongside graph events.
-                import asyncio as _asyncio
-                _agent_queue: _asyncio.Queue = _asyncio.Queue()
-
-                async def _drain_agent_events():
-                    """Drain agent events and emit them as traces."""
-                    while True:
-                        event = await _agent_queue.get()
-                        if event is None:  # sentinel = graph done
-                            break
-                        cat = event.pop("cat", "agent")
-                        text = event.pop("text", "")
-                        await _trace(cat, text, **event)
-
-                _drain_task = _asyncio.create_task(_drain_agent_events())
-
-                # Pass queue via config (not state) — Queue is not serializable
-                graph_config["configurable"]["agent_event_queue"] = _agent_queue
-
-                async for event in _graph.astream_events(
-                    {
-                        "messages": [HumanMessage(content=message)],
-                        "session_start": datetime.now(),
-                        "caller_id": caller_id,
-                        "sandbox": sandbox_mode,
-                    },
-                    config=graph_config,
-                    version="v2",
-                ):
-                    kind = event.get("event", "")
-                    name = event.get("name", "")
-                    _event_count += 1
-
-                    # ── Node lifecycle ──
-                    # v0.0.6 nodes + v0.10 subgraph nodes
-                    if kind == "on_chain_start" and name in (
-                        "identity", "compress", "memory", "skill_match",
-                        "router", "companion", "integrate", "evolve",
-                        "graph_router", "personal_companion", "planning_companion",
-                    ):
-                        if name not in seen_nodes:
-                            seen_nodes.add(name)
-                            _node_times[name] = _time.monotonic()
-                            _current_node = name
-                            await _trace("node", f"→ {name}", node=name, action="start")
-
-                    elif kind == "on_chain_end" and name in seen_nodes:
-                        node_elapsed = round((_time.monotonic() - _node_times.get(name, _t0)) * 1000)
-                        output = event.get("data", {}).get("output")
-                        detail = {}
-
-                        if isinstance(output, dict):
-                            # Capture key outputs from each node
-                            if "knowledge_context" in output:
-                                last_knowledge = output["knowledge_context"]
-                                detail["fdo_count"] = len(last_knowledge)
-                                detail["fdo_ids"] = [k.id for k in last_knowledge[:8]]
-                            if "session_knowledge" in output:
-                                sk = output["session_knowledge"]
-                                last_session_knowledge_count = len(sk) if sk else 0
-                                detail["session_knowledge_count"] = last_session_knowledge_count
-                                # Store for API access — serialize entries
-                                if sk:
-                                    _session_knowledge[session_id] = [
-                                        e.to_dict() if hasattr(e, "to_dict") else e
-                                        for e in sk
-                                    ]
-                            if "mode" in output:
-                                last_mode = output["mode"]
-                                detail["mode"] = last_mode
-                            if "matched_skills" in output:
-                                last_skills = [s.name for s in output["matched_skills"]]
-                                detail["skills"] = last_skills
-                            if "field_state" in output:
-                                fs = output["field_state"]
-                                if hasattr(fs, "coherence"):
-                                    detail["field_state"] = {
-                                        "coherence": round(fs.coherence, 3),
-                                        "valence": round(fs.valence, 3),
-                                        "uncertainty": round(fs.uncertainty, 3),
-                                        "mode": fs.expression_mode() if hasattr(fs, "expression_mode") else "",
-                                    }
-
-                        # Include step_content for nodes that produced LLM output
-                        step_text = _node_text.get(name) or _node_stream_text.get(name)
-                        await _trace("node", f"✓ {name} ({node_elapsed}ms)",
-                                     node=name, action="end", duration_ms=node_elapsed,
-                                     detail=detail if detail else None,
-                                     step_content=step_text if step_text else None)
-
-                        # Capture integrate node's formatted response.
-                        # The integrate node returns {"messages": [AIMessage(...)]}
-                        # with the agent summary + audit verdict + file listing,
-                        # but it doesn't call an LLM, so on_chat_model_end never
-                        # fires for it. We must extract the text here.
-                        if name == "integrate" and isinstance(output, dict):
-                            integrate_msgs = output.get("messages", [])
-                            for im in integrate_msgs:
-                                if hasattr(im, "content"):
-                                    itext = _extract_text(im.content)
-                                    if itext:
-                                        full_response = itext
-                                        _node_text["integrate"] = itext
-                                        logger.debug("Captured integrate response (%d chars)", len(itext))
-
-                        # Emit compact memory notification when evolve completes
-                        # (instead of streaming full memory content to the UI)
-                        if name == "evolve":
-                            await ws.send_json({
-                                "type": "memory_notification",
-                                "updated": True,
-                                "summary": "Working memory updated",
-                                "duration_ms": node_elapsed,
-                            })
-
-                    # ── LLM lifecycle ──
-                    elif kind == "on_chat_model_start":
-                        model_name = ""
-                        kwargs = event.get("data", {}).get("input", {})
-                        if isinstance(kwargs, dict):
-                            msgs_in = kwargs.get("messages", [])
-                            if isinstance(msgs_in, list):
-                                # Count by type
-                                counts = {}
-                                for m in (msgs_in[0] if msgs_in and isinstance(msgs_in[0], list) else msgs_in):
-                                    t = getattr(m, "type", "unknown")
-                                    counts[t] = counts.get(t, 0) + 1
-                                detail_str = ", ".join(f"{v} {k}" for k, v in counts.items())
-                                model_name = f" ({detail_str})"
-                        await _trace("llm", f"LLM call started{model_name}", action="start")
-
-                    elif kind == "on_chat_model_end":
-                        resp = event.get("data", {}).get("output")
-                        info = {}
-                        if resp:
-                            if hasattr(resp, "usage_metadata") and resp.usage_metadata:
-                                info["tokens"] = dict(resp.usage_metadata)
-                            has_tool_calls = hasattr(resp, "tool_calls") and resp.tool_calls
-                            if has_tool_calls:
-                                info["tool_calls"] = [tc["name"] for tc in resp.tool_calls]
-                                # Tell the UI: the text just streamed was thinking
-                                # (companion will make tool calls, then answer).
-                                # UI should clear the bubble so the final answer
-                                # starts fresh.
-                                # Applies to companion (v0.0.6) and conversation (v0.10)
-                                if _current_node in ("companion", "conversation"):
-                                    thinking = _node_stream_text.get(_current_node, "")
-                                    await ws.send_json({
-                                        "type": "stream_clear",
-                                        "node": _current_node,
-                                        "thinking": thinking.strip() if thinking else "",
-                                    })
-                                    # Reset stream text and full_response
-                                    # so the final answer starts fresh
-                                    _node_stream_text[_current_node] = ""
-                                    full_response = ""
-                            # Capture the LAST non-tool-call AI response —
-                            # but NOT from the evolve node, whose LLM calls
-                            # (objective extraction, memory update) are internal
-                            # and must not overwrite the user-facing response.
-                            if not has_tool_calls and hasattr(resp, "content") and _current_node != "evolve":
-                                text = _extract_text(resp.content)
-                                if text:
-                                    full_response = text
-                                    streaming_started = True
-                                    if _current_node:
-                                        _node_text[_current_node] = text
-                        await _trace("llm", "LLM call complete", action="end",
-                                     detail=info if info else None)
-
-                    # ── Token streaming ──
-                    elif kind == "on_chat_model_stream":
-                        # Skip streaming tokens from evolve node — its internal
-                        # LLM calls (memory update, objective extraction) should
-                        # not dump full content to the chat UI.
-                        if _current_node == "evolve":
-                            continue
-                        chunk = event.get("data", {}).get("chunk")
-                        if chunk and hasattr(chunk, "content") and chunk.content:
-                            token = _extract_text(chunk.content)
-                            if token:
-                                if not streaming_started:
-                                    streaming_started = True
-                                full_response += token
-                                if _current_node:
-                                    _node_stream_text[_current_node] = _node_stream_text.get(_current_node, "") + token
-                                await ws.send_json({"type": "stream", "token": token, "node": _current_node or None})
-
-                    # ── Tool lifecycle ──
-                    elif kind == "on_tool_start":
-                        tool_name = event.get("name", "unknown")
-                        tool_input = event.get("data", {}).get("input", {})
-                        is_claw = tool_name.startswith("claw_")
-                        cat = "claw" if is_claw else "tool"
-                        await _trace(cat, f"⚡ {tool_name}",
-                                     tool=tool_name, action="start",
-                                     sandboxed=is_claw,
-                                     input=_safe_truncate(tool_input))
-
-                    elif kind == "on_tool_end":
-                        tool_name = event.get("name", "unknown")
-                        tool_output = event.get("data", {}).get("output", "")
-                        output_str = str(tool_output)
-                        is_claw = tool_name.startswith("claw_")
-                        cat = "claw" if is_claw else "tool"
-                        await _trace(cat, f"✓ {tool_name}",
-                                     tool=tool_name, action="end",
-                                     sandboxed=is_claw,
-                                     output_preview=output_str[:200])
-
-                # Signal the agent event drainer to stop and wait for it
-                _agent_queue.put_nowait(None)
-                await _drain_task
-
-                total_ms = round((_time.monotonic() - _t0) * 1000)
-                logger.info("WS turn complete: %d events, %d chars response, %dms",
-                            _event_count, len(full_response), total_ms)
-
-                if not full_response:
-                    full_response = "I processed your message but have no response to show."
-
-                await _trace("graph", f"Complete ({total_ms}ms)", duration_ms=total_ms)
-
-                await ws.send_json({
-                    "type": "response",
-                    "content": full_response,
-                    "meta": {
-                        "mode": last_mode,
-                        "knowledge_count": len(last_knowledge),
-                        "session_knowledge_count": last_session_knowledge_count,
-                        "skills": last_skills,
-                        "fdo_ids": [k.id for k in last_knowledge[:5]] if last_knowledge else [],
-                        "total_ms": total_ms,
-                    },
-                })
-
-            except Exception as exc:
-                import traceback
-                tb = traceback.format_exc()
-                logger.error("WS processing error: %s\n%s", exc, tb)
-                # Send error with enough detail to debug
-                exc_type = type(exc).__name__
-                exc_loc = ""
-                if exc.__traceback__:
-                    frame = exc.__traceback__
-                    while frame.tb_next:
-                        frame = frame.tb_next
-                    exc_loc = f" at {frame.tb_frame.f_code.co_filename}:{frame.tb_lineno}"
-                await ws.send_json({
-                    "type": "error",
-                    "content": f"Error ({exc_type}{exc_loc}): {exc}",
-                })
-
-    except WebSocketDisconnect:
-        logger.info("WS disconnected: %s", session_id)
-    finally:
-        _active_ws_sessions.discard(session_id)
-
-
-# ---------------------------------------------------------------------------
-# Pool event → WebSocket push
-# ---------------------------------------------------------------------------
-
-async def _broadcast_pool_event(event) -> None:
-    """Push pool events to all connected v2 WebSocket clients."""
-    if not _v2_websockets:
-        return
-    msg = {"type": "pool_event", **event.to_dict()}
-    dead = set()
-    for ws in _v2_websockets:
-        try:
-            await ws.send_json(msg)
-        except Exception:
-            dead.add(ws)
-    _v2_websockets.difference_update(dead)
-
-
-# ---------------------------------------------------------------------------
-# v2 WebSocket — GrimClient SDK sessions
-# ---------------------------------------------------------------------------
-
-@app.websocket("/ws/v2/{session_id}")
-async def websocket_chat_v2(ws: WebSocket, session_id: str):
-    """v2 WebSocket chat — uses GrimClient SDK sessions.
-
-    Same client protocol as /ws/{session_id}:
       Client sends: {"message": "...", "caller_id": "..."}
       Server sends:
-        {"type": "trace", "cat": "...", "text": "..."}  — trace events
-        {"type": "stream", "token": "..."}               — text tokens
-        {"type": "response", "content": "...", "meta": {...}} — final
-        {"type": "error", "content": "..."}              — error
+        {"type": "trace", "cat": "...", "text": "..."}       — trace events
+        {"type": "stream", "token": "..."}                    — text tokens
+        {"type": "response", "content": "...", "meta": {...}} — final response
+        {"type": "error", "content": "..."}                   — error
     """
     if _session_manager is None:
         await ws.accept()
@@ -1584,8 +1273,8 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
         return
 
     await ws.accept()
-    _v2_websockets.add(ws)
-    logger.info("WS v2 connected: %s", session_id)
+    _ws_connections.add(ws)
+    logger.info("WS connected: %s", session_id)
 
     try:
         while True:
@@ -1618,8 +1307,14 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
                 full_response = ""
                 tool_trace: list[str] = []
 
+                # Timeout: 120s max for the entire streaming response
+                SDK_TIMEOUT = 120
+
                 async for event in client.send_streaming(message):
                     elapsed = round((_time.monotonic() - _t0) * 1000)
+                    if elapsed > SDK_TIMEOUT * 1000:
+                        logger.warning("SDK response timed out after %ds", SDK_TIMEOUT)
+                        break
 
                     if event.type == "text":
                         token = event.data.get("text", "")
@@ -1646,10 +1341,7 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
                         })
 
                     elif event.type == "result":
-                        cost = event.data.get("cost_usd")
-                        turns = event.data.get("num_turns")
                         total_ms = round((_time.monotonic() - _t0) * 1000)
-
                         await ws.send_json({
                             "type": "trace",
                             "cat": "sdk",
@@ -1667,6 +1359,7 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
 
                 # Get cost/turn data from session
                 session_info = client.session_info
+                turn_cost = session_info.get("total_cost_usd", 0)
 
                 await ws.send_json({
                     "type": "response",
@@ -1675,18 +1368,27 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
                         "mode": "sdk",
                         "tools": tool_trace,
                         "total_ms": total_ms,
-                        "cost_usd": session_info.get("total_cost_usd", 0),
+                        "cost_usd": turn_cost,
                         "turn_count": session_info.get("turn_count", 0),
                     },
                 })
 
-                logger.info("WS v2 turn: %s — %d chars, %d tools, %dms",
+                # Persist conversation turn
+                await _session_manager.save_turn(
+                    session_id,
+                    user_message=message,
+                    assistant_message=full_response,
+                    cost_usd=turn_cost,
+                    tools_used=tool_trace or None,
+                )
+
+                logger.info("WS turn: %s — %d chars, %d tools, %dms",
                             session_id, len(full_response), len(tool_trace), total_ms)
 
             except Exception as exc:
                 import traceback
                 tb = traceback.format_exc()
-                logger.error("WS v2 error: %s\n%s", exc, tb)
+                logger.error("WS error: %s\n%s", exc, tb)
                 exc_type = type(exc).__name__
                 await ws.send_json({
                     "type": "error",
@@ -1694,24 +1396,79 @@ async def websocket_chat_v2(ws: WebSocket, session_id: str):
                 })
 
     except WebSocketDisconnect:
-        logger.info("WS v2 disconnected: %s", session_id)
+        logger.info("WS disconnected: %s", session_id)
     finally:
-        _v2_websockets.discard(ws)
+        _ws_connections.discard(ws)
 
 
 # ---------------------------------------------------------------------------
-# v2 Session API endpoints
+# Pool event → WebSocket push
 # ---------------------------------------------------------------------------
+
+async def _broadcast_pool_event(event) -> None:
+    """Push pool events to connected WebSocket clients.
+
+    Lifecycle events (job_submitted, etc.) go to ALL clients.
+    Streaming events (agent_output, agent_tool_result) go only to clients
+    that have subscribed to the specific job_id.
+    """
+    from core.pool.events import is_streaming_event
+
+    msg = {**event.to_dict(), "type": "pool_event"}  # type MUST come last — to_dict() data may contain "type" from SDK blocks
+    is_stream = is_streaming_event(event)
+
+    all_pool_ws = set(_pool_ws_subs.keys())
+    all_ws = _ws_connections | all_pool_ws
+    if not all_ws:
+        return
+
+    dead_chat = set()
+    dead_pool = set()
+
+    # Chat WebSocket connections get lifecycle events only
+    if not is_stream:
+        for ws in _ws_connections:
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                dead_chat.add(ws)
+
+    # Pool WebSocket connections: lifecycle → all, streaming → subscribed only
+    for ws in all_pool_ws:
+        if is_stream:
+            subs = _pool_ws_subs.get(ws, set())
+            if event.job_id not in subs and "*" not in subs:
+                continue
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead_pool.add(ws)
+
+    _ws_connections.difference_update(dead_chat)
+    for ws in dead_pool:
+        _pool_ws_subs.pop(ws, None)
+
+
+# ---------------------------------------------------------------------------
+# Legacy v2 path aliases (backwards compat during transition)
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/v2/{session_id}")
+async def websocket_chat_v2_alias(ws: WebSocket, session_id: str):
+    """Alias — redirects to primary /ws/{session_id}."""
+    await websocket_chat(ws, session_id)
+
+
+@app.post("/api/v2/chat")
+async def chat_v2_alias(req: ChatRequest):
+    """Alias — redirects to primary /api/chat."""
+    return await chat_rest(req)
+
 
 @app.get("/api/v2/sessions")
-async def list_v2_sessions():
-    """List active SDK sessions."""
-    if _session_manager is None:
-        return JSONResponse({"sessions": [], "error": "SDK sessions not available"}, status_code=503)
-    return JSONResponse({
-        "sessions": _session_manager.list_sessions(),
-        "count": _session_manager.active_count,
-    })
+async def list_v2_sessions_alias():
+    """Alias — redirects to primary /api/sessions."""
+    return await list_sessions()
 
 
 @app.delete("/api/v2/sessions/{session_id}")
@@ -1725,31 +1482,21 @@ async def destroy_v2_session(session_id: str):
     return JSONResponse({"error": "Session not found"}, status_code=404)
 
 
-@app.post("/api/v2/chat")
-async def chat_v2_rest(req: ChatRequest):
-    """REST endpoint for v2 SDK sessions — send a message, get a response."""
+@app.get("/api/v2/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str, limit: int = 100, offset: int = 0):
+    """Get conversation history for a session."""
     if _session_manager is None:
         return JSONResponse({"error": "SDK sessions not available"}, status_code=503)
+    messages = await _session_manager.get_history(
+        session_id, limit=limit, offset=offset,
+    )
+    return JSONResponse({"session_id": session_id, "messages": messages, "count": len(messages)})
 
-    session_id = req.session_id or str(uuid.uuid4())[:8]
-    caller_id = req.caller_id or "peter"
 
-    try:
-        client = await _session_manager.get_or_create(session_id, caller_id=caller_id)
-        resp = await client.send(req.message)
-
-        _session_manager.touch(session_id)
-
-        return JSONResponse({
-            "response": resp.text or "No response.",
-            "session_id": session_id,
-            "tool_calls": resp.tool_calls,
-            "cost_usd": resp.cost_usd,
-            "num_turns": resp.num_turns,
-        })
-    except Exception as exc:
-        logger.exception("v2 chat error")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+@app.get("/api/sessions/{session_id}/messages")
+async def get_session_messages_primary(session_id: str, limit: int = 100, offset: int = 0):
+    """Get conversation history for a session (primary path)."""
+    return await get_session_messages(session_id, limit=limit, offset=offset)
 
 
 # ---------------------------------------------------------------------------
@@ -1758,7 +1505,7 @@ async def chat_v2_rest(req: ChatRequest):
 
 @app.get("/api/graph/topology")
 async def graph_topology():
-    """Serialize the GRIM LangGraph topology for the Graph Studio UI.
+    """Serialize the GRIM graph topology for the Graph Studio UI.
 
     Merges static infrastructure node metadata with live agent-registry
     metadata (companion nodes + discovered agents).  Returns nodes with
@@ -1808,90 +1555,27 @@ async def graph_topology():
 
 @app.get("/api/graph/sessions")
 async def graph_sessions():
-    """Active WebSocket session count for Graph Studio status bar."""
+    """Active session count for Graph Studio status bar."""
+    count = _session_manager.active_count if _session_manager else 0
     return JSONResponse({
-        "active": len(_active_ws_sessions),
-        "session_ids": sorted(_active_ws_sessions),
+        "active": count,
     })
 
 
-# ---------------------------------------------------------------------------
-# Session Knowledge endpoints
-# ---------------------------------------------------------------------------
+# Session Knowledge endpoints — deferred to Phase 9 (UI)
+# These return empty stubs for now; the v1 LangGraph-based session knowledge
+# system will be reimplemented with SDK-native tracing.
 
 @app.get("/api/session/knowledge")
 async def api_session_knowledge(session_id: str | None = None):
-    """Return accumulated session knowledge entries for a session.
-
-    If no session_id is provided, returns entries for the most recent active session.
-    """
-    if session_id and session_id in _session_knowledge:
-        entries = _session_knowledge[session_id]
-    elif not session_id and _session_knowledge:
-        # Most recently updated session
-        entries = list(_session_knowledge.values())[-1]
-    else:
-        entries = []
-
-    return JSONResponse({
-        "entries": entries,
-        "count": len(entries),
-    })
+    """Session knowledge entries (stub — reimplemented in Phase 9)."""
+    return JSONResponse({"entries": [], "count": 0})
 
 
 @app.get("/api/session/knowledge/graph")
 async def api_session_knowledge_graph(session_id: str | None = None):
-    """Build a force-graph from session knowledge entries.
-
-    Nodes = accumulated FDOs, sized by hit_count.
-    Edges = related links between FDOs present in the session.
-    """
-    if session_id and session_id in _session_knowledge:
-        entries = _session_knowledge[session_id]
-    elif not session_id and _session_knowledge:
-        entries = list(_session_knowledge.values())[-1]
-    else:
-        return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
-
-    # Build node set
-    node_map: dict[str, dict] = {}
-    for e in entries:
-        fdo_id = e.get("fdo_id", "")
-        if not fdo_id:
-            continue
-        node_map[fdo_id] = {
-            "id": fdo_id,
-            "title": e.get("fdo_title", fdo_id),
-            "domain": e.get("fdo_domain", ""),
-            "confidence": e.get("fdo_confidence", 0),
-            "hit_count": e.get("hit_count", 1),
-            "fetched_turn": e.get("fetched_turn", 0),
-            "fetched_by": e.get("fetched_by", ""),
-        }
-
-    # Build edges from related links (only between nodes in the session)
-    edges: list[dict] = []
-    seen_edges: set[tuple[str, str]] = set()
-    for e in entries:
-        fdo_id = e.get("fdo_id", "")
-        for related_id in e.get("related", []):
-            if related_id in node_map and fdo_id != related_id:
-                edge_key = tuple(sorted((fdo_id, related_id)))
-                if edge_key not in seen_edges:
-                    seen_edges.add(edge_key)
-                    edges.append({
-                        "source": edge_key[0],
-                        "target": edge_key[1],
-                        "type": "related",
-                    })
-
-    nodes = list(node_map.values())
-    return JSONResponse({
-        "nodes": nodes,
-        "edges": edges,
-        "node_count": len(nodes),
-        "edge_count": len(edges),
-    })
+    """Session knowledge graph (stub — reimplemented in Phase 9)."""
+    return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
 
 
 @app.get("/api/memory/graph")
@@ -1916,7 +1600,23 @@ async def api_memory_graph():
     if not memory_content:
         return JSONResponse({"nodes": [], "edges": [], "sections": [], "node_count": 0, "edge_count": 0})
 
-    # Parse sections and extract wikilinks
+    # Build a set of known FDO IDs for plain-text matching
+    known_fdo_ids: set[str] = set()
+    try:
+        from core.tools.context import tool_context as _tc
+        if _tc.mcp_session:
+            result = await _tc.mcp_session.call_tool("kronos_list", {})
+            import json as _json
+            data = _json.loads(result.content[0].text)
+            for item in data.get("fdos", []):
+                known_fdo_ids.add(item["id"])
+            logger.info("Memory graph: loaded %d known FDO IDs for matching", len(known_fdo_ids))
+        else:
+            logger.warning("Memory graph: no MCP session — FDO matching disabled")
+    except Exception as exc:
+        logger.warning("Memory graph: kronos_list failed: %s", exc)
+
+    # Parse sections and extract FDO references (wikilinks + plain text)
     sections: dict[str, list[str]] = {}
     current_section = "root"
     for line in memory_content.split("\n"):
@@ -1926,6 +1626,16 @@ async def api_memory_graph():
         else:
             # Extract [[fdo-id]] wikilinks
             refs = re.findall(r"\[\[([a-z0-9-]+)\]\]", line)
+            # Also detect known FDO IDs as plain text
+            if known_fdo_ids:
+                # Match backtick-wrapped IDs and bare kebab-case words
+                for token in re.findall(r"`([a-z][a-z0-9-]+)`", line):
+                    if token in known_fdo_ids and token not in refs:
+                        refs.append(token)
+                # Also try bare words (split on non-alphanum-dash)
+                for token in re.split(r"[^a-z0-9-]", line.lower()):
+                    if "-" in token and token in known_fdo_ids and token not in refs:
+                        refs.append(token)
             for ref in refs:
                 sections.setdefault(current_section, [])
                 if ref not in sections[current_section]:
@@ -2436,6 +2146,52 @@ async def ws_eval_progress(ws: WebSocket, run_id: str):
 # Pool API (Project Charizard)
 # ---------------------------------------------------------------------------
 
+@app.websocket("/ws-pool")
+async def websocket_pool(ws: WebSocket):
+    """Dedicated pool event WebSocket with job-scoped streaming subscriptions.
+
+    Lifecycle events are broadcast to all connected clients.
+    Streaming events (agent_output, agent_tool_result) are only sent to
+    clients that subscribe to specific job_ids.
+
+    Client → server messages (JSON):
+        {"action": "subscribe", "job_id": "job-abc12345"}
+        {"action": "unsubscribe", "job_id": "job-abc12345"}
+        {"action": "subscribe_all"}   — receive streaming for ALL jobs
+        {"action": "unsubscribe_all"} — clear all streaming subscriptions
+    """
+    await ws.accept()
+    _pool_ws_subs[ws] = set()
+    logger.info("Pool WS connected (total: %d)", len(_pool_ws_subs))
+    try:
+        while True:
+            raw = await ws.receive_text()
+            logger.debug("Pool WS recv: %s", raw[:200])
+            try:
+                msg = json.loads(raw)
+                action = msg.get("action", "")
+                job_id = msg.get("job_id", "")
+                if action == "subscribe" and job_id:
+                    _pool_ws_subs[ws].add(job_id)
+                    logger.info("Pool WS subscribed to %s", job_id)
+                elif action == "unsubscribe" and job_id:
+                    _pool_ws_subs[ws].discard(job_id)
+                elif action == "subscribe_all":
+                    _pool_ws_subs[ws].add("*")
+                    logger.info("Pool WS subscribed to ALL")
+                elif action == "unsubscribe_all":
+                    _pool_ws_subs[ws].clear()
+            except (json.JSONDecodeError, AttributeError):
+                pass
+    except WebSocketDisconnect:
+        logger.info("Pool WS client disconnected")
+    except Exception as exc:
+        logger.warning("Pool WS error: %s", exc)
+    finally:
+        _pool_ws_subs.pop(ws, None)
+        logger.info("Pool WS cleanup (remaining: %d)", len(_pool_ws_subs))
+
+
 @app.get("/api/pool/status")
 async def api_pool_status():
     """Get execution pool status."""
@@ -2540,8 +2296,271 @@ async def api_pool_events_info():
         return JSONResponse({"error": "Pool not enabled"}, status_code=503)
     return JSONResponse({
         "subscribers": _execution_pool.events.subscriber_count,
-        "active_ws": len(_v2_websockets),
+        "active_ws": len(_pool_ws_subs),
     })
+
+
+@app.get("/api/pool/metrics")
+async def api_pool_metrics(hours: int = 24):
+    """Aggregated pool metrics for the Mission Control dashboard."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    from datetime import datetime, timedelta, timezone
+    from core.pool.models import JobStatus
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    jobs = await _execution_pool.queue.list_jobs(limit=1000)
+
+    # Job is a Pydantic model — use attribute access, not .get()
+    completed = [j for j in jobs if j.status == JobStatus.COMPLETE]
+    failed = [j for j in jobs if j.status == JobStatus.FAILED]
+    running = [j for j in jobs if j.status == JobStatus.RUNNING]
+    queued = [j for j in jobs if j.status == JobStatus.QUEUED]
+
+    # Compute average duration from created_at → updated_at for completed jobs
+    durations = []
+    for j in completed:
+        try:
+            delta = (j.updated_at - j.created_at).total_seconds() * 1000
+            if delta > 0:
+                durations.append(delta)
+        except (TypeError, AttributeError):
+            pass
+
+    avg_duration_ms = sum(durations) / len(durations) if durations else 0
+
+    return JSONResponse({
+        "completed_count": len(completed),
+        "failed_count": len(failed),
+        "running_count": len(running),
+        "queued_count": len(queued),
+        "avg_duration_ms": round(avg_duration_ms, 1),
+        "total_cost_usd": 0,
+        "throughput_per_hour": round(len(completed) / max(hours, 1), 2),
+        "period_hours": hours,
+    })
+
+
+@app.get("/api/pool/workspaces/{workspace_id}/files")
+async def api_pool_workspace_files(workspace_id: str, base_branch: str = "main"):
+    """List changed files with status in a workspace."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    changed = await mgr.list_changed_files(workspace_id, base_branch)
+    return JSONResponse({
+        "workspace_id": workspace_id,
+        "files": changed or [],
+    })
+
+
+@app.get("/api/pool/workspaces/{workspace_id}/file")
+async def api_pool_workspace_file(workspace_id: str, path: str = ""):
+    """Read a file from a workspace worktree."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    if not path:
+        return JSONResponse({"error": "path parameter required"}, status_code=400)
+
+    # Security: prevent path traversal
+    from pathlib import PurePosixPath
+    try:
+        clean = PurePosixPath(path)
+        if ".." in clean.parts:
+            return JSONResponse({"error": "Invalid path"}, status_code=400)
+    except Exception:
+        return JSONResponse({"error": "Invalid path"}, status_code=400)
+
+    file_path = ws.worktree_path / path
+    if not file_path.is_file():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        # Truncate very large files
+        if len(content) > 100_000:
+            content = content[:100_000] + "\n\n... (truncated at 100KB)"
+        return JSONResponse({
+            "workspace_id": workspace_id,
+            "path": path,
+            "content": content,
+            "size": file_path.stat().st_size,
+        })
+    except Exception as e:
+        return JSONResponse({"error": f"Could not read file: {e}"}, status_code=500)
+
+
+@app.get("/api/pool/workspaces")
+async def api_pool_workspaces():
+    """List active pool workspaces."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    return JSONResponse(mgr.list_workspaces())
+
+
+@app.get("/api/pool/workspaces/{workspace_id}/diff")
+async def api_pool_workspace_diff(workspace_id: str, base_branch: str = "main"):
+    """Get full diff for a workspace."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    diff = await mgr.get_full_diff(workspace_id, base_branch)
+    changed = await mgr.list_changed_files(workspace_id, base_branch)
+    stat = await mgr.get_branch_diff(workspace_id, base_branch)
+    return JSONResponse({
+        "workspace_id": workspace_id,
+        "diff_stat": stat,
+        "changed_files": changed,
+        "full_diff": diff,
+    })
+
+
+@app.post("/api/pool/workspaces/{workspace_id}/merge")
+async def api_pool_workspace_merge(workspace_id: str, request: Request):
+    """Squash-merge a workspace branch back to base and cleanup."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    body = await request.json()
+    base_branch = body.get("base_branch", "main")
+    success = await mgr.merge_to_base(workspace_id, base_branch)
+    if success:
+        return JSONResponse({"ok": True, "workspace_id": workspace_id, "merged": True})
+    return JSONResponse({"error": "Merge failed"}, status_code=500)
+
+
+@app.delete("/api/pool/workspaces/{workspace_id}")
+async def api_pool_workspace_delete(workspace_id: str):
+    """Destroy a workspace without merging."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    success = await mgr.destroy(workspace_id)
+    if success:
+        return JSONResponse({"ok": True, "workspace_id": workspace_id})
+    return JSONResponse({"error": "Workspace not found"}, status_code=404)
+
+
+@app.post("/api/pool/jobs/{job_id}/retry")
+async def api_pool_retry(job_id: str):
+    """Re-queue a FAILED job for retry."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    from core.pool.models import JobStatus
+    job = await _execution_pool.queue.get(job_id)
+    if job is None:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+    if job.status != JobStatus.FAILED:
+        return JSONResponse({"error": f"Cannot retry job in status: {job.status.value}"}, status_code=409)
+    await _execution_pool.queue.update_status(job_id, JobStatus.QUEUED, retry_count=0)
+    return JSONResponse({"ok": True, "job_id": job_id, "status": "queued"})
+
+
+@app.post("/api/pool/jobs/{job_id}/review")
+async def api_pool_review(request: Request, job_id: str):
+    """Approve or reject a completed job with workspace."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    body = await request.json()
+    action = body.get("action", "")  # "approve" or "reject"
+    if action not in ("approve", "reject"):
+        return JSONResponse({"error": "action must be 'approve' or 'reject'"}, status_code=400)
+
+    mgr = _execution_pool.workspace_manager
+    # Find workspace for this job
+    ws_id = _execution_pool._job_workspace_map.get(job_id)
+    if not ws_id or not mgr:
+        return JSONResponse({"error": "No workspace found for this job"}, status_code=404)
+
+    if action == "approve":
+        base_branch = body.get("base_branch", "main")
+        success = await mgr.merge_to_base(ws_id, base_branch)
+        _execution_pool._job_workspace_map.pop(job_id, None)
+        if success:
+            return JSONResponse({"ok": True, "job_id": job_id, "action": "approved", "merged": True})
+        return JSONResponse({"error": "Merge failed"}, status_code=500)
+    else:
+        await mgr.destroy(ws_id)
+        _execution_pool._job_workspace_map.pop(job_id, None)
+        return JSONResponse({"ok": True, "job_id": job_id, "action": "rejected", "destroyed": True})
+
+
+@app.post("/api/pool/workspaces/{workspace_id}/snapshot")
+async def api_pool_workspace_snapshot(workspace_id: str):
+    """Create a snapshot of a workspace."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    snapshot_dir = Path(getattr(_config, "workspace_root", ".")) / ".grim" / "snapshots"
+    path = await mgr.snapshot(workspace_id, snapshot_dir)
+    if path:
+        return JSONResponse({"ok": True, "workspace_id": workspace_id, "snapshot_path": str(path)})
+    return JSONResponse({"error": "Snapshot failed"}, status_code=500)
+
+
+@app.get("/api/pool/snapshots")
+async def api_pool_snapshots():
+    """List available workspace snapshots."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    snapshot_dir = Path(getattr(_config, "workspace_root", ".")) / ".grim" / "snapshots"
+    return JSONResponse(mgr.list_snapshots(snapshot_dir))
+
+
+@app.post("/api/pool/workspaces/restore")
+async def api_pool_workspace_restore(request: Request):
+    """Restore a workspace from a snapshot."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    body = await request.json()
+    snapshot_path = body.get("snapshot_path", "")
+    job_id = body.get("job_id", "")
+    repo_path = body.get("repo_path", "")
+    if not snapshot_path or not job_id:
+        return JSONResponse({"error": "Missing snapshot_path or job_id"}, status_code=400)
+    ws = await mgr.restore_snapshot(
+        Path(snapshot_path), job_id, Path(repo_path) if repo_path else Path("."),
+    )
+    if ws:
+        return JSONResponse({"ok": True, "workspace": ws.to_dict()})
+    return JSONResponse({"error": "Restore failed"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -2558,27 +2577,3 @@ def _safe_truncate(obj: Any, max_len: int = 200) -> Any:
     return str(obj)[:max_len]
 
 
-def _extract_text(content: Any) -> str:
-    """Extract plain text from LLM content (handles Anthropic list blocks)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
-        return "".join(parts)
-    return str(content) if content else ""
-
-
-def _extract_response(result: dict) -> str:
-    """Pull GRIM's response from the graph result."""
-    messages = result.get("messages", [])
-    for msg in reversed(messages):
-        if hasattr(msg, "type") and msg.type == "ai":
-            text = _extract_text(msg.content if hasattr(msg, "content") else str(msg))
-            if text:
-                return text
-    return "I processed your message but have no response to show."

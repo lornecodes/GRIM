@@ -1,4 +1,9 @@
-"""GRIM State Graph — wire all nodes into the LangGraph state machine.
+"""DEPRECATED: GRIM State Graph — LangGraph v1 state machine.
+
+NOTE: This module is deprecated as of Phase 7 (Project Charizard).
+The server now uses GrimClient (core/client.py) with Claude Agent SDK.
+This file is kept because node functions are tested independently.
+It will be fully removed once all node tests are migrated.
 
 The graph is built from composable sections. Each section adds a group
 of related nodes and edges. This makes it possible to build different
@@ -167,13 +172,13 @@ def add_planning_graph(
 
 
     # NOTE: v0.10 companion router, subgraphs, and response generator removed.
-    # These depended on the dispatch pipeline (IronClaw). Agent execution now
-    # uses GrimClient SDK sessions. The v0.10 graph mode may be re-implemented
+    # These depended on the dispatch pipeline. Agent execution now uses
+    # GrimClient SDK sessions. The v0.10 graph mode may be re-implemented
     # on top of GrimClient in a future iteration.
 
 
     # NOTE: add_agents() removed — dispatch/audit/re_dispatch pipeline was the
-    # IronClaw staging system. Agent execution now uses GrimClient SDK sessions
+    # old staging system. Agent execution now uses GrimClient SDK sessions
     # via core/client.py + core/pool/. The old LangGraph graph retains companion
     # paths (personal, planning, research) for backwards compat until server.py
     # migrates to GrimClient in story-003.

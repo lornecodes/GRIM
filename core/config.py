@@ -49,8 +49,7 @@ class GrimConfig:
     # Models — disabled tiers (e.g. ["opus"] to block expensive tier)
     models_disabled: list[str] = field(default_factory=list)
 
-    # Agents — disabled agent IDs (e.g. ["ironclaw"] to disable sandbox)
-    # "code" disabled by default: all code ops go through IronClaw (v0.0.6)
+    # Agents — disabled agent IDs (e.g. ["code"] to disable code execution)
     agents_disabled: list[str] = field(default_factory=lambda: ["code"])
 
     # Evolution
@@ -84,6 +83,7 @@ class GrimConfig:
     pool_db_path: Path = field(default_factory=lambda: Path("local/pool.db"))
     pool_max_turns_per_job: int = 20
     pool_job_timeout_secs: int = 300
+    pool_discord_webhook_url: str = ""
 
     # Redis (optional — for reasoning cache)
     redis_url: str = ""

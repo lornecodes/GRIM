@@ -16,10 +16,11 @@ auth-dir: "/root/.cli-proxy-api"
 api-keys: []
 
 # Strip the system field from Claude requests.
-# CLIProxyAPI's checkSystemInstructions() prepends "You are Claude Code..."
-# to every request's system field, overriding GRIM's identity. By filtering
-# the system field, the injected prompt is removed. GRIM compensates by
-# passing its system prompt as the first message in the conversation.
+# CLIProxyAPI's checkSystemInstructions() replaces the system field with
+# "You are Claude Code..." on every request. The ai-bridge compensates by
+# moving the original system content into the messages array before forwarding,
+# so the model still sees our system instructions. The filter then strips
+# CLIProxyAPI's injected system prompt.
 payload:
   filter:
     - models:

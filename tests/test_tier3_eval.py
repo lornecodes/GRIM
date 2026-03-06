@@ -707,9 +707,9 @@ class TestTier3Schemas:
     def test_routing_expectation(self):
         from eval.schema import RoutingExpectation
 
-        exp = RoutingExpectation(subgraph="research", delegation_type="ironclaw")
+        exp = RoutingExpectation(subgraph="research", delegation_type="code")
         assert exp.subgraph == "research"
-        assert exp.delegation_type == "ironclaw"
+        assert exp.delegation_type == "code"
 
     def test_domain_fact(self):
         from eval.schema import DomainFact

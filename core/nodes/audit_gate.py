@@ -1,6 +1,6 @@
 """Audit gate node — decide whether dispatched output needs audit review.
 
-Only IronClaw dispatches with staged artifacts go through the audit path.
+Only code dispatches with staged artifacts go through the audit path.
 All other agents (memory, coder, researcher, operator) skip straight to
 integrate, preserving backward compatibility.
 """
@@ -23,13 +23,13 @@ def audit_gate_decision(state: GrimState) -> str:
     """Decide: route to audit or skip to integrate.
 
     Returns:
-        "audit" if IronClaw dispatched with staging artifacts.
+        "audit" if code agent dispatched with staging artifacts.
         "skip" for all other agents.
     """
     delegation = state.get("delegation_type")
     artifacts = state.get("staging_artifacts", [])
 
-    if delegation == "ironclaw" and artifacts:
+    if delegation == "code" and artifacts:
         logger.info(
             "Audit gate: routing to audit (%d artifacts, job %s)",
             len(artifacts),

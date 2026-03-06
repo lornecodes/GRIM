@@ -17,6 +17,8 @@ from core.pool.models import (
     JobStatus,
     JobType,
 )
+from core.pool.codebase import CodebaseManager
+from core.pool.locks import ResourceLock
 from core.pool.queue import JobQueue
 from core.pool.slot import AgentSlot
 from core.pool.workspace import WorkspaceManager
@@ -45,14 +47,28 @@ class ExecutionPool:
 
         # Workspace manager for git worktree isolation
         workspace_root = getattr(config, "workspace_root", None)
+        self._workspace_root = Path(workspace_root) if workspace_root else None
         worktree_base = Path(workspace_root) / ".grim" / "worktrees" if workspace_root else None
         self._workspace_mgr: WorkspaceManager | None = (
             WorkspaceManager(worktree_base) if worktree_base else None
         )
         self._job_workspace_map: dict[str, str] = {}  # job_id → workspace_id
 
+        # Codebase manager for bare-cache repo cloning
+        cache_dir = Path(workspace_root) / "local" / "repos" if workspace_root else None
+        self._codebase_mgr: CodebaseManager | None = None
+        if cache_dir and self._workspace_root:
+            self._codebase_mgr = CodebaseManager(
+                cache_dir=cache_dir,
+                workspace_root=self._workspace_root,
+                repos_manifest=getattr(config, "repos_manifest", "repos.yaml"),
+            )
+
         # Event bus for push notifications
         self.events = PoolEventBus()
+
+        # Resource lock for shared operations (pytest, pip, npm, git main)
+        self._resource_lock = ResourceLock()
 
         # Build Kronos MCP env from config
         self._kronos_mcp_command = getattr(config, "kronos_mcp_command", "")
@@ -65,11 +81,20 @@ class ExecutionPool:
             self._kronos_mcp_env["KRONOS_SKILLS_PATH"] = str(skills_path)
         if workspace_root:
             self._kronos_mcp_env["KRONOS_WORKSPACE_ROOT"] = str(workspace_root)
-        self._workspace_root = Path(workspace_root) if workspace_root else None
 
     async def start(self) -> None:
-        """Initialize queue and start the dispatch loop."""
+        """Initialize queue, refresh caches, and start the dispatch loop."""
         await self._queue.initialize()
+
+        # Initialize codebase caches (non-blocking — failures are logged, not fatal)
+        if self._codebase_mgr:
+            try:
+                await self._codebase_mgr.load_manifest()
+                results = await self._codebase_mgr.refresh_all()
+                refreshed = sum(1 for v in results.values() if v)
+                logger.info("Codebase caches refreshed: %d/%d", refreshed, len(results))
+            except Exception:
+                logger.exception("Failed to refresh codebase caches — continuing without")
 
         # Create agent slots
         num_slots = getattr(self._config, "pool_num_slots", 2)
@@ -140,6 +165,16 @@ class ExecutionPool:
         return self._queue
 
     @property
+    def workspace_manager(self) -> WorkspaceManager | None:
+        """Access the workspace manager (None if not configured)."""
+        return self._workspace_mgr
+
+    @property
+    def codebase(self) -> CodebaseManager | None:
+        """Access the codebase manager (None if not configured)."""
+        return self._codebase_mgr
+
+    @property
     def status(self) -> dict[str, Any]:
         """Current pool state — slot statuses + queue counts."""
         slots_info = []
@@ -154,7 +189,35 @@ class ExecutionPool:
             "slots": slots_info,
             "active_jobs": len(self._tasks),
             "active_workspaces": self._workspace_mgr.active_count if self._workspace_mgr else 0,
+            "resource_locks": self._resource_lock.status(),
         }
+
+    # ── Agent streaming callback ────────────────────────────────
+
+    async def _on_agent_message(self, job_id: str, msg: dict) -> None:
+        """Emit streaming events for each SDK message as it arrives."""
+        role = msg.get("role")
+        if role == "assistant":
+            for block in msg.get("content", []):
+                block_type = block.get("type")
+                if block_type in ("text", "tool_use"):
+                    # Exclude "type" from block data — it would clobber PoolEvent.to_dict()'s keys
+                    block_data = {k: v for k, v in block.items() if k != "type"}
+                    block_data["block_type"] = block_type
+                    await self.events.emit(PoolEvent(
+                        type=PoolEventType.AGENT_OUTPUT,
+                        job_id=job_id,
+                        data=block_data,
+                    ))
+        elif role == "result":
+            # Tool results — forward as tool_result event
+            result_data = {k: v for k, v in msg.items() if k != "type"}
+            result_data["block_type"] = "result"
+            await self.events.emit(PoolEvent(
+                type=PoolEventType.AGENT_TOOL_RESULT,
+                job_id=job_id,
+                data=result_data,
+            ))
 
     # ── Main dispatch loop ───────────────────────────────────────
 
@@ -245,7 +308,7 @@ class ExecutionPool:
 
         try:
             result = await asyncio.wait_for(
-                slot.execute(job),
+                slot.execute(job, on_message=self._on_agent_message),
                 timeout=getattr(self._config, "pool_job_timeout_secs", 300),
             )
         except ClarificationNeeded as e:
@@ -283,14 +346,19 @@ class ExecutionPool:
             self._task_workspaces.pop(slot.slot_id, None)
             slot.cwd = None  # Reset slot working directory
 
-        # Cleanup workspace on failure/cancel (keep on success for PR review)
-        if workspace_id and self._workspace_mgr:
-            # If job failed, destroy the worktree
-            # If succeeded, leave it for potential PR/merge
-            pass  # Cleanup handled below per-outcome
-
         # Handle result
         if result.success:
+            # Gather workspace diff if available
+            diff_stat: str | None = None
+            changed_files: list[str] | None = None
+            if workspace_id and self._workspace_mgr:
+                diff_stat = await self._workspace_mgr.get_branch_diff(workspace_id)
+                changed_files = await self._workspace_mgr.list_changed_files(workspace_id)
+                # Mark workspace as pending review (keep for PR/merge)
+                ws = self._workspace_mgr.get(workspace_id)
+                if ws:
+                    ws.status = "pending_review"
+
             await self._queue.update_status(
                 job.id,
                 JobStatus.COMPLETE,
@@ -304,9 +372,23 @@ class ExecutionPool:
                     "result_preview": (result.result or "")[:200],
                     "cost_usd": result.cost_usd,
                     "num_turns": result.num_turns,
+                    "diff_stat": diff_stat,
+                    "changed_files": changed_files,
                 },
             ))
             logger.info("Job %s complete", job.id)
+
+            # Emit review event for workspace jobs
+            if workspace_id and self._workspace_mgr:
+                await self.events.emit(PoolEvent(
+                    type=PoolEventType.JOB_REVIEW,
+                    job_id=job.id,
+                    data={
+                        "workspace_id": workspace_id,
+                        "diff_stat": diff_stat,
+                        "changed_files": changed_files,
+                    },
+                ))
         else:
             # Retry logic
             if job.retry_count < job.max_retries:

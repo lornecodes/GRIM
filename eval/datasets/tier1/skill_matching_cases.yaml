@@ -179,12 +179,6 @@ cases:
     expected:
       matched_skills: [ship-it]
 
-  - id: skill-ironclaw-review
-    tags: [skill, ironclaw-review]
-    message: "review staging and audit output for errors"
-    expected:
-      matched_skills: [ironclaw-review]
-
   # ══════════════════════════════════════════════════════════
   # Routing/model skills
   # ══════════════════════════════════════════════════════════
@@ -264,7 +258,7 @@ cases:
   # ══════════════════════════════════════════════════════════
   - id: skill-neg-build-webserver
     tags: [skill, negative, regression]
-    message: "have ironclaw build me a simple webserver in python"
+    message: "build me a simple webserver in python"
     expected:
       matched_skills: []
 

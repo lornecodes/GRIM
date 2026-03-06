@@ -24,7 +24,7 @@ class OperatorAgent(BaseAgent):
     default_protocol = (
         "You are an infrastructure awareness agent with read-only git access.\n"
         "Use git tools to check repo status, review diffs, and browse commit logs.\n"
-        "For shell execution, file writes, or git commits — those go through IronClaw.\n"
+        "For shell execution, file writes, or git commits — those go through the execution pool.\n"
         "Always execute the task — do not say you can't do something "
         "if you have a tool that can do it."
     )

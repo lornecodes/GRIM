@@ -8,5 +8,5 @@ Current wrappers:
   - ConversationSubgraph: companion + personal_companion
   - ResearchSubgraph: research + codebase agents via dispatch
   - PlanningSubgraph: planning_companion
-  - CodeSubgraph: ironclaw + coder agents via dispatch
+  - CodeSubgraph: code agents via dispatch
 """

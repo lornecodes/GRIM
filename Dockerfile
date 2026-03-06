@@ -36,7 +36,7 @@ COPY mcp/kronos/pyproject.toml mcp/kronos/README.md mcp/kronos/
 COPY mcp/kronos/src/ mcp/kronos/src/
 
 # Install GRIM + kronos-mcp + server deps + test deps
-RUN pip install --no-cache-dir ".[server,cache,dev]" && \
+RUN pip install --no-cache-dir ".[server,cache,pool,dev]" && \
     pip install --no-cache-dir "./mcp/kronos[cache]"
 
 # ── Application ─────────────────────────────────────────────

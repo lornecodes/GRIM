@@ -57,13 +57,13 @@ class TestAgentDiscovery:
     """Test auto-discovery from core/agents/ directory."""
 
     def test_discovers_all_agents(self, grim_config):
-        """Should discover all 5 agents (IronClaw/audit removed)."""
+        """Should discover all 5 agents (audit removed)."""
         reg = AgentRegistry.discover(grim_config)
         expected = {"memory", "code", "research", "operate", "codebase"}
         assert set(reg.names()) == expected
 
     def test_default_config_disables_code(self):
-        """Default config disables 'code' agent (v0.0.6: code ops → IronClaw)."""
+        """Default config disables 'code' agent (v0.0.6: code ops delegated)."""
         config = GrimConfig()
         assert "code" in config.agents_disabled
 

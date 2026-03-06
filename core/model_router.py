@@ -5,7 +5,7 @@ Routes requests to the optimal model tier based on complexity:
   - sonnet: code gen, analysis, multi-step tasks (default)
   - opus:   architecture, deep research, complex reasoning
 
-Self-contained module — portable to IronClaw.
+Self-contained module — portable to other agents.
 
 Routing stages:
   1. Explicit overrides (/fast, /deep, /sonnet)

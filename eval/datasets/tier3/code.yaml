@@ -13,10 +13,10 @@ cases:
         message: "Write a Python function that calculates the PAC coherence metric given alpha and beta inputs"
         expected_routing:
           subgraph: code
-          delegation_type: ironclaw
+          delegation_type: code
     expected_routing:
       subgraph: code
-      delegation_type: ironclaw
+      delegation_type: code
     code_expectations:
       must_contain:
         - "def "
@@ -74,4 +74,4 @@ cases:
           subgraph: code
     expected_routing:
       subgraph: code
-      delegation_type: ironclaw
+      delegation_type: code

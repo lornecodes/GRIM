@@ -139,7 +139,7 @@ antitheft:
 
 # Execution Pool (Project Charizard) — async job execution via Agent SDK
 pool:
-  enabled: false                  # set true when Phase 1 is tested
+  enabled: true                   # Phase 1 complete — pool active
   num_slots: 2                    # concurrent agent slots
   poll_interval: 2.0              # seconds between queue polls
   db_path: "local/pool.db"       # SQLite queue persistence

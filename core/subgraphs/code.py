@@ -1,7 +1,7 @@
-"""Code subgraph — wraps ironclaw bridge + coder tools via dispatch.
+"""Code subgraph — wraps code execution via dispatch.
 
 Handles code writing, command execution, deployments, git operations.
-Uses the existing dispatch mechanism to delegate to ironclaw or coder
+Uses the existing dispatch mechanism to delegate to code or coder
 agents. Can signal continuation to Planning if scope grows beyond
 the current task.
 """
@@ -45,12 +45,12 @@ def _detect_code_continuation(result: dict, state: GrimState) -> dict | None:
 def make_code_subgraph(dispatch_fn: Any) -> Any:
     """Create the code subgraph wrapper.
 
-    Wraps the dispatch node when delegation_type is "ironclaw" or "code".
+    Wraps the dispatch node when delegation_type is "code".
     Produces SubgraphOutput with code execution results.
     """
 
     async def code_dispatch(state: GrimState) -> dict:
-        """Dispatch to ironclaw or coder agent."""
+        """Dispatch to code agent."""
         return await dispatch_fn(state)
 
     return make_subgraph_wrapper(

@@ -112,25 +112,24 @@ cases:
         - kronos_update
 
   # ══════════════════════════════════════════════════════════
-  # IronClaw Agent — sandboxed claw_* tools
+  # Coder Agent — file, shell, and companion tools
   # ══════════════════════════════════════════════════════════
-  - id: tools-ironclaw-has-claw
-    tags: [tools, ironclaw]
-    message: "ironclaw"
+  - id: tools-coder-has-file-tools
+    tags: [tools, coder]
+    message: "coder"
     expected:
       tools_present:
-        - claw_read_file
-        - claw_write_file
-        - claw_shell
+        - read_file
+        - write_file
+        - run_shell
 
-  - id: tools-ironclaw-no-direct
-    tags: [tools, ironclaw, boundary]
-    message: "ironclaw"
+  - id: tools-coder-no-write-kronos
+    tags: [tools, coder, boundary]
+    message: "coder"
     expected:
       tools_absent:
-        - run_shell
-        - write_file
         - kronos_create
+        - kronos_update
 
   # ══════════════════════════════════════════════════════════
   # Audit Agent — staging read-only

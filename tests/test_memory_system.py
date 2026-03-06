@@ -119,7 +119,7 @@ SAMPLE_MEMORY = textwrap.dedent("""\
     - Agent fallback protocols prevent capability amnesia
 
     ## Future Goals
-    - IronClaw Phase 2 integration
+    - Code Agent Phase 2 integration
     - Multi-user support
 
     ## Session Notes

@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir ".[discord,pool,cache]" && \
 # ── Application ─────────────────────────────────────────────
 COPY core/ core/
 COPY clients/ clients/
+COPY server/ server/
 COPY config/ config/
 COPY identity/ identity/
 COPY skills/ skills/

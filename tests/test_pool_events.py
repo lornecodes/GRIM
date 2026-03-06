@@ -38,13 +38,13 @@ class TestPoolEvent:
             data={"job_type": "code", "priority": "normal"},
         )
         d = event.to_dict()
-        assert d["type"] == "job_submitted"
+        assert d["event_type"] == "job_submitted"
         assert d["job_id"] == "job-abc12345"
         assert d["job_type"] == "code"
         assert "timestamp" in d
 
     def test_event_types(self):
-        assert len(PoolEventType) == 6
+        assert len(PoolEventType) == 9  # 7 lifecycle + 2 streaming
         assert PoolEventType.JOB_SUBMITTED.value == "job_submitted"
         assert PoolEventType.JOB_STARTED.value == "job_started"
         assert PoolEventType.JOB_COMPLETE.value == "job_complete"

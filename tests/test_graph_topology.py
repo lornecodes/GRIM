@@ -757,7 +757,6 @@ class TestSessionsEndpoint(unittest.TestCase):
         import server.app as app_module
 
         app_module._config = _make_test_config()
-        app_module._graph = MagicMock()
         return TestClient(app_module.app)
 
     def test_returns_200(self):
@@ -771,81 +770,14 @@ class TestSessionsEndpoint(unittest.TestCase):
         self.assertIn("active", data)
         self.assertIsInstance(data["active"], int)
 
-    def test_response_has_session_ids(self):
-        client = self._make_client()
-        data = client.get("/api/graph/sessions").json()
-        self.assertIn("session_ids", data)
-        self.assertIsInstance(data["session_ids"], list)
-
     def test_empty_sessions_returns_zero(self):
-        import server.app as app_module
-        app_module._active_ws_sessions = set()
         client = self._make_client()
         data = client.get("/api/graph/sessions").json()
         self.assertEqual(data["active"], 0)
-        self.assertEqual(data["session_ids"], [])
-
-    def test_populated_sessions(self):
-        import server.app as app_module
-        app_module._active_ws_sessions = {"session-1", "session-2", "session-3"}
-        client = self._make_client()
-        data = client.get("/api/graph/sessions").json()
-        self.assertEqual(data["active"], 3)
-        self.assertEqual(sorted(data["session_ids"]), ["session-1", "session-2", "session-3"])
-        # Cleanup
-        app_module._active_ws_sessions = set()
-
-    def test_session_ids_sorted(self):
-        import server.app as app_module
-        app_module._active_ws_sessions = {"z-session", "a-session", "m-session"}
-        client = self._make_client()
-        data = client.get("/api/graph/sessions").json()
-        self.assertEqual(data["session_ids"], ["a-session", "m-session", "z-session"])
-        app_module._active_ws_sessions = set()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 6. Session Tracking Unit Tests
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestSessionTracking(unittest.TestCase):
-    """Test the _active_ws_sessions set behavior."""
-
-    def test_set_add_and_discard(self):
-        import server.app as app_module
-        original = app_module._active_ws_sessions.copy()
-        try:
-            app_module._active_ws_sessions.add("test-sid")
-            self.assertIn("test-sid", app_module._active_ws_sessions)
-            app_module._active_ws_sessions.discard("test-sid")
-            self.assertNotIn("test-sid", app_module._active_ws_sessions)
-        finally:
-            app_module._active_ws_sessions = original
-
-    def test_discard_nonexistent_is_safe(self):
-        import server.app as app_module
-        original = app_module._active_ws_sessions.copy()
-        try:
-            # Should not raise
-            app_module._active_ws_sessions.discard("nonexistent-sid")
-        finally:
-            app_module._active_ws_sessions = original
-
-    def test_duplicate_add_is_idempotent(self):
-        import server.app as app_module
-        original = app_module._active_ws_sessions.copy()
-        try:
-            app_module._active_ws_sessions.add("dup-sid")
-            app_module._active_ws_sessions.add("dup-sid")
-            count = sum(1 for s in app_module._active_ws_sessions if s == "dup-sid")
-            self.assertEqual(count, 1)
-        finally:
-            app_module._active_ws_sessions = original
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 7. Cross-Validation Tests
+# 6. Cross-Validation Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
 

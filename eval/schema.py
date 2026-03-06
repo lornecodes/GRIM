@@ -245,7 +245,7 @@ class RoutingExpectation(BaseModel):
     """Expected routing outcome for a Tier 3 case."""
 
     subgraph: Optional[str] = None       # conversation, research, planning, code
-    delegation_type: Optional[str] = None # ironclaw, research, memory, etc.
+    delegation_type: Optional[str] = None # code, research, memory, etc.
     model_tier: Optional[str] = None      # haiku, sonnet, opus
 
 

@@ -404,7 +404,7 @@ class KnowledgeEntry:
 
     fdo: FDOSummary
     fetched_turn: int          # which turn first retrieved this FDO
-    fetched_by: str            # "memory", "companion", "ironclaw", etc.
+    fetched_by: str            # "memory", "companion", "code", etc.
     query: str                 # the search query that found it
     last_referenced_turn: int  # updated when re-encountered
     hit_count: int = 1         # how many times this FDO was returned/referenced
@@ -494,7 +494,7 @@ class StagingArtifact:
     path: str  # relative to /workspace/staging/{job_id}/output/
     size_bytes: int
     artifact_type: str  # "file", "script_output", "log"
-    created_by: str  # "ironclaw"
+    created_by: str  # "code"
 
 
 @dataclass
@@ -554,12 +554,9 @@ class GrimState(TypedDict, total=False):
     # Routing decision (within research graph — v0.0.6 compat)
     mode: Literal["companion", "delegate"]
     delegation_type: Optional[
-        Literal["memory", "code", "research", "operate", "ironclaw", "audit", "codebase"]
+        Literal["memory", "code", "research", "operate", "audit", "codebase"]
     ]
     selected_model: Optional[str]  # model ID chosen by model router
-
-    # IronClaw engine state
-    ironclaw_available: bool
 
     # Agent results (set by doer agents, consumed by integrate node)
     agent_result: Optional[AgentResult]
@@ -574,7 +571,7 @@ class GrimState(TypedDict, total=False):
     audit_feedback: Optional[str]  # structured feedback for re-dispatch
 
     # Caller identity (resolved at session start)
-    caller_id: str  # "peter", "ironclaw", etc. — defaults to "peter"
+    caller_id: str  # "peter", "pool", etc. — defaults to "peter"
     caller_context: Optional[str]  # compiled caller profile for prompt injection
 
     # Context management

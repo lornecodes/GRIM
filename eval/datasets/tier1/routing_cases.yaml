@@ -213,11 +213,11 @@ cases:
     expected:
       graph_target: planning
 
-  - id: gr-skill-hint-ironclaw
+  - id: gr-skill-hint-code
     tags: [graph_router, research, skill_hint]
     message: "deploy this"
     state_overrides:
-      skill_delegation_hint: ironclaw
+      skill_delegation_hint: code
     expected:
       graph_target: research
 
@@ -271,14 +271,14 @@ cases:
       mode: delegate
       delegation_type: memory
 
-  - id: rt-delegate-ironclaw-hint
-    tags: [router, delegate, ironclaw, skill_hint]
+  - id: rt-delegate-code-hint
+    tags: [router, delegate, code, skill_hint]
     message: "write the code"
     state_overrides:
-      skill_delegation_hint: ironclaw
+      skill_delegation_hint: code
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-delegate-research-hint
     tags: [router, delegate, research, skill_hint]
@@ -315,19 +315,19 @@ cases:
       mode: delegate
       delegation_type: memory
 
-  - id: rt-delegate-ironclaw-kw-shell
-    tags: [router, delegate, ironclaw, keyword]
+  - id: rt-delegate-code-kw-shell
+    tags: [router, delegate, code, keyword]
     message: "open a powershell session"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-delegate-ironclaw-kw-deploy
-    tags: [router, delegate, ironclaw, keyword]
+  - id: rt-delegate-code-kw-deploy
+    tags: [router, delegate, code, keyword]
     message: "deploy the latest build"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-delegate-research-kw-analyze
     tags: [router, delegate, research, keyword]
@@ -364,19 +364,19 @@ cases:
     tags: [router, continuity]
     message: "now do the same for the other file"
     state_overrides:
-      last_delegation_type: ironclaw
+      last_delegation_type: code
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-continuity-also
     tags: [router, continuity]
     message: "also add a test for that"
     state_overrides:
-      last_delegation_type: ironclaw
+      last_delegation_type: code
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-continuity-try
     tags: [router, continuity]
@@ -391,7 +391,7 @@ cases:
     tags: [router, continuity, negative]
     message: "what is entropy?"
     state_overrides:
-      last_delegation_type: ironclaw
+      last_delegation_type: code
     expected:
       mode: companion
 
@@ -399,18 +399,18 @@ cases:
   # Router — Action-intent patterns
   # ══════════════════════════════════════════════════════════
   - id: rt-action-intent-run-command
-    tags: [router, action_intent, ironclaw]
+    tags: [router, action_intent, code]
     message: "run a command to check the server"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-action-intent-test-tool
-    tags: [router, action_intent, ironclaw]
+    tags: [router, action_intent, code]
     message: "test the network connection"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-action-intent-show-file
     tags: [router, action_intent, operate]
@@ -423,124 +423,124 @@ cases:
   # Edge cases
   # ══════════════════════════════════════════════════════════
   # ══════════════════════════════════════════════════════════
-  # Router — IronClaw dispatch (regression tests for v0.0.5.5 routing fix)
+  # Router — Code dispatch (regression tests for v0.0.5.5 routing fix)
   # ══════════════════════════════════════════════════════════
-  - id: rt-ironclaw-build-webserver
-    tags: [router, delegate, ironclaw, keyword, regression]
-    message: "have ironclaw build me a simple webserver in python"
+  - id: rt-code-build-webserver
+    tags: [router, delegate, code, keyword, regression]
+    message: "build me a simple webserver in python"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-build-me
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-build-me
+    tags: [router, delegate, code, keyword, regression]
     message: "build me a python script that does data validation"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-write-webserver
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-write-webserver
+    tags: [router, delegate, code, keyword, regression]
     message: "write code for a flask webserver with two endpoints"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-have-agent-do
-    tags: [router, delegate, ironclaw, keyword, regression]
-    message: "have ironclaw do that"
+  - id: rt-code-build-this
+    tags: [router, delegate, code, keyword, regression]
+    message: "build this for me"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-code-me
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-code-me
+    tags: [router, delegate, code, keyword, regression]
     message: "code me a simple webserver in python please"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-implement-feature
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-implement-feature
+    tags: [router, delegate, code, keyword, regression]
     message: "implement a REST API with authentication"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-run-pytest
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-run-pytest
+    tags: [router, delegate, code, keyword, regression]
     message: "run pytest on the test suite"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-ironclaw-shell-command
-    tags: [router, delegate, ironclaw, keyword, regression]
+  - id: rt-code-shell-command
+    tags: [router, delegate, code, keyword, regression]
     message: "run the shell command to check disk space"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   # ── Skill false-positive regression: "build" should NOT trigger project-lifecycle ──
 
   - id: rt-no-lifecycle-build-webserver
-    tags: [router, delegate, ironclaw, regression, negative]
+    tags: [router, delegate, code, regression, negative]
     message: "build a webserver for me"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-no-lifecycle-deploy-image
-    tags: [router, delegate, ironclaw, regression, negative]
+    tags: [router, delegate, code, regression, negative]
     message: "deploy the docker image to production"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   # ══════════════════════════════════════════════════════════
   # Router — Tool-specific execution intent (v0.0.5.7)
   # ══════════════════════════════════════════════════════════
   - id: rt-tool-run-file-check
-    tags: [router, delegate, ironclaw, action_intent]
+    tags: [router, delegate, code, action_intent]
     message: "run a command to check the file permissions"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-tool-execute-shell-deploy
-    tags: [router, delegate, ironclaw, action_intent]
+    tags: [router, delegate, code, action_intent]
     message: "execute the shell command to deploy the service"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-tool-test-process
-    tags: [router, delegate, ironclaw, action_intent]
+    tags: [router, delegate, code, action_intent]
     message: "test whether the process is still running"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   - id: rt-tool-check-port
-    tags: [router, delegate, ironclaw, action_intent]
+    tags: [router, delegate, code, action_intent]
     message: "check if port 8080 is in use"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-tool-ironclaw-commit-push
-    tags: [router, delegate, ironclaw, keyword]
-    message: "have ironclaw commit these changes and push to origin"
+  - id: rt-tool-code-commit-push
+    tags: [router, delegate, code, keyword]
+    message: "commit these changes and push to origin"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
-  - id: rt-tool-ironclaw-scan
-    tags: [router, delegate, ironclaw, keyword]
-    message: "use ironclaw to scan the project for vulnerabilities"
+  - id: rt-tool-code-scan
+    tags: [router, delegate, code, keyword]
+    message: "scan the project for vulnerabilities"
     expected:
       mode: delegate
-      delegation_type: ironclaw
+      delegation_type: code
 
   # ══════════════════════════════════════════════════════════
   # Edge cases

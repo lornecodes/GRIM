@@ -20,6 +20,8 @@ def _make_mock_session_manager():
     manager = MagicMock()
     manager.active_count = 0
     manager.list_sessions.return_value = []
+    manager.save_turn = AsyncMock()
+    manager.get_history = AsyncMock(return_value=[])
 
     mock_client = AsyncMock()
     mock_client.session_info = {

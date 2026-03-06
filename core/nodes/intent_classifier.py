@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 TARGET_TO_DELEGATION: dict[str, str | None] = {
     "conversation": None,       # companion mode, no delegation
     "research": "research",     # research agent or companion
-    "code": "ironclaw",         # ironclaw agent for code execution
+    "code": "code",             # code agent for code execution
     "operations": "memory",     # memory agent for vault/task ops
     "planning": None,           # planning companion, no delegation
 }
@@ -50,9 +50,8 @@ TARGET_TO_DELEGATION: dict[str, str | None] = {
 HINT_TO_TARGET: dict[str, str] = {
     "memory": "operations",
     "research": "research",
-    "ironclaw": "code",
     "code": "code",
-    "operate": "code",         # operate replaced ironclaw — code execution path
+    "operate": "code",         # operate → code execution path
     "audit": "code",           # audit is part of code pipeline
     "codebase": "research",    # codebase exploration = research
     "planning": "planning",
@@ -62,8 +61,7 @@ HINT_TO_TARGET: dict[str, str] = {
 DELEGATION_TO_TARGET: dict[str, str] = {
     "memory": "operations",
     "research": "research",
-    "ironclaw": "code",
-    "operate": "code",         # operate replaced ironclaw
+    "operate": "code",
     "audit": "code",
     "codebase": "research",
 }

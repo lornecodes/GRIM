@@ -104,7 +104,7 @@ After creating items, present a clear summary:
 Once work items are approved and promoted, the next step is code-level planning
 — exploring the actual codebase to design implementation strategy before
 execution. This handoff to the Codebase Agent is not yet built but is the
-bridge to IronClaw execution (Phase 3 architecture).
+bridge to pool execution (Phase 3 architecture).
 """
 
 # UI roster metadata for the planning companion node

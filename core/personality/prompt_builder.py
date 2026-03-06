@@ -202,9 +202,30 @@ def build_system_prompt(
     return parts.full()
 
 
-def load_field_state(personality_path: Path) -> FieldState:
+def load_field_state(personality_path: Path) -> "FieldState":
     """Load initial field state from personality.yaml."""
-    from core.state import FieldState
+    try:
+        from core.state import FieldState
+    except ImportError:
+        # Fallback when langgraph is not installed (e.g. Discord bot container)
+        from dataclasses import dataclass
+
+        @dataclass
+        class FieldState:
+            coherence: float = 0.8
+            valence: float = 0.3
+            uncertainty: float = 0.2
+
+            def modulate(self, confidence=None, topic_type=None):
+                pass
+
+            def expression_mode(self) -> str:
+                if self.coherence > 0.6 and self.uncertainty < 0.4:
+                    return "direct, assertive"
+                return "conversational, flowing"
+
+            def snapshot(self) -> dict:
+                return {"coherence": self.coherence, "valence": self.valence, "uncertainty": self.uncertainty}
 
     if not personality_path.exists():
         return FieldState()

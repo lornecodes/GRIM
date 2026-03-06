@@ -5,7 +5,7 @@ in the workspace via MCP source navigation tools, file reading tools, and
 git read tools. It understands directory structures via meta.yaml, can
 search source files linked to FDOs, and track repo changes over time.
 
-Trust boundary: ALL tools are read-only. Code changes go through IronClaw.
+Trust boundary: ALL tools are read-only. Code changes go through the execution pool.
 """
 from __future__ import annotations
 

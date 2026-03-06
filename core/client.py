@@ -220,11 +220,17 @@ class GrimClient:
         allowed_tools: list[str] | None = None,
         max_turns: int = 10,
         caller_id: str | None = None,
+        system_prompt_prefix: str = "",
+        system_prompt_suffix: str = "",
+        model: str | None = None,
     ):
         self.config = config
         self.on_message = on_message
         self.max_turns = max_turns
         self.caller_id = caller_id or "peter"
+        self._prompt_prefix = system_prompt_prefix
+        self._prompt_suffix = system_prompt_suffix
+        self._model = model
 
         # Override allowed tools (e.g. Discord bot removes write tools)
         self._allowed_tools = allowed_tools
@@ -292,13 +298,17 @@ class GrimClient:
             if self.config.pool_enabled:
                 tools.extend(POOL_TOOLS)
 
-        # 5. Create SDK client
+        # 5. Build permission callback (audit gate)
+        permission_cb = _make_grim_permission_callback()
+
+        # 6. Create SDK client
         options = ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             mcp_servers=mcp_servers if mcp_servers else None,
             allowed_tools=tools,
-            permission_mode="bypassPermissions",
+            can_use_tool=permission_cb,
             max_turns=self.max_turns,
+            model=self._model,
         )
 
         # Must unset CLAUDECODE to spawn SDK sessions from Claude Code
@@ -309,8 +319,8 @@ class GrimClient:
         self._started = True
 
         logger.info(
-            "GrimClient started: %d tools, %d MCP servers, prompt=%d chars",
-            len(tools), len(mcp_servers), len(self._system_prompt),
+            "GrimClient started: %d tools, %d MCP servers, prompt=%d chars, model=%s",
+            len(tools), len(mcp_servers), len(self._system_prompt), self._model,
         )
 
     async def stop(self) -> None:
@@ -501,17 +511,37 @@ class GrimClient:
         )
 
         # Append SDK-specific instructions
+        pool_instructions = ""
+        if self.config.pool_enabled:
+            pool_instructions = (
+                "- You have an execution pool with coding agents. Use pool_submit to dispatch jobs.\n"
+                "- IMPORTANT: When the user asks you to build, create, write, fix, or modify code/files, "
+                "ALWAYS submit it as a pool job using pool_submit. Do NOT write code in chat.\n"
+                "  Examples that should be dispatched: 'build me a webserver', 'write a script that...', "
+                "'create a FastAPI app', 'fix the bug in...', 'add tests for...'\n"
+                "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
+                "- After submitting, tell the user the job ID and that they can watch progress in the Studio tab.\n"
+                "- Use pool_job_status to check on running jobs when the user asks.\n"
+                "- Use pool_list_jobs to show all jobs when asked."
+            )
+        else:
+            pool_instructions = (
+                "- The execution pool is currently DISABLED. You cannot submit async jobs.\n"
+                "- For coding requests, write the code directly in your response using markdown code blocks.\n"
+                "- For research requests, use your Kronos vault tools to find information."
+            )
+
         sdk_section = (
             "\n\n## Available Capabilities\n\n"
-            "You have access to your Kronos knowledge vault and the execution pool.\n"
-            "- Use kronos tools to search, retrieve, and navigate knowledge.\n"
+            "You have access to your Kronos knowledge vault via MCP tools.\n"
+            "- Use kronos tools (kronos_search, kronos_get, kronos_graph, etc.) to search, retrieve, and navigate knowledge.\n"
             "- IMPORTANT: Always pass semantic=false when calling kronos_search (faster).\n"
-            "- Use pool tools (pool_submit, pool_status, pool_list_jobs) to submit async jobs.\n"
-            "When a user asks you to do something that requires coding, research, or auditing, "
-            "submit it as a pool job. For knowledge questions, search your vault directly."
+            "- Only use tools that are in your allowed_tools list. Do NOT call tools that don't exist.\n"
+            f"{pool_instructions}\n"
+            "For general conversation or coding help, respond directly — you do not need tools for everything."
         )
 
-        return parts.full() + sdk_section
+        return self._prompt_prefix + parts.full() + sdk_section + self._prompt_suffix
 
 
 # ── Message helpers (shared with slot.py) ────────────────────────
@@ -579,3 +609,35 @@ def _safe_json(obj: Any) -> Any:
         return obj
     except (TypeError, ValueError):
         return str(obj)
+
+
+def _make_grim_permission_callback():
+    """Build an async can_use_tool callback for the interactive GrimClient.
+
+    GrimClient is user-facing (interactive session), so it gets full
+    permissions: writes + bash allowed. Uses the same audit gate as
+    AgentSlot (core.pool.audit) for consistent tool classification.
+    """
+    async def _permission_handler(tool_name, tool_input, context):
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+        try:
+            from core.pool.audit import ToolVerdict, can_use_tool
+
+            result = can_use_tool(
+                tool_name,
+                tool_input if isinstance(tool_input, dict) else {},
+                allow_writes=True,
+                allow_bash=True,
+            )
+            if result.verdict == ToolVerdict.ALLOW:
+                return PermissionResultAllow()
+            return PermissionResultDeny(
+                behavior="deny",
+                message=f"Audit gate denied: {result.reason}",
+            )
+        except ImportError:
+            # audit module not available — allow everything
+            return PermissionResultAllow()
+
+    return _permission_handler

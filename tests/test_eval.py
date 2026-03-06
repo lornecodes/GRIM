@@ -564,7 +564,7 @@ class TestDatasetLoading:
 
         runner = EvalRunner(EvalConfig())
         datasets = runner.load_tier2_datasets()
-        assert len(datasets) >= 5  # companion, memory, ironclaw, planning, personal, etc.
+        assert len(datasets) >= 5  # companion, memory, code, planning, personal, etc.
 
     def test_list_datasets(self):
         from eval.config import EvalConfig

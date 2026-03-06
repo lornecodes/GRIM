@@ -398,7 +398,7 @@ class TestCodeSubgraph:
     async def test_wraps_dispatch(self):
         dispatch_fn = AsyncMock(return_value={
             "messages": [AIMessage(content="Code executed")],
-            "agent_result": AgentResult(agent="ironclaw", success=True, summary="Done"),
+            "agent_result": AgentResult(agent="code", success=True, summary="Done"),
         })
 
         subgraph = make_code_subgraph(dispatch_fn)
@@ -413,7 +413,7 @@ class TestCodeSubgraph:
     async def test_no_continuation_on_failure(self):
         dispatch_fn = AsyncMock(return_value={
             "messages": [AIMessage(content="Error occurred")],
-            "agent_result": AgentResult(agent="ironclaw", success=False, summary="Failed"),
+            "agent_result": AgentResult(agent="code", success=False, summary="Failed"),
         })
 
         subgraph = make_code_subgraph(dispatch_fn)
@@ -430,7 +430,7 @@ class TestDetectCodeContinuation:
         assert result is None
 
     def test_failed_agent_no_continuation(self):
-        agent_result = AgentResult(agent="ironclaw", success=False, summary="Failed")
+        agent_result = AgentResult(agent="code", success=False, summary="Failed")
         result = _detect_code_continuation(
             {"agent_result": agent_result}, _state(),
         )
@@ -443,7 +443,7 @@ class TestDetectCodeContinuation:
             target_subgraph="code",
             context={"auto_continue": True},
         )
-        agent_result = AgentResult(agent="ironclaw", success=True, summary="Done")
+        agent_result = AgentResult(agent="code", success=True, summary="Done")
         result = _detect_code_continuation(
             {"agent_result": agent_result},
             _state(objectives=[obj]),
@@ -452,7 +452,7 @@ class TestDetectCodeContinuation:
         assert result["next_intent"] == "code"
 
     def test_successful_no_objectives(self):
-        agent_result = AgentResult(agent="ironclaw", success=True, summary="Done")
+        agent_result = AgentResult(agent="code", success=True, summary="Done")
         result = _detect_code_continuation(
             {"agent_result": agent_result}, _state(),
         )
