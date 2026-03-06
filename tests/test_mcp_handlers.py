@@ -788,6 +788,66 @@ def test_git_recent():
     record("git_recent missing repo returns error", "error" in data3)
 
 
+# -- Test 26: workspace resolution for sibling repos -------------------------
+
+def test_workspace_resolution():
+    """Verify MCP can resolve paths to all core sibling repos, not just GRIM."""
+    print("\n[26] workspace resolution (sibling repos)")
+    import json
+
+    workspace = Path(vault_path).parent
+
+    # Core repos that should be navigable (from repos.yaml)
+    CORE_REPOS = ["GRIM", "kronos-vault", "dawn-field-theory", "fracton", "reality-engine"]
+
+    accessible = []
+    missing = []
+    for name in CORE_REPOS:
+        repo_dir = workspace / name
+        if repo_dir.is_dir():
+            resp = handle_navigate({"path": name})
+            data = json.loads(resp)
+            if "error" not in data:
+                accessible.append(name)
+            else:
+                missing.append(f"{name} (navigate error)")
+        else:
+            missing.append(f"{name} (dir not found)")
+
+    print(f"    Accessible: {accessible}")
+    if missing:
+        print(f"    Missing:    {missing}")
+
+    record("core repos navigable", len(accessible) >= 3,
+           f"accessible={len(accessible)}/{len(CORE_REPOS)}, missing={missing}")
+
+    # Verify read_source works for sibling repos (not just GRIM)
+    sibling_files = [
+        ("dawn-field-theory", "README.md"),
+        ("fracton", "README.md"),
+        ("reality-engine", "README.md"),
+    ]
+    for repo, path in sibling_files:
+        if repo not in accessible:
+            continue
+        resp = handle_read_source({"repo": repo, "path": path, "max_lines": 3})
+        data = json.loads(resp)
+        ok = "error" not in data and data.get("total_lines", 0) > 0
+        record(f"read_source {repo}/{path}", ok,
+               f"{'ok' if ok else data.get('error', 'unknown')}")
+
+    # Verify workspace root == vault parent (the critical invariant)
+    from kronos_mcp.server import _validate_workspace_path
+    target, err = _validate_workspace_path("GRIM", "core/pool/workspace.py")
+    record("_validate_workspace_path resolves", target is not None and err is None)
+    if target:
+        record("resolved path exists on disk", target.exists(), str(target))
+
+    # Path traversal blocked
+    _, err = _validate_workspace_path("GRIM", "../../etc/passwd")
+    record("path traversal blocked", err is not None)
+
+
 # -- Final cleanup + runner ---------------------------------------------------
 
 def final_cleanup():
@@ -825,6 +885,7 @@ def run_all():
     test_validate_sources()
     test_find_implementation()
     test_git_recent()
+    test_workspace_resolution()
 
     final_cleanup()
 
