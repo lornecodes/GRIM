@@ -1,0 +1,28 @@
+schema_version: '2.0'
+directory_name: engine
+description: >
+  Legacy Rust component (IronClaw engine). Deprecated — IronClaw was fully removed
+  from active GRIM code during Project Charizard Phase 7. Replaced by Claude Code
+  Agent SDK sessions via GrimClient. Kept for reference only. Contains Cargo project
+  structure with src/, tests/, config/, and documentation.
+semantic_scope:
+  - engine
+  - legacy
+  - deprecated
+  - ironclaw
+  - rust
+files:
+  - CODE_OF_CONDUCT.md
+  - CONTRIBUTING.md
+  - Cargo.lock
+  - Cargo.toml
+  - Dockerfile
+  - QUICKSTART.md
+  - README.md
+  - SECURITY.md
+child_directories:
+  - config
+  - docs
+  - src
+  - target
+  - tests

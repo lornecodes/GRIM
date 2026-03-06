@@ -1,0 +1,19 @@
+schema_version: '2.0'
+directory_name: clients
+description: >
+  Client frontends sharing the same GrimClient core. Primary client is the Discord
+  bot (discord_bot.py, 38KB) — production-grade with per-channel sessions, people
+  profile lookup via vault, owner-only authentication, pool job dispatch/cancel,
+  clarification pattern, webhook notifiers, rate limiting, daily cost caps, and
+  Shade archetype personality with non-owner privacy guards.
+semantic_scope:
+  - clients
+  - discord
+  - discord-bot
+  - pool-dispatch
+  - people-profiles
+  - shade-archetype
+files:
+  - __init__.py
+  - discord_bot.py
+child_directories: []

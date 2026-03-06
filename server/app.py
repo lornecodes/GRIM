@@ -56,6 +56,7 @@ _mcp_cleanup: Any = None  # holds the MCP context manager for cleanup
 _skill_registry: Any = None  # SkillRegistry — loaded at boot for /api/skills
 _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at boot)
 _execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
+_daemon_engine: Any = None  # ManagementEngine instance (Project Mewtwo)
 _session_manager: Any = None  # SessionManager for SDK sessions
 _ws_connections: set = set()  # active WebSocket connections for chat + pool events
 # Pool WebSocket connections: maps WebSocket → set of subscribed job IDs.
@@ -213,6 +214,26 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Execution pool disabled (pool.enabled: false)")
 
+    # Boot Management Daemon (Project Mewtwo) if enabled
+    global _daemon_engine
+    if _config.daemon_enabled and _execution_pool:
+        try:
+            from core.daemon.engine import ManagementEngine
+            _daemon_engine = ManagementEngine(
+                config=_config,
+                pool_queue=_execution_pool.queue,
+                pool_events=_execution_pool.events,
+            )
+            await _daemon_engine.start()
+            logger.info("Management daemon started")
+        except Exception as exc:
+            logger.warning("Could not start management daemon: %s", exc)
+            _daemon_engine = None
+    elif _config.daemon_enabled and not _execution_pool:
+        logger.warning("Management daemon requires execution pool — both must be enabled")
+    else:
+        logger.info("Management daemon disabled (daemon.enabled: false)")
+
     # Boot ConversationStore + SessionManager for SDK sessions
     global _session_manager
     _conversation_store = None
@@ -253,6 +274,13 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+    # Shutdown Management Daemon
+    if _daemon_engine:
+        try:
+            await _daemon_engine.stop()
+        except Exception:
+            pass
+
     # Shutdown Execution Pool
     if _execution_pool:
         try:
@@ -282,10 +310,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow Next.js dev server
+# CORS — allow local dev and LAN access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -339,6 +367,35 @@ async def health():
         "graph": tool_context.mcp_session is not None,
         "sdk_sessions": _session_manager is not None,
     })
+
+
+# ---------------------------------------------------------------------------
+# Bridge proxy — forward /bridge/* to the ai-bridge container so the UI
+# works from any host (not just localhost where bridge port is exposed).
+# ---------------------------------------------------------------------------
+
+_BRIDGE_URL = os.getenv("BRIDGE_INTERNAL_URL", "http://ai-bridge:8318")
+
+@app.api_route("/bridge/{path:path}", methods=["GET", "POST"])
+async def bridge_proxy(path: str, request: Request):
+    """Reverse proxy to ai-bridge container."""
+    import httpx
+    url = f"{_BRIDGE_URL}/bridge/{path}"
+    qs = str(request.query_params)
+    if qs:
+        url = f"{url}?{qs}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                content=await request.body(),
+                headers={k: v for k, v in request.headers.items()
+                         if k.lower() not in ("host", "connection")},
+            )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"error": f"Bridge unavailable: {e}"}, status_code=502)
 
 
 @app.get("/api/config")
@@ -2561,6 +2618,68 @@ async def api_pool_workspace_restore(request: Request):
     if ws:
         return JSONResponse({"ok": True, "workspace": ws.to_dict()})
     return JSONResponse({"error": "Restore failed"}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Daemon endpoints (Project Mewtwo)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/daemon/status")
+async def get_daemon_status():
+    """Management daemon health and pipeline summary."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    status = await _daemon_engine.health.status(_daemon_engine.store)
+    return JSONResponse(status)
+
+
+@app.get("/api/daemon/pipeline")
+async def get_daemon_pipeline(status: str | None = None, project: str | None = None):
+    """List pipeline items with optional filters."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    from core.daemon.models import PipelineStatus
+    sf = PipelineStatus(status) if status else None
+    items = await _daemon_engine.store.list_items(status_filter=sf, project_filter=project)
+    return JSONResponse([item.model_dump(mode="json") for item in items])
+
+
+@app.post("/api/daemon/pipeline/{item_id}/advance")
+async def advance_pipeline_item(item_id: str, request: Request):
+    """Manually advance a pipeline item (e.g. review → merged)."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    body = await request.json()
+    target = body.get("status")
+    if not target:
+        return JSONResponse({"error": "Missing 'status' field"}, status_code=400)
+    from core.daemon.models import PipelineStatus, InvalidTransition
+    try:
+        target_status = PipelineStatus(target)
+    except ValueError:
+        return JSONResponse({"error": f"Invalid status: {target}"}, status_code=400)
+    try:
+        item = await _daemon_engine.store.advance(item_id, target_status)
+        return JSONResponse(item.model_dump(mode="json"))
+    except InvalidTransition as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.post("/api/daemon/pipeline/{item_id}/retry")
+async def retry_pipeline_item(item_id: str):
+    """Re-queue a FAILED pipeline item as READY."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    from core.daemon.models import PipelineStatus, InvalidTransition
+    try:
+        item = await _daemon_engine.store.advance(item_id, PipelineStatus.READY)
+        return JSONResponse(item.model_dump(mode="json"))
+    except InvalidTransition as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
 
 
 # ---------------------------------------------------------------------------

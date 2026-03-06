@@ -1,0 +1,35 @@
+schema_version: '2.0'
+directory_name: kronos_mcp
+description: >
+  Core Kronos MCP implementation. server.py registers all 36 tools and is the main
+  entry point. vault.py is the filesystem engine (FDO reader/writer, YAML frontmatter
+  parsing, no Obsidian dependency). search.py provides hybrid search (exact tag matching
+  + BM25 keyword + graph expansion with Reciprocal Rank Fusion). tasks.py handles story
+  CRUD, board engine, and calendar sync. board.py manages kanban state (new, active,
+  in_progress, resolved, closed columns). calendar.py computes work schedules from
+  active board items + personal events. skills.py indexes skill protocols. cache.py
+  provides LRU caching for FDOs and search results.
+semantic_scope:
+  - kronos-mcp
+  - vault-engine
+  - search-engine
+  - bm25
+  - task-engine
+  - board-engine
+  - calendar-engine
+  - skill-index
+  - fdo
+  - yaml-frontmatter
+files:
+  - __init__.py
+  - __main__.py
+  - board.py
+  - cache.py
+  - calendar.py
+  - fileutil.py
+  - search.py
+  - server.py
+  - skills.py
+  - tasks.py
+  - vault.py
+child_directories: []

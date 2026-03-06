@@ -1,0 +1,46 @@
+schema_version: '2.0'
+directory_name: GRIM
+description: >
+  GRIM — AI companion and autonomous productivity system for the Dawn Field Institute.
+  Built on the Claude Agent SDK with persistent sessions (GrimClient), a pool-based
+  execution architecture (Project Charizard), and Kronos MCP for knowledge graph access.
+  Features 34 skills, 36 MCP tools, 2300+ tests, and a Next.js Mission Control UI.
+  Personality-driven with the Shade archetype. Supports Discord, web, and CLI frontends.
+semantic_scope:
+  - ai-companion
+  - agent-sdk
+  - execution-pool
+  - mcp
+  - kronos
+  - langgraph
+  - discord
+  - fastapi
+  - nextjs
+files:
+  - Dockerfile
+  - Dockerfile.discord
+  - README.md
+  - _val.json
+  - docker-compose.prod.yml
+  - docker-compose.yml
+  - pyproject.toml
+  - server.py
+  - ws_diag.py
+child_directories:
+  - bridge
+  - clients
+  - config
+  - core
+  - engine
+  - eval
+  - identity
+  - local
+  - mcp
+  - scripts
+  - server
+  - skills
+  - spikes
+  - staging
+  - tests
+  - tools
+  - ui

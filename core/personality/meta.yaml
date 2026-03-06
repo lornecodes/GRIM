@@ -1,0 +1,21 @@
+schema_version: '2.0'
+directory_name: personality
+description: >
+  Prompt building and identity management. PromptBuilder assembles system prompts from
+  identity files (roles, traits, field state from identity/ directory) plus dynamic
+  Kronos FDO knowledge. PromptParts structure: static (identity, personality, caller
+  context) + dynamic (session knowledge, skills). Cache module stores identity
+  definitions. UserCache tracks user preferences and context across sessions.
+semantic_scope:
+  - personality
+  - prompt-builder
+  - identity
+  - system-prompt
+  - user-context
+  - prompt-parts
+files:
+  - __init__.py
+  - cache.py
+  - prompt_builder.py
+  - user_cache.py
+child_directories: []

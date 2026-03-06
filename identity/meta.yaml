@@ -1,0 +1,22 @@
+schema_version: '2.0'
+directory_name: identity
+description: >
+  GRIM personality and identity definition. personality.yaml defines field state
+  dynamics (coherence, valence, uncertainty) and expression mapping rules for the
+  Shade archetype. system_prompt.md is GRIM's full system prompt (identity, vault-first
+  knowledge, epistemic stance, capabilities). personality.cache.md stores cached
+  personality state. These files are loaded by the identity node and injected into
+  all interactions via PromptBuilder.
+semantic_scope:
+  - identity
+  - personality
+  - shade-archetype
+  - system-prompt
+  - field-state
+  - epistemic-stance
+files:
+  - README.md
+  - personality.cache.md
+  - personality.yaml
+  - system_prompt.md
+child_directories: []

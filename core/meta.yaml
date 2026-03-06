@@ -1,0 +1,39 @@
+schema_version: '2.0'
+directory_name: core
+description: >
+  Core application package for GRIM. Contains the GrimClient (persistent Agent SDK
+  session replacing LangGraph), agent registry with auto-discovery, graph nodes for
+  routing/memory/compression, tool modules (Kronos, pool, workspace), the execution
+  pool (Charizard), subgraph adapters, skill matching, and prompt/personality assembly.
+  GrimConfig provides centralized runtime configuration. GrimState + AgentResult are
+  the core dataclasses for conversation state and routing decisions.
+semantic_scope:
+  - core
+  - grim-client
+  - agent-sdk
+  - state-management
+  - routing
+  - configuration
+  - model-routing
+files:
+  - __init__.py
+  - __main__.py
+  - client.py
+  - config.py
+  - context.py
+  - graph.py
+  - graph_topology.py
+  - memory_store.py
+  - model_router.py
+  - objectives.py
+  - reasoning_cache.py
+  - state.py
+child_directories:
+  - agents
+  - bridge
+  - nodes
+  - personality
+  - pool
+  - skills
+  - subgraphs
+  - tools

@@ -1,0 +1,33 @@
+schema_version: '2.0'
+directory_name: tools
+description: >
+  Tool modules organized into named groups via ToolRegistry singleton. Agents declare
+  which tool_groups they need. Groups: kronos_read (search, get, list, graph, validate,
+  deep_dive, navigate), kronos_write (create, update), kronos_source (read_source,
+  search_source, find_implementation), tasks (story/task CRUD, board, calendar, dispatch),
+  memory (kronos_memory_read/update/sections), pool (submit, status, list, clarify),
+  workspace (branch, diff, merge, review). ToolContext singleton provides shared state
+  (workspace root, MCP session, bridge). Sandbox module enforces SAFE_BASH patterns.
+semantic_scope:
+  - tools
+  - tool-registry
+  - tool-groups
+  - kronos
+  - pool
+  - memory
+  - workspace
+  - sandbox
+  - safe-bash
+files:
+  - __init__.py
+  - context.py
+  - kronos_read.py
+  - kronos_source.py
+  - kronos_tasks.py
+  - kronos_write.py
+  - memory_tools.py
+  - pool_tools.py
+  - registry.py
+  - sandbox.py
+  - workspace.py
+child_directories: []

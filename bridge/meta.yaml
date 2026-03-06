@@ -1,0 +1,19 @@
+schema_version: '2.0'
+directory_name: bridge
+description: >
+  AI Bridge — transparent FastAPI reverse proxy between Claude API consumers (GRIM,
+  scripts) and CLIProxyAPI. Forwards requests, extracts token usage from responses,
+  and logs to SQLite for cost tracking via tracker.py. Containerized with its own
+  Dockerfile.
+semantic_scope:
+  - bridge
+  - reverse-proxy
+  - token-tracking
+  - cost-monitoring
+  - cliproxyapi
+files:
+  - Dockerfile
+  - app.py
+  - requirements.txt
+  - tracker.py
+child_directories: []

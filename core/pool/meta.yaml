@@ -1,0 +1,35 @@
+schema_version: '2.0'
+directory_name: pool
+description: >
+  Execution pool (Project Charizard Phase 1-8). Async job queue with SQLite persistence
+  (JobQueue), agent sandbox slots (AgentSlot wrapping Claude Code SDK sessions),
+  orchestrator (ExecutionPool), git worktree workspace management (WorkspaceManager),
+  real-time permission auditing (can_use_tool with SAFE_BASH patterns), event bus
+  (PoolEventBus with 7 event types + WebSocket broadcast), resource locking
+  (ResourceScope per system resource), bare-cache codebase management (CodebaseManager
+  with repos.yaml manifest), Discord/webhook notifiers, and in-chat ephemeral execution.
+semantic_scope:
+  - execution-pool
+  - job-queue
+  - agent-slots
+  - workspace
+  - git-worktree
+  - audit
+  - events
+  - resource-locking
+  - codebase-management
+  - charizard
+files:
+  - __init__.py
+  - audit.py
+  - codebase.py
+  - events.py
+  - inchat.py
+  - locks.py
+  - models.py
+  - notifiers.py
+  - pool.py
+  - queue.py
+  - slot.py
+  - workspace.py
+child_directories: []

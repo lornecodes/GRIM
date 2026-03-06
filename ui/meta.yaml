@@ -1,0 +1,32 @@
+schema_version: '2.0'
+directory_name: ui
+description: >
+  Mission Control — Next.js web frontend for GRIM. 10 consolidated pages including
+  Dashboard with Pool tab (MetricsBar, SlotGrid, JobKanban, SubmitJobDialog), Agents
+  page with Studio tab (LiveTranscript, DiffViewer, WorkspaceBrowser, AuditPanel),
+  Memory page with knowledge graph visualization, and chat interface with session
+  knowledge panel. Real-time WebSocket streaming via /ws-pool. Built with React,
+  TypeScript, Tailwind CSS. 199 UI tests via Vitest.
+semantic_scope:
+  - ui
+  - mission-control
+  - nextjs
+  - react
+  - typescript
+  - tailwind
+  - websocket
+  - dashboard
+  - chat
+  - vitest
+files:
+  - next-env.d.ts
+  - next.config.ts
+  - package-lock.json
+  - package.json
+  - postcss.config.mjs
+  - tailwind.config.ts
+  - tsconfig.json
+  - tsconfig.tsbuildinfo
+  - vitest.config.ts
+child_directories:
+  - src

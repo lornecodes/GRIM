@@ -1,0 +1,20 @@
+schema_version: '2.0'
+directory_name: pool_mcp
+description: >
+  Pool MCP server implementation. server.py registers pool tools and is the main
+  entry point. db.py wraps SQLite with WAL-safe read access to the pool job queue.
+  skills.py provides a skills engine for MCP tool handlers. Hybrid read/write
+  architecture: queries go direct to SQLite, mutations proxy through GRIM REST API.
+semantic_scope:
+  - pool-mcp
+  - mcp-implementation
+  - sqlite
+  - job-queue
+  - skills-engine
+files:
+  - __init__.py
+  - __main__.py
+  - db.py
+  - server.py
+  - skills.py
+child_directories: []

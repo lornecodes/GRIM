@@ -1,0 +1,30 @@
+schema_version: '2.0'
+directory_name: eval
+description: >
+  Two-tier evaluation framework for GRIM. Tier 1 (deterministic, no LLM, <1s) has
+  176 test cases across routing, keyword_routing, skill_matching, tool_resolution,
+  and knowledge_context categories. Tier 2 (LLM-judged, multi-turn) has 51 cases
+  across single_turn, multi_turn, and knowledge_accumulation. EvalRunner engine with
+  regression detection via comparator. Quality gates integrated with ship-it skill
+  (Tier 1 ≥95%, Tier 2 ≥70%). CLI: python -m eval run --tier 1.
+semantic_scope:
+  - evaluation
+  - tier-1
+  - tier-2
+  - quality-gates
+  - regression-detection
+  - eval-runner
+  - datasets
+files:
+  - __init__.py
+  - __main__.py
+  - config.py
+  - reports.py
+  - schema.py
+child_directories:
+  - datasets
+  - engine
+  - fixtures
+  - qa_mcp
+  - results
+  - tier3

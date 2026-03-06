@@ -1,0 +1,41 @@
+schema_version: '2.0'
+directory_name: nodes
+description: >
+  Graph nodes implementing GRIM's processing pipeline. Three-tier routing: skill hint
+  override → LLM intent classifier (Haiku) → keyword fallback. Memory node runs
+  parallel vault queries (keyword search + best-practice FDOs + rolling notes) with
+  session_knowledge accumulation. Compression node summarizes conversation history
+  while preserving session_knowledge. Identity node loads GRIM personality from
+  identity/ files. Planning companion handles multi-turn recursive task breakdown.
+  Companion router decides between direct agent dispatch and companion mode.
+semantic_scope:
+  - graph-nodes
+  - routing
+  - intent-classification
+  - memory
+  - compression
+  - identity
+  - skill-matching
+  - planning-companion
+  - keyword-routing
+  - session-knowledge
+files:
+  - __init__.py
+  - audit_gate.py
+  - companion.py
+  - companion_router.py
+  - compress.py
+  - evolve.py
+  - graph_router.py
+  - identity.py
+  - integrate.py
+  - intent_classifier.py
+  - keyword_router.py
+  - memory.py
+  - metadata.py
+  - personal_companion.py
+  - planning_companion.py
+  - response_generator.py
+  - router.py
+  - skill_match.py
+child_directories: []

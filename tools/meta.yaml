@@ -1,0 +1,23 @@
+schema_version: '2.0'
+directory_name: tools
+description: >
+  Tuning and benchmark utilities. actualization/ is a LangGraph-powered knowledge
+  ingestion service with an 8-node graph (intake → extract → search → judge →
+  actualize → validate → crosslink → commit) for ingesting source material into the
+  vault. tuning/ provides a framework for tuning actualization agent prompts via
+  iterative evaluation, scoring, and rewriting. repo_loader.py (58KB) handles
+  repository loading for analysis.
+semantic_scope:
+  - tools
+  - actualization
+  - tuning
+  - knowledge-ingestion
+  - prompt-optimization
+  - repo-loading
+files:
+  - _diag.py
+  - repo_loader.py
+  - requirements.txt
+child_directories:
+  - actualization
+  - tuning

@@ -1,0 +1,89 @@
+schema_version: '2.0'
+directory_name: tests
+description: >
+  Comprehensive pytest test suite — 2300+ tests across 60+ files. Coverage spans all
+  GRIM subsystems: core (grim_core, graph_router, keyword_router, intent_classifier),
+  agents (registry, integration, comprehensive, base_agent_callable, codebase_agent),
+  tools (tool_registry, tool_context, workspace), pool (unit, smoke, workspace, locks,
+  snapshot, audit, events, streaming, notifiers, MCP), tasks (unit, smoke, E2E, handlers),
+  sessions (session_knowledge, conversation_store, sessions), eval (datasets, runner,
+  comparator), Discord (discord_bot, discord_pool, inchat_pool), and infrastructure
+  (mcp_e2e, mcp_handlers, redis_cache, reasoning_cache, websocket_v2).
+semantic_scope:
+  - tests
+  - pytest
+  - unit-tests
+  - integration-tests
+  - smoke-tests
+  - e2e-tests
+files:
+  - conftest.py
+  - test_agent_comprehensive.py
+  - test_agent_integration.py
+  - test_agent_registry.py
+  - test_base_agent_callable.py
+  - test_client.py
+  - test_codebase.py
+  - test_codebase_agent.py
+  - test_companion_router.py
+  - test_concurrency.py
+  - test_context_compression.py
+  - test_conversation_store.py
+  - test_discord_bot.py
+  - test_discord_pool.py
+  - test_e2e_smoke.py
+  - test_eval.py
+  - test_full_pipeline.py
+  - test_graph_router.py
+  - test_graph_smoke.py
+  - test_graph_topology.py
+  - test_grim_core.py
+  - test_inchat_pool.py
+  - test_integration.py
+  - test_intent_classifier.py
+  - test_keyword_router.py
+  - test_kronos_timeouts.py
+  - test_matcher_smoke.py
+  - test_mcp_e2e.py
+  - test_mcp_handlers.py
+  - test_mcp_keyword.py
+  - test_mcp_live.py
+  - test_mcp_minimal.py
+  - test_mcp_stress.py
+  - test_memory_system.py
+  - test_model_routing.py
+  - test_notes_tools.py
+  - test_objectives.py
+  - test_planning_agent.py
+  - test_pool_audit.py
+  - test_pool_events.py
+  - test_pool_locks.py
+  - test_pool_mcp_handlers.py
+  - test_pool_mcp_smoke.py
+  - test_pool_notifiers.py
+  - test_pool_server_endpoints.py
+  - test_pool_smoke.py
+  - test_pool_snapshot.py
+  - test_pool_streaming.py
+  - test_pool_unit.py
+  - test_pool_workspace.py
+  - test_reasoning_cache.py
+  - test_redis_cache.py
+  - test_response_generator.py
+  - test_service_smoke.py
+  - test_session_knowledge.py
+  - test_sessions.py
+  - test_skills_consumers.py
+  - test_subgraphs.py
+  - test_task_e2e.py
+  - test_task_handlers.py
+  - test_task_smoke.py
+  - test_task_unit.py
+  - test_tier3_eval.py
+  - test_tool_context.py
+  - test_tool_registry.py
+  - test_vault_endpoints.py
+  - test_websocket_v2.py
+  - test_workspace.py
+child_directories:
+  - vault

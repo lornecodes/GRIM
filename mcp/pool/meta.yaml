@@ -1,0 +1,18 @@
+schema_version: '2.0'
+directory_name: pool
+description: >
+  Pool MCP server — dedicated MCP interface for execution pool introspection and
+  control. Hybrid architecture: read operations use direct SQLite (WAL-safe) for
+  zero-latency queries, write operations proxy to GRIM REST API. Follows the same
+  pattern as Kronos MCP. Standalone Python package with its own pyproject.toml.
+semantic_scope:
+  - pool-mcp
+  - mcp-server
+  - sqlite
+  - execution-pool
+  - introspection
+files:
+  - pyproject.toml
+child_directories:
+  - skills
+  - src

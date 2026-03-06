@@ -1,0 +1,15 @@
+schema_version: '2.0'
+directory_name: config
+description: >
+  Centralized YAML configuration for GRIM runtime. grim.yaml defines model routing
+  tiers, agent settings, pool configuration, eval thresholds, and feature flags.
+  cliproxyapi.yaml configures the upstream CLIProxyAPI connection.
+semantic_scope:
+  - configuration
+  - runtime-config
+  - model-routing
+  - feature-flags
+files:
+  - cliproxyapi.yaml
+  - grim.yaml
+child_directories: []

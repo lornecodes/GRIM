@@ -1,0 +1,53 @@
+schema_version: '2.0'
+directory_name: skills
+description: >
+  34 skill protocol definitions. Each skill subdirectory contains manifest.yaml
+  (metadata, triggers, tool groups) and protocol.md (step-by-step execution guide).
+  Categories: vault operations (kronos-capture/promote/recall/relate/reflect/bp/journal/note),
+  task management (task-manage, sprint-plan, calendar-manage), code operations
+  (code-execution, git-operations, file-operations, shell-execution), project lifecycle
+  (deep-ingest, vault-sync, experiment-validate/scaffold, fdo-source-validate),
+  routing (capability-routing, model-routing, source-navigate), and CI/CD
+  (eval-gate, ship-it, docker-release).
+semantic_scope:
+  - skills
+  - protocols
+  - manifests
+  - vault-operations
+  - task-management
+  - code-operations
+  - ci-cd
+files:
+  - README.md
+child_directories:
+  - calendar-manage
+  - capability-routing
+  - cliproxyapi
+  - code-execution
+  - deep-ingest
+  - docker-release
+  - eval-gate
+  - experiment-scaffold
+  - experiment-validate
+  - fdo-source-validate
+  - file-operations
+  - git-operations
+  - kronos-bp
+  - kronos-capture
+  - kronos-journal
+  - kronos-note
+  - kronos-promote
+  - kronos-recall
+  - kronos-reflect
+  - kronos-relate
+  - memory-read
+  - memory-update
+  - model-routing
+  - project-lifecycle
+  - repo-navigate
+  - shell-execution
+  - ship-it
+  - source-navigate
+  - sprint-plan
+  - task-manage
+  - vault-sync

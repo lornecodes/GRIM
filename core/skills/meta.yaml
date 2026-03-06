@@ -1,0 +1,21 @@
+schema_version: '2.0'
+directory_name: skills
+description: >
+  Skill loading, matching, and registry. Loader walks GRIM/skills/ directory, parses
+  manifest.yaml + protocol.md per skill, and populates SkillRegistry. Matcher evaluates
+  user messages against trigger keywords and intent patterns. Registry stores Skill
+  dataclasses with per-turn matching and context building for skill delegation hints
+  that flow through routing.
+semantic_scope:
+  - skills
+  - skill-matching
+  - skill-loading
+  - skill-registry
+  - manifest
+  - protocol
+files:
+  - __init__.py
+  - loader.py
+  - matcher.py
+  - registry.py
+child_directories: []

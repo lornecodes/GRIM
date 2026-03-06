@@ -1,0 +1,24 @@
+schema_version: '2.0'
+directory_name: server
+description: >
+  FastAPI HTTP + WebSocket server layer. app.py is the main entry point wrapping
+  GrimClient SDK sessions. Routes: GET / (UI), /health, WS /ws/{sid} (WebSocket chat),
+  POST /api/chat (REST), GET /api/sessions (list), plus pool, eval, and session
+  knowledge endpoints. SessionManager handles GrimClient lifecycle with idle eviction.
+  ConversationStore provides SQLite persistence of session messages and history with
+  CRUD operations and pagination.
+semantic_scope:
+  - server
+  - fastapi
+  - websocket
+  - rest-api
+  - session-management
+  - conversation-persistence
+  - sqlite
+files:
+  - __init__.py
+  - app.py
+  - conversation_store.py
+  - sessions.py
+child_directories:
+  - static

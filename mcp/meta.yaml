@@ -1,0 +1,20 @@
+schema_version: '2.0'
+directory_name: mcp
+description: >
+  Model Context Protocol (MCP) servers for GRIM. Contains three MCP server packages:
+  kronos (knowledge graph — vault, search, tasks, calendar, memory, source navigation),
+  pool (execution pool introspection — read via SQLite, write via HTTP proxy), and
+  obsidian (Obsidian vault bridge, legacy). Each is a standalone Python package with
+  its own pyproject.toml, runnable as stdio MCP servers.
+semantic_scope:
+  - mcp
+  - mcp-servers
+  - kronos
+  - pool
+  - obsidian
+  - stdio
+files: []
+child_directories:
+  - kronos
+  - obsidian
+  - pool

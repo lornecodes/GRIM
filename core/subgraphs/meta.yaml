@@ -1,0 +1,23 @@
+schema_version: '2.0'
+directory_name: subgraphs
+description: >
+  Subgraph adapters for specialized conversation paths. BaseSubgraph provides common
+  logic for extracting AI response text and packaging into SubgraphOutput. Four
+  adapters: code (code writing + testing), conversation (general chat), planning
+  (project planning + task breakdown), research (vault + web research). Each adapter
+  configures the appropriate agent, tools, and context for its domain.
+semantic_scope:
+  - subgraphs
+  - conversation-paths
+  - code
+  - planning
+  - research
+  - conversation
+files:
+  - __init__.py
+  - base.py
+  - code.py
+  - conversation.py
+  - planning.py
+  - research.py
+child_directories: []

@@ -85,6 +85,14 @@ class GrimConfig:
     pool_job_timeout_secs: int = 300
     pool_discord_webhook_url: str = ""
 
+    # Management Daemon (Project Mewtwo)
+    daemon_enabled: bool = False
+    daemon_poll_interval: float = 30.0          # seconds between scan cycles
+    daemon_max_concurrent_jobs: int = 1         # max stories dispatched at once
+    daemon_project_filter: list[str] = field(default_factory=list)  # limit to specific proj-* IDs
+    daemon_auto_dispatch: bool = True           # auto-dispatch READY stories
+    daemon_db_path: Path = field(default_factory=lambda: Path("local/daemon.db"))
+
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
 
@@ -151,6 +159,7 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     cfg.objectives_path = _resolve(cfg.objectives_path, grim_root)
     cfg.workspace_root = _resolve(cfg.workspace_root, grim_root)
     cfg.pool_db_path = _resolve(cfg.pool_db_path, grim_root)
+    cfg.daemon_db_path = _resolve(cfg.daemon_db_path, grim_root)
 
     # Redis URL
     redis_override = os.getenv("GRIM_REDIS_URL", os.getenv("KRONOS_REDIS_URL", ""))
@@ -267,6 +276,21 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.pool_max_turns_per_job = pool["max_turns_per_job"]
     if "job_timeout_secs" in pool:
         cfg.pool_job_timeout_secs = pool["job_timeout_secs"]
+
+    # Management Daemon (Project Mewtwo)
+    daemon = raw.get("daemon", {})
+    if "enabled" in daemon:
+        cfg.daemon_enabled = daemon["enabled"]
+    if "poll_interval" in daemon:
+        cfg.daemon_poll_interval = daemon["poll_interval"]
+    if "max_concurrent_jobs" in daemon:
+        cfg.daemon_max_concurrent_jobs = daemon["max_concurrent_jobs"]
+    if "project_filter" in daemon:
+        cfg.daemon_project_filter = daemon["project_filter"]
+    if "auto_dispatch" in daemon:
+        cfg.daemon_auto_dispatch = daemon["auto_dispatch"]
+    if "db_path" in daemon:
+        cfg.daemon_db_path = Path(daemon["db_path"])
 
 
 def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:

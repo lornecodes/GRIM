@@ -1,0 +1,23 @@
+schema_version: '2.0'
+directory_name: spikes
+description: >
+  Project Charizard Phase 0 proof-of-concepts. Five spikes proving the execution pool
+  architecture: 01 (ClaudeSDKClient with in-process MCP, streaming, permission callbacks),
+  02 (coding agent writes code + tests, uses Edit for fixes), 03 (research agent with
+  real Kronos MCP via stdio), 04 (audit agent with structured verdict classification),
+  05 (GRIM as persistent Agent SDK session with identity, multi-turn context, pool tools).
+  Total cost ~$1.37 across all spikes.
+semantic_scope:
+  - spikes
+  - proof-of-concept
+  - charizard
+  - agent-sdk
+  - execution-pool
+files:
+  - README.md
+child_directories:
+  - 01_agent_sdk_runtime
+  - 02_coding_agent
+  - 03_research_agent
+  - 04_audit_agent
+  - 05_persistent_session

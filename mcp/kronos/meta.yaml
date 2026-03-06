@@ -1,0 +1,21 @@
+schema_version: '2.0'
+directory_name: kronos
+description: >
+  Kronos MCP server package — the knowledge graph interface for GRIM. Provides 36 MCP
+  tools for vault operations (search, get, list, graph, create, update), source code
+  navigation (read_source, search_source, find_implementation, navigate, deep_dive),
+  task management (story CRUD, board, backlog, calendar, dispatch), memory (read, update,
+  sections), notes (append, recent), and validation (validate_sources, git_recent).
+  Runs as external stdio MCP server for GrimClient, or standalone CLI.
+semantic_scope:
+  - kronos
+  - mcp-server
+  - knowledge-graph
+  - vault
+  - source-navigation
+  - task-management
+files:
+  - README.md
+  - pyproject.toml
+child_directories:
+  - src

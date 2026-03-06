@@ -1,0 +1,13 @@
+schema_version: '2.0'
+directory_name: bridge
+description: >
+  Legacy bridge server integration package. Previously connected to external AI bridge
+  services. Now minimal — effectively archived. Bridge functionality superseded by
+  direct Agent SDK sessions via GrimClient.
+semantic_scope:
+  - bridge
+  - legacy
+  - archived
+files:
+  - __init__.py
+child_directories: []

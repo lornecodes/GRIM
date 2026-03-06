@@ -1,0 +1,33 @@
+schema_version: '2.0'
+directory_name: agents
+description: >
+  Agent registry and implementations. BaseAgent provides common infrastructure
+  (LLM init, tool resolution, context building, make_callable() classmethod).
+  Auto-discovery via registry.py scans modules for __agent_name__ + __make_agent__
+  attributes. Agents declare tool_groups and protocol_priority. Six specialized agents:
+  coder (code writing + testing), research (vault + web research), planning (project
+  planning), memory (knowledge management), operator (system operations), and
+  codebase (semantic code search + indexing).
+semantic_scope:
+  - agents
+  - auto-discovery
+  - registry
+  - base-agent
+  - tool-groups
+  - coder
+  - research
+  - planning
+  - memory
+  - operator
+  - codebase
+files:
+  - __init__.py
+  - base.py
+  - codebase_agent.py
+  - coder_agent.py
+  - memory_agent.py
+  - operator_agent.py
+  - planning_agent.py
+  - registry.py
+  - research_agent.py
+child_directories: []
