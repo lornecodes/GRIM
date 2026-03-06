@@ -1,9 +1,9 @@
 """
 Kronos Board Engine — kanban board state management.
 
-The board is a cross-feature view stored in kronos-vault/projects/board.yaml.
+The board is a cross-project view stored in kronos-vault/projects/board.yaml.
 It holds story IDs in ADO-style columns. Moving a story between columns
-auto-updates its status in the parent feature FDO via TaskEngine.
+auto-updates its status in the parent project FDO via TaskEngine.
 
 Columns: NEW → ACTIVE → IN_PROGRESS → RESOLVED → CLOSED
 """
@@ -212,7 +212,11 @@ class BoardEngine:
 
     # ── Views ────────────────────────────────────────────────────────────
 
-    def board_view(self, project_id: str | None = None) -> dict:
+    def board_view(
+        self,
+        project_id: str | None = None,
+        domain: str | None = None,
+    ) -> dict:
         """Get the full board with enriched story data per column.
 
         Lock held only for board YAML read; task_engine calls happen
@@ -243,6 +247,10 @@ class BoardEngine:
                 if project_id and story.get("project") != project_id:
                     continue
 
+                # Filter by domain if requested
+                if domain and story.get("domain") != domain:
+                    continue
+
                 enriched.append(story)
 
             result["columns"][col] = enriched
@@ -255,7 +263,7 @@ class BoardEngine:
     def backlog_view(
         self,
         project_id: str | None = None,
-        feat_id: str | None = None,
+        domain: str | None = None,
         priority: str | None = None,
     ) -> dict:
         """Get stories NOT on the board (the backlog)."""
@@ -268,7 +276,7 @@ class BoardEngine:
         # Get all stories, filter out board ones
         all_stories = self.task_engine.list_items(
             project_id=project_id,
-            feat_id=feat_id,
+            domain=domain,
             priority=priority,
         )
 

@@ -87,8 +87,9 @@ class CalendarEngine:
             entries.append({
                 "story_id": story.get("id", ""),
                 "title": story.get("title", ""),
-                "feature": story.get("feature", ""),
                 "project": story.get("project", ""),
+                "domain": story.get("domain", ""),
+                "assignee": story.get("assignee", ""),
                 "start_date": str(cursor),
                 "end_date": str(end),
                 "estimate_days": est,

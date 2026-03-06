@@ -1,7 +1,7 @@
 """
 Smoke tests for Kronos Task Management MCP tool registration.
 
-Verifies that all 12 task tools are registered, handlers exist,
+Verifies that all 13 task tools are registered, handlers exist,
 tool groups are correct, and basic calls return valid JSON.
 Runs against the real vault but makes no changes (read-only + rollback).
 
@@ -31,14 +31,18 @@ sys.path.insert(0, str(grim_root / "mcp" / "kronos" / "src"))
 print("Importing server module...")
 t0 = time.time()
 from kronos_mcp.server import (
-    TOOLS, HANDLERS,
+    TOOLS, HANDLERS, TOOL_GROUPS,
     handle_task_create, handle_task_update, handle_task_get,
     handle_task_list, handle_task_move, handle_task_archive,
+    handle_task_dispatch,
     handle_board_view, handle_backlog_view,
     handle_calendar_view, handle_calendar_add, handle_calendar_update,
     handle_calendar_sync,
-    handle_create, vault, task_engine, board_engine, calendar_engine,
+    handle_create, _ensure_initialized,
 )
+# Trigger lazy engine initialization so handlers work
+_ensure_initialized()
+from kronos_mcp.server import vault, task_engine, board_engine, calendar_engine
 print(f"Import done in {time.time() - t0:.1f}s")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,6 +67,7 @@ TASK_TOOLS = [
     "kronos_task_get",
     "kronos_task_list",
     "kronos_task_move",
+    "kronos_task_dispatch",
     "kronos_task_archive",
     "kronos_board_view",
     "kronos_backlog_view",
@@ -76,7 +81,7 @@ TASK_TOOLS = [
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 def test_tool_registration():
-    """All 12 task tools appear in the TOOLS list."""
+    """All 13 task tools appear in the TOOLS list."""
     print("\n[1] Tool registration")
     tool_names = {t.name for t in TOOLS}
     for name in TASK_TOOLS:
@@ -84,7 +89,7 @@ def test_tool_registration():
 
 
 def test_handler_registration():
-    """All 12 task tools have handlers in HANDLERS dict."""
+    """All 13 task tools have handlers in HANDLERS dict."""
     print("\n[2] Handler registration")
     for name in TASK_TOOLS:
         record(f"{name} handler", name in HANDLERS, "in HANDLERS" if name in HANDLERS else "MISSING")
@@ -108,16 +113,15 @@ def test_tool_schemas():
 def test_tool_groups():
     """Task tools appear in correct tool groups."""
     print("\n[4] Tool groups")
-    from kronos_mcp.server import TOOL_GROUPS
-
     read_tools = set(TOOL_GROUPS.get("tasks:read", []))
     write_tools = set(TOOL_GROUPS.get("tasks:write", []))
 
     expected_read = {"kronos_task_list", "kronos_task_get", "kronos_board_view",
                      "kronos_backlog_view", "kronos_calendar_view"}
     expected_write = {"kronos_task_create", "kronos_task_update", "kronos_task_move",
-                      "kronos_task_archive", "kronos_calendar_add",
-                      "kronos_calendar_update", "kronos_calendar_sync"}
+                      "kronos_task_dispatch", "kronos_task_archive",
+                      "kronos_calendar_add", "kronos_calendar_update",
+                      "kronos_calendar_sync"}
 
     record("tasks:read group", read_tools == expected_read,
            f"match={read_tools == expected_read} extra={read_tools - expected_read} missing={expected_read - read_tools}")
@@ -148,6 +152,16 @@ def test_read_only_smoke():
     record("task_list has stories", "stories" in data)
     record("task_list has count", "count" in data)
 
+    # Task list with domain filter
+    resp = handle_task_list({"domain": "projects"})
+    data = json.loads(resp)
+    record("task_list domain filter", isinstance(data, dict) and "stories" in data)
+
+    # Board view with domain filter
+    resp = handle_board_view({"domain": "projects"})
+    data = json.loads(resp)
+    record("board_view domain filter", isinstance(data, dict) and "columns" in data)
+
     # Calendar view
     resp = handle_calendar_view({"start_date": "2026-03-01", "end_date": "2026-03-31"})
     data = json.loads(resp)
@@ -166,24 +180,14 @@ def test_error_handling():
     print("\n[6] Error handling")
 
     # Missing title
-    resp = handle_task_create({"type": "story", "feat_id": "feat-x"})
+    resp = handle_task_create({"proj_id": "proj-x"})
     data = json.loads(resp)
     record("missing title error", "error" in data, data.get("error", ""))
 
-    # Missing feat_id
-    resp = handle_task_create({"type": "story", "title": "X"})
+    # Missing proj_id
+    resp = handle_task_create({"title": "X"})
     data = json.loads(resp)
-    record("missing feat_id error", "error" in data, data.get("error", ""))
-
-    # Missing story_id for task
-    resp = handle_task_create({"type": "task", "title": "X"})
-    data = json.loads(resp)
-    record("missing story_id error", "error" in data, data.get("error", ""))
-
-    # Invalid type
-    resp = handle_task_create({"type": "epic", "title": "X"})
-    data = json.loads(resp)
-    record("invalid type error", "error" in data, data.get("error", ""))
+    record("missing proj_id error", "error" in data, data.get("error", ""))
 
     # Missing item_id for get
     resp = handle_task_get({})
@@ -215,6 +219,16 @@ def test_error_handling():
     data = json.loads(resp)
     record("move invalid column", "error" in data, data.get("error", ""))
 
+    # Dispatch missing story_id
+    resp = handle_task_dispatch({})
+    data = json.loads(resp)
+    record("dispatch missing story_id", "error" in data, data.get("error", ""))
+
+    # Dispatch nonexistent story
+    resp = handle_task_dispatch({"story_id": "story-nonexistent-999"})
+    data = json.loads(resp)
+    record("dispatch nonexistent story", "error" in data, data.get("error", ""))
+
     # Calendar view missing dates
     resp = handle_calendar_view({})
     data = json.loads(resp)
@@ -242,11 +256,11 @@ def test_null_safety():
 
     # All string args as None (simulating JSON null)
     try:
-        resp = handle_task_create({"type": None, "title": None, "feat_id": None, "story_id": None})
+        resp = handle_task_create({"title": None, "proj_id": None})
         data = json.loads(resp)
-        record("null type/title/feat_id", "error" in data, data.get("error", ""))
+        record("null title/proj_id", "error" in data, data.get("error", ""))
     except Exception as e:
-        record("null type/title/feat_id", False, f"CRASH: {e}")
+        record("null title/proj_id", False, f"CRASH: {e}")
 
     try:
         resp = handle_task_get({"item_id": None})
@@ -261,6 +275,13 @@ def test_null_safety():
         record("null move args", "error" in data, data.get("error", ""))
     except Exception as e:
         record("null move args", False, f"CRASH: {e}")
+
+    try:
+        resp = handle_task_dispatch({"story_id": None})
+        data = json.loads(resp)
+        record("null dispatch args", "error" in data, data.get("error", ""))
+    except Exception as e:
+        record("null dispatch args", False, f"CRASH: {e}")
 
     try:
         resp = handle_calendar_add({"title": None, "date": None})
@@ -285,10 +306,10 @@ def test_engine_initialization():
 
 
 def test_total_tool_count():
-    """Total MCP tool count should be 30."""
+    """Total MCP tool count should be 36 (base tools + task/dispatch)."""
     print("\n[9] Total tool count")
-    record("total tools", len(TOOLS) == 30, f"expected=30 got={len(TOOLS)}")
-    record("total handlers", len(HANDLERS) == 30, f"expected=30 got={len(HANDLERS)}")
+    record("total tools", len(TOOLS) == 36, f"expected=36 got={len(TOOLS)}")
+    record("total handlers", len(HANDLERS) == 36, f"expected=36 got={len(HANDLERS)}")
     record("tools == handlers", len(TOOLS) == len(HANDLERS),
            f"tools={len(TOOLS)} handlers={len(HANDLERS)}")
 

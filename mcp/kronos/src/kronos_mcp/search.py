@@ -741,39 +741,63 @@ class SearchEngine:
     def _ensure_semantic(self, blocking: bool = True):
         """Lazily build semantic index on first semantic search request.
 
-        The lock is held only briefly to check/set flags. The heavy model load
-        and embedding happens OUTSIDE the lock so other search requests can
-        proceed with keyword-only results instead of blocking for 60s+.
-
         Args:
-            blocking: If False, return immediately if another thread is loading.
-                      The background pre-load uses blocking=True.
-                      Search requests use blocking=False to avoid hanging.
+            blocking: If True, load model and build index on this thread (blocks).
+                      If False, start a background thread and return immediately.
+                      Search handlers use blocking=False so the GIL-heavy model
+                      load (TensorFlow/PyTorch, 10-15s) doesn't block tool calls.
         """
         if self._semantic_indexed:
             return True
-        if not self._semantic.available:
+
+        # Skip the .available check when non-blocking — it triggers
+        # `import sentence_transformers` which loads TF/PyTorch (10-15s GIL).
+        # Defer that check to the background thread instead.
+        if blocking and not self._semantic.available:
             return False
 
         # Brief lock to check/set loading flag
         acquired = self._semantic_lock.acquire(blocking=blocking)
         if not acquired:
-            logger.warning("Semantic index still loading — skipping semantic for this request")
             return False
         try:
             if self._semantic_indexed:
                 return True
             if self._semantic_loading:
-                # Another thread is building — skip semantic for this request
-                logger.warning("Semantic index still loading — skipping semantic for this request")
                 return False
             self._semantic_loading = True
         finally:
             self._semantic_lock.release()
 
-        # Heavy work outside lock — only one thread gets here due to flag
+        if blocking:
+            # Blocking path — load model on this thread
+            self._build_semantic_index()
+            return self._semantic_indexed
+        else:
+            # Non-blocking — offload to background thread so handler returns fast.
+            # The .available check (which imports TF/PyTorch) happens inside the
+            # background thread, not on the handler thread.
+            import threading
+            threading.Thread(
+                target=self._build_semantic_index,
+                daemon=True,
+                name="semantic-build",
+            ).start()
+            logger.info("Semantic model loading started in background thread")
+            return False  # Not ready yet for this request
+
+    def _build_semantic_index(self):
+        """Heavy work: load sentence-transformer model + embed all FDOs.
+
+        May be called from background thread. Checks .available first since
+        that import is GIL-heavy and should not run on handler threads.
+        """
+        if not self._semantic.available:
+            with self._semantic_lock:
+                self._semantic_loading = False
+            return
         try:
-            logger.info("Building semantic index (first semantic search)...")
+            logger.info("Building semantic index...")
             t0 = time.time()
             to_embed: dict[str, str] = {}
             for fdo in self._vault.index.values():
@@ -784,12 +808,10 @@ class SearchEngine:
                 self._semantic_indexed = True
                 self._semantic_loading = False
             logger.info(f"Semantic index built in {time.time() - t0:.1f}s — {self._semantic.indexed_count} embeddings")
-            return True
         except Exception as e:
             with self._semantic_lock:
                 self._semantic_loading = False
             logger.warning(f"Semantic index build failed: {e}")
-            return False
 
     def _full_index(self, all_paths: list[str]):
         """Full index build: BM25 + graph (fast). Semantic deferred."""
@@ -939,13 +961,24 @@ class SearchEngine:
     def _index_meta_entry(self, entry: dict[str, Any]):
         """Index a single meta.yaml entry into BM25."""
         meta_id = entry["meta_id"]
-        tags_text = " ".join(entry.get("semantic_tags", []) + entry.get("semantic_scope", []))
+        # Ensure list types — meta.yaml values might be strings instead of lists
+        sem_tags = entry.get("semantic_tags", [])
+        if isinstance(sem_tags, str):
+            sem_tags = [sem_tags]
+        sem_scope = entry.get("semantic_scope", [])
+        if isinstance(sem_scope, str):
+            sem_scope = [sem_scope]
+        tags_text = " ".join(sem_tags + sem_scope)
+        # key_results can be a list of strings in experiment meta.yaml
+        key_results = entry.get("key_results", "")
+        if isinstance(key_results, list):
+            key_results = " ".join(str(r) for r in key_results)
         fields = {
             "id": entry["repo"] + " " + entry["path"].replace("/", " "),
             "title": entry.get("description", "")[:200],
             "tags": tags_text,
             "summary": entry.get("description", ""),
-            "body": entry.get("key_results", ""),
+            "body": str(key_results),
         }
         self._bm25.add(meta_id, fields)
 

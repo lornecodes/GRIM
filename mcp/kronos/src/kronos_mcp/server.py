@@ -23,10 +23,11 @@ Tools:
     kronos_search_source  — Grep across source files referenced by an FDO
 
   Tasks:
-    kronos_task_create    — Create story or task in a feature FDO
-    kronos_task_update    — Update story/task fields
-    kronos_task_get       — Get story/task by ID
+    kronos_task_create    — Create a story in a project FDO
+    kronos_task_update    — Update story fields
+    kronos_task_get       — Get story by ID
     kronos_task_list      — List stories with filters
+    kronos_task_dispatch  — Dispatch a story to the execution pool
     kronos_task_move      — Move story on the kanban board
     kronos_task_archive   — Archive closed stories
     kronos_board_view     — Get kanban board state
@@ -107,6 +108,10 @@ logger = logging.getLogger("kronos-mcp")
 logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
 
 # ── Configuration ────────────────────────────────────────────────────────────
+# CRITICAL: All engine construction is DEFERRED to first tool call.
+# Module-level init must be near-instant so the MCP stdio server starts
+# accepting requests immediately. Otherwise the MCP client times out waiting
+# for the initialize response and spawns a new process every ~1 second.
 
 vault_path = os.getenv("KRONOS_VAULT_PATH", "")
 skills_path = os.getenv("KRONOS_SKILLS_PATH", "")
@@ -117,37 +122,45 @@ if not vault_path:
         "Set it to the absolute path of your kronos-vault directory."
     )
 
-vault = VaultEngine(vault_path)
-search_engine = SearchEngine(vault)
-skills_engine = SkillsEngine(skills_path) if skills_path else None
-
-# ── Task management engines ──────────────────────────────────────────────────
-task_engine = TaskEngine(vault_path)
-board_engine = BoardEngine(vault_path, task_engine)
-calendar_engine = CalendarEngine(vault_path, board_engine)
-
-# ── Redis cache (optional) ────────────────────────────────────────────────────
 from .cache import KronosCache, WRITE_TOOLS, MEMORY_WRITE_TOOLS, TASK_WRITE_TOOLS
-cache = KronosCache.from_env()
 
-# Pre-load semantic index in background thread so first search is fast.
-# Timeout prevents the preload from hanging the server startup indefinitely
-# (e.g. if the sentence-transformer model needs to download from HuggingFace).
-import threading
+# Engine globals — populated by _ensure_initialized() on first tool call
+vault: VaultEngine | None = None
+search_engine: SearchEngine | None = None
+skills_engine: SkillsEngine | None = None
+task_engine: TaskEngine | None = None
+board_engine: BoardEngine | None = None
+calendar_engine: CalendarEngine | None = None
+cache: KronosCache | None = None
+_engines_initialized = False
 
-PRELOAD_TIMEOUT = 90  # seconds — generous, but not infinite
+def _ensure_initialized():
+    """Lazy-init all engines on first tool call. Must be called under _tool_lock."""
+    global vault, search_engine, skills_engine, task_engine, board_engine
+    global calendar_engine, cache, _engines_initialized
+    if _engines_initialized:
+        return
+    t0 = time.time()
+    vault = VaultEngine(vault_path)
+    search_engine = SearchEngine(vault)
+    skills_engine = SkillsEngine(skills_path) if skills_path else None
+    task_engine = TaskEngine(vault_path)
+    board_engine = BoardEngine(vault_path, task_engine)
+    calendar_engine = CalendarEngine(vault_path, board_engine)
+    cache = KronosCache.from_env()
+    _engines_initialized = True
+    logger.info(f"Engines initialized in {time.time() - t0:.1f}s")
 
-def _preload_semantic():
+    # Build BM25+graph index eagerly (fast, <1s) so first search is instant.
+    # Semantic model loading is deferred to first semantic=true search because
+    # TensorFlow/PyTorch import holds the GIL for 10-15s, blocking all threads
+    # including handler threads — causing tool call timeouts.
     try:
-        t0 = time.time()
-        search_engine._ensure_indexed()  # BM25 + graph first
-        logger.info(f"BM25 + graph indexed in {time.time() - t0:.1f}s")
-        search_engine._ensure_semantic(blocking=True)  # Then semantic model + embeddings
-        logger.info(f"Semantic pre-load complete in {time.time() - t0:.1f}s — all channels ready")
+        t1 = time.time()
+        search_engine._ensure_indexed()
+        logger.info(f"BM25 + graph indexed in {time.time() - t1:.1f}s")
     except Exception as e:
-        logger.warning(f"Semantic pre-load failed (search still works without it): {e}")
-
-threading.Thread(target=_preload_semantic, daemon=True, name="semantic-preload").start()
+        logger.warning(f"Index build failed (search still works): {e}")
 
 app = Server("kronos-mcp")
 
@@ -607,61 +620,48 @@ TOOLS: list[Tool] = [
     Tool(
         name="kronos_task_create",
         description=(
-            "Create a new story or task. Stories live inside feat-* FDOs. "
-            "Tasks are nested under stories. Provide feat_id for stories, "
-            "or story_id for tasks."
+            "Create a new story. Stories live inside proj-* FDOs and are "
+            "dispatchable work orders for the execution pool."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["story", "task"],
-                    "description": "Item type to create",
-                },
-                "feat_id": {
-                    "type": "string",
-                    "description": "Feature FDO ID (required for stories, e.g. 'feat-grim-taskman')",
-                },
-                "story_id": {
-                    "type": "string",
-                    "description": "Parent story ID (required for tasks)",
-                },
                 "title": {
                     "type": "string",
-                    "description": "Title of the story or task",
+                    "description": "Title of the story",
+                },
+                "proj_id": {
+                    "type": "string",
+                    "description": "Project FDO ID (e.g. 'proj-grim')",
                 },
                 "priority": {
                     "type": "string",
                     "enum": ["critical", "high", "medium", "low"],
-                    "description": "Priority level (stories only, default: medium)",
+                    "description": "Priority level (default: medium)",
                     "default": "medium",
                 },
                 "estimate_days": {
                     "type": "number",
-                    "description": "Estimated days to complete (default: 1 for stories, 0.5 for tasks)",
+                    "description": "Estimated days to complete (default: 1)",
                 },
                 "description": {
                     "type": "string",
-                    "description": "Story description (stories only)",
+                    "description": "Story description",
                 },
                 "acceptance_criteria": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of acceptance criteria (stories only)",
+                    "description": "List of acceptance criteria",
+                },
+                "assignee": {
+                    "type": "string",
+                    "enum": ["code", "research", "audit", "plan"],
+                    "description": "Agent type to assign (for pool dispatch)",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Tags for the story",
-                },
-                "assignee": {
-                    "type": "string",
-                    "description": "Assignee (tasks only)",
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "Notes (tasks only)",
                 },
                 "created_by": {
                     "type": "string",
@@ -673,28 +673,27 @@ TOOLS: list[Tool] = [
                     "description": "Initial status — 'draft' for AI-created items pending approval, 'new' for human-created (default: new)",
                 },
             },
-            "required": ["type", "title"],
+            "required": ["title"],
         },
     ),
     Tool(
         name="kronos_task_update",
         description=(
-            "Update fields on a story or task. Pass the item ID and a dict of "
-            "fields to update. Auto-logs status changes."
+            "Update fields on a story. Pass the item ID and a dict of "
+            "fields to update. Auto-logs status and assignee changes."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "item_id": {
                     "type": "string",
-                    "description": "Story or task ID to update",
+                    "description": "Story ID to update",
                 },
                 "fields": {
                     "type": "object",
                     "description": (
-                        "Fields to update. Stories: title, status, priority, estimate_days, "
-                        "description, acceptance_criteria, tags. "
-                        "Tasks: title, status, estimate_days, assignee, notes."
+                        "Fields to update: title, status, priority, estimate_days, "
+                        "description, acceptance_criteria, assignee, job_id, tags."
                     ),
                 },
             },
@@ -704,15 +703,15 @@ TOOLS: list[Tool] = [
     Tool(
         name="kronos_task_get",
         description=(
-            "Get full details of a story or task by ID. Returns all fields "
-            "including tasks (for stories) and parent info."
+            "Get full details of a story by ID. Returns all fields "
+            "including assignee, job_id, and parent project info."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "item_id": {
                     "type": "string",
-                    "description": "Story or task ID",
+                    "description": "Story ID",
                 },
             },
             "required": ["item_id"],
@@ -722,7 +721,7 @@ TOOLS: list[Tool] = [
         name="kronos_task_list",
         description=(
             "List stories with optional filters. Returns summary info for each "
-            "story including task progress. Sorted by priority then creation date."
+            "story. Sorted by priority then creation date."
         ),
         inputSchema={
             "type": "object",
@@ -731,9 +730,9 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Filter by project (e.g. 'proj-grim')",
                 },
-                "feat_id": {
+                "domain": {
                     "type": "string",
-                    "description": "Filter by feature (e.g. 'feat-grim-taskman')",
+                    "description": "Filter by vault domain (e.g. 'projects', 'ai-systems', 'physics')",
                 },
                 "status": {
                     "type": "string",
@@ -772,17 +771,40 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kronos_task_dispatch",
+        description=(
+            "Dispatch a story to the execution pool. Creates a pool job from "
+            "the story's title, description, and acceptance criteria. "
+            "Sets story.job_id to the created job ID."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "story_id": {
+                    "type": "string",
+                    "description": "Story ID to dispatch",
+                },
+                "override_assignee": {
+                    "type": "string",
+                    "enum": ["code", "research", "audit", "plan"],
+                    "description": "Override the story's assignee for this dispatch",
+                },
+            },
+            "required": ["story_id"],
+        },
+    ),
+    Tool(
         name="kronos_task_archive",
         description=(
-            "Archive closed stories in feature FDOs. Moves closed stories from "
+            "Archive closed stories in project FDOs. Moves closed stories from "
             "the active stories list to an archived_stories section."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "feat_id": {
+                "proj_id": {
                     "type": "string",
-                    "description": "Feature to archive (omit to archive all closed stories across all features)",
+                    "description": "Project to archive (omit to archive all closed stories across all projects)",
                 },
             },
         },
@@ -791,8 +813,8 @@ TOOLS: list[Tool] = [
         name="kronos_board_view",
         description=(
             "Get the current kanban board state. Returns all columns with "
-            "enriched story data (title, priority, estimate, task progress). "
-            "Optionally filter by project."
+            "enriched story data (title, priority, estimate, assignee, job status). "
+            "Optionally filter by project or domain."
         ),
         inputSchema={
             "type": "object",
@@ -801,6 +823,10 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Filter board to a specific project",
                 },
+                "domain": {
+                    "type": "string",
+                    "description": "Filter by vault domain (e.g. 'projects', 'ai-systems')",
+                },
             },
         },
     ),
@@ -808,7 +834,7 @@ TOOLS: list[Tool] = [
         name="kronos_backlog_view",
         description=(
             "Get stories NOT currently on the board (the backlog). "
-            "Filter by project, feature, or priority."
+            "Filter by project, domain, or priority."
         ),
         inputSchema={
             "type": "object",
@@ -817,9 +843,9 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Filter by project",
                 },
-                "feat_id": {
+                "domain": {
                     "type": "string",
-                    "description": "Filter by feature",
+                    "description": "Filter by vault domain",
                 },
                 "priority": {
                     "type": "string",
@@ -996,6 +1022,103 @@ TOOLS: list[Tool] = [
             },
         },
     ),
+    # ── Code intelligence tools ──
+    Tool(
+        name="kronos_validate_sources",
+        description=(
+            "Validate all FDO source_paths links against the filesystem. "
+            "Returns broken links. Use to audit source_paths integrity."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Filter to a specific domain",
+                    "enum": _DOMAIN_ENUM,
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Filter to a specific repo",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kronos_find_implementation",
+        description=(
+            "Find where a function, class, or symbol is implemented in a repo. "
+            "Scans source files for definition patterns (def, class, assignment). "
+            "Returns file paths, line numbers, and surrounding context. "
+            "Unlike kronos_search_source, this scans the whole repo without "
+            "requiring an FDO source_path link."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository to search (e.g., 'GRIM', 'fracton')",
+                },
+                "symbol": {
+                    "type": "string",
+                    "description": "Symbol name to find (function, class, constant, etc.)",
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Symbol kind filter (default: 'any')",
+                    "enum": ["function", "class", "any"],
+                    "default": "any",
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Lines of context around each match (default 5, max 20)",
+                    "default": 5,
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "path_filter": {
+                    "type": "string",
+                    "description": "Only search within this subdirectory (e.g., 'core/pool')",
+                },
+            },
+            "required": ["repo", "symbol"],
+        },
+    ),
+    Tool(
+        name="kronos_git_recent",
+        description=(
+            "Get recent git log scoped to a repo or path. "
+            "Answers 'what changed recently in this module?'"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Repository name (e.g., 'GRIM', 'fracton')",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Subdirectory to scope the log to (optional)",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "How many days back (default 30, max 90)",
+                    "default": 30,
+                },
+                "max_commits": {
+                    "type": "integer",
+                    "description": "Maximum commits to return (default 20, max 50)",
+                    "default": 20,
+                },
+            },
+            "required": ["repo"],
+        },
+    ),
 ]
 
 
@@ -1008,13 +1131,16 @@ TOOL_GROUPS = {
     "vault:write":  ["kronos_create", "kronos_update", "kronos_note_append"],
     "memory:read":  ["kronos_memory_read", "kronos_memory_sections"],
     "memory:write": ["kronos_memory_update"],
-    "source:read":  ["kronos_navigate", "kronos_read_source", "kronos_search_source"],
+    "source:read":  ["kronos_navigate", "kronos_read_source", "kronos_search_source",
+                      "kronos_validate_sources", "kronos_find_implementation",
+                      "kronos_git_recent"],
     "system":       ["kronos_skills", "kronos_skill_load", "kronos_tool_groups"],
     "tasks:read":   ["kronos_task_list", "kronos_task_get", "kronos_board_view",
                       "kronos_backlog_view", "kronos_calendar_view"],
     "tasks:write":  ["kronos_task_create", "kronos_task_update", "kronos_task_move",
-                      "kronos_task_archive", "kronos_calendar_add",
-                      "kronos_calendar_update", "kronos_calendar_sync"],
+                      "kronos_task_dispatch", "kronos_task_archive",
+                      "kronos_calendar_add", "kronos_calendar_update",
+                      "kronos_calendar_sync"],
 }
 
 
@@ -1469,6 +1595,252 @@ def handle_search_source(args: dict) -> str:
     })
 
 
+# ── Code intelligence handlers ──────────────────────────────────────────────
+
+def _walk_source_files(root: Path) -> list[Path]:
+    """Walk a directory tree yielding source files (respecting skip/extension/size rules)."""
+    results: list[Path] = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            entries = sorted(d.iterdir(), key=lambda p: p.name.lower())
+        except (PermissionError, OSError):
+            continue
+        for entry in entries:
+            name = entry.name
+            if name.startswith("."):
+                continue
+            if name in _NAVIGATE_SKIP:
+                continue
+            if entry.is_dir():
+                stack.append(entry)
+            elif entry.is_file() and entry.suffix in _SOURCE_EXTENSIONS:
+                try:
+                    if entry.stat().st_size < 500_000:
+                        results.append(entry)
+                except OSError:
+                    continue
+    return results
+
+
+def _classify_match(line: str) -> str:
+    """Classify a matching line as function/class/constant/assignment."""
+    stripped = line.strip()
+    if stripped.startswith(("def ", "async def ")):
+        return "function"
+    if stripped.startswith("class "):
+        return "class"
+    # ALL_CAPS = ... → constant
+    name_part = stripped.split("=")[0].split(":")[0].strip() if "=" in stripped or ":" in stripped else ""
+    if name_part and name_part == name_part.upper() and name_part[0].isalpha():
+        return "constant"
+    return "assignment"
+
+
+def handle_validate_sources(args: dict) -> str:
+    """Validate all FDO source_paths against the filesystem."""
+    vault._ensure_index()
+    domain_filter = args.get("domain")
+    repo_filter = args.get("repo")
+
+    broken: list[dict] = []
+    total_paths = 0
+    fdos_checked = 0
+
+    for fdo in vault.index.values():
+        if domain_filter and fdo.domain != domain_filter:
+            continue
+        if not fdo.source_paths:
+            continue
+        fdos_checked += 1
+        for sp in fdo.source_paths:
+            repo, path, sp_type = _normalize_source_path(sp)
+            if not repo or not path:
+                continue
+            if repo_filter and repo != repo_filter:
+                continue
+            total_paths += 1
+            target, err = _validate_workspace_path(repo, path)
+            if err:
+                broken.append({
+                    "fdo_id": fdo.id, "repo": repo, "path": path,
+                    "type": sp_type, "error": err,
+                })
+            elif target is not None and not target.exists():
+                broken.append({
+                    "fdo_id": fdo.id, "repo": repo, "path": path,
+                    "type": sp_type, "error": "File or directory not found",
+                })
+
+    return _json({
+        "total_fdos_checked": fdos_checked,
+        "total_paths_checked": total_paths,
+        "broken_count": len(broken),
+        "domain_filter": domain_filter,
+        "repo_filter": repo_filter,
+        "broken": broken,
+    })
+
+
+def handle_find_implementation(args: dict) -> str:
+    """Find where a symbol is defined in a repo (scans entire repo, no FDO needed)."""
+    repo = args.get("repo", "").strip().strip("/\\")
+    symbol = args.get("symbol", "").strip()
+    kind = args.get("kind", "any")
+    context_lines = min(args.get("context_lines", 5), 20)
+    max_results = min(args.get("max_results", 20), 50)
+    path_filter = args.get("path_filter", "").strip().strip("/\\")
+
+    if not repo or not symbol:
+        return _json({"error": "repo and symbol are required"})
+
+    workspace = Path(vault_path).parent
+    repo_root = workspace / repo
+    if not repo_root.is_dir():
+        return _json({"error": f"Repo not found: {repo}"})
+
+    scan_root = repo_root / path_filter if path_filter else repo_root
+    if not scan_root.is_dir():
+        return _json({"error": f"Path not found: {repo}/{path_filter}"})
+
+    # Build regex patterns based on kind
+    esc = re.escape(symbol)
+    patterns: list[re.Pattern] = []
+    if kind in ("function", "any"):
+        patterns.append(re.compile(rf"^\s*(async\s+)?def\s+{esc}\s*[\(:]", re.MULTILINE))
+    if kind in ("class", "any"):
+        patterns.append(re.compile(rf"^\s*class\s+{esc}\s*[\(:\[]", re.MULTILINE))
+    if kind == "any":
+        # Also match top-level assignments: SYMBOL = ..., symbol: type = ...
+        patterns.append(re.compile(rf"^{esc}\s*[=:]", re.MULTILINE))
+
+    source_files = _walk_source_files(scan_root)
+    results: list[dict] = []
+    files_scanned = 0
+
+    for fpath in source_files:
+        if len(results) >= max_results:
+            break
+        files_scanned += 1
+        try:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        lines = text.splitlines()
+        seen_lines: set[int] = set()  # dedup across patterns
+
+        for pat in patterns:
+            for m in pat.finditer(text):
+                # Use m.end() for line counting — m.start() may be on
+                # preceding whitespace/blank lines due to ^\s* in MULTILINE
+                line_no = text[:m.end()].count("\n") + 1
+                if line_no in seen_lines:
+                    continue
+                seen_lines.add(line_no)
+
+                start = max(0, line_no - 1 - context_lines)
+                end = min(len(lines), line_no + context_lines)
+                rel = str(fpath.relative_to(workspace)).replace("\\", "/")
+                results.append({
+                    "file": rel,
+                    "repo": repo,
+                    "line": line_no,
+                    "match": lines[line_no - 1].strip() if line_no <= len(lines) else "",
+                    "kind": _classify_match(lines[line_no - 1] if line_no <= len(lines) else ""),
+                    "context": "\n".join(lines[start:end]),
+                })
+                if len(results) >= max_results:
+                    break
+            if len(results) >= max_results:
+                break
+
+    return _json({
+        "repo": repo,
+        "symbol": symbol,
+        "kind": kind,
+        "path_filter": path_filter or None,
+        "files_scanned": files_scanned,
+        "results_count": len(results),
+        "truncated": len(results) >= max_results,
+        "results": results,
+    })
+
+
+def handle_git_recent(args: dict) -> str:
+    """Get recent git log scoped to a repo or path."""
+    import subprocess
+
+    repo = args.get("repo", "").strip().strip("/\\")
+    path_scope = args.get("path", "").strip().strip("/\\")
+    days = min(args.get("days", 30), 90)
+    max_commits = min(args.get("max_commits", 20), 50)
+
+    if not repo:
+        return _json({"error": "repo is required"})
+
+    workspace = Path(vault_path).parent
+    repo_root = workspace / repo
+    if not repo_root.is_dir():
+        return _json({"error": f"Repo not found: {repo}"})
+
+    # Check if it's a git repo
+    if not (repo_root / ".git").exists():
+        return _json({"error": f"{repo} is not a git repository"})
+
+    # Build git log command
+    # Format: hash|date|author|message
+    cmd = [
+        "git", "log",
+        f"--since={days} days ago",
+        f"-n{max_commits}",
+        "--format=%H|%aI|%an|%s",
+        "--name-only",
+    ]
+    if path_scope:
+        cmd.extend(["--", path_scope])
+
+    try:
+        result = subprocess.run(
+            cmd, cwd=str(repo_root), capture_output=True, text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return _json({"error": "Git log timed out"})
+    except FileNotFoundError:
+        return _json({"error": "git not found on PATH"})
+
+    if result.returncode != 0:
+        return _json({"error": f"git log failed: {result.stderr.strip()}"})
+
+    # Parse output: commit lines start with hash, file lines are indented
+    commits: list[dict] = []
+    current: dict | None = None
+
+    for line in result.stdout.splitlines():
+        if "|" in line and len(line.split("|")) >= 4:
+            parts = line.split("|", 3)
+            current = {
+                "hash": parts[0][:8],
+                "date": parts[1],
+                "author": parts[2],
+                "message": parts[3],
+                "files": [],
+            }
+            commits.append(current)
+        elif line.strip() and current is not None:
+            current["files"].append(line.strip())
+
+    return _json({
+        "repo": repo,
+        "path": path_scope or None,
+        "days": days,
+        "commits_count": len(commits),
+        "commits": commits,
+    })
+
+
 def handle_search(args: dict) -> str:
     query = args["query"]
     max_results = args.get("max_results", 10)
@@ -1843,14 +2215,23 @@ def handle_deep_dive(args: dict) -> str:
         if not fdo:
             return
         paths = fdo.source_paths
+        # Normalize legacy flat-string source_paths to dicts
+        normalized = []
+        for p in paths:
+            if isinstance(p, dict):
+                normalized.append(p)
+            elif isinstance(p, str):
+                repo_part, path_part, type_part = _normalize_source_path(p)
+                normalized.append({"repo": repo_part, "path": path_part, "type": type_part})
+            # Skip non-string/non-dict entries
         if type_filter:
-            paths = [p for p in paths if p.get("type") == type_filter]
-        if paths:
+            normalized = [p for p in normalized if p.get("type") == type_filter]
+        if normalized:
             fdo_sources.append({
                 "fdo_id": fdo.id,
                 "fdo_title": fdo.title,
                 "hop": d,
-                "source_paths": paths,
+                "source_paths": normalized,
             })
         if d < depth:
             for rel_id in fdo.related:
@@ -2034,50 +2415,35 @@ def handle_navigate(args: dict) -> str:
 # ── Task management handlers ─────────────────────────────────────────────────
 
 def handle_task_create(args: dict) -> str:
-    item_type = args.get("type") or "story"
     title = (args.get("title") or "").strip()
     if not title:
         return _json({"error": "title required"})
 
-    if item_type == "story":
-        feat_id = (args.get("feat_id") or "").strip()
-        if not feat_id:
-            return _json({"error": "feat_id required for stories"})
+    proj_id = (args.get("proj_id") or "").strip()
+    if not proj_id:
+        return _json({"error": "proj_id required"})
 
-        # Pre-creation validation (non-blocking warnings)
-        est = float(args.get("estimate_days") or 1.0)
-        warnings = task_engine.validate_story_creation(
-            feat_id=feat_id, title=title, estimate_days=est,
-        )
+    # Pre-creation validation (non-blocking warnings)
+    est = float(args.get("estimate_days") or 1.0)
+    warnings = task_engine.validate_story_creation(
+        proj_id=proj_id, title=title, estimate_days=est,
+    )
 
-        result = task_engine.create_story(
-            feat_id=feat_id,
-            title=title,
-            priority=args.get("priority") or "medium",
-            estimate_days=est,
-            description=args.get("description") or "",
-            acceptance_criteria=args.get("acceptance_criteria"),
-            tags=args.get("tags"),
-            created_by=args.get("created_by") or "human",
-            status=args.get("status") or "new",
-        )
-        if warnings and not result.get("error"):
-            result["warnings"] = warnings
-        return _json(result)
-    elif item_type == "task":
-        story_id = (args.get("story_id") or "").strip()
-        if not story_id:
-            return _json({"error": "story_id required for tasks"})
-        return _json(task_engine.create_task(
-            story_id=story_id,
-            title=title,
-            estimate_days=float(args.get("estimate_days") or 0.5),
-            assignee=args.get("assignee") or "",
-            notes=args.get("notes") or "",
-            created_by=args.get("created_by") or "human",
-        ))
-    else:
-        return _json({"error": f"Invalid type: {item_type}", "valid": ["story", "task"]})
+    result = task_engine.create_story(
+        proj_id=proj_id,
+        title=title,
+        priority=args.get("priority") or "medium",
+        estimate_days=est,
+        description=args.get("description") or "",
+        acceptance_criteria=args.get("acceptance_criteria"),
+        assignee=args.get("assignee") or "",
+        tags=args.get("tags"),
+        created_by=args.get("created_by") or "human",
+        status=args.get("status") or "new",
+    )
+    if warnings and not result.get("error"):
+        result["warnings"] = warnings
+    return _json(result)
 
 
 def handle_task_update(args: dict) -> str:
@@ -2103,7 +2469,7 @@ def handle_task_get(args: dict) -> str:
 def handle_task_list(args: dict) -> str:
     items = task_engine.list_items(
         project_id=args.get("project_id"),
-        feat_id=args.get("feat_id"),
+        domain=args.get("domain"),
         status=args.get("status"),
         priority=args.get("priority"),
     )
@@ -2121,7 +2487,7 @@ def handle_task_move(args: dict) -> str:
 
 
 def handle_task_archive(args: dict) -> str:
-    result = task_engine.archive_closed(feat_id=args.get("feat_id"))
+    result = task_engine.archive_closed(proj_id=args.get("proj_id"))
     # Remove archived stories from the board using BoardEngine's lock-safe method
     if result.get("archived", 0) > 0:
         removed = board_engine.cleanup_archived()
@@ -2130,13 +2496,16 @@ def handle_task_archive(args: dict) -> str:
 
 
 def handle_board_view(args: dict) -> str:
-    return _json(board_engine.board_view(project_id=args.get("project_id")))
+    return _json(board_engine.board_view(
+        project_id=args.get("project_id"),
+        domain=args.get("domain"),
+    ))
 
 
 def handle_backlog_view(args: dict) -> str:
     return _json(board_engine.backlog_view(
         project_id=args.get("project_id"),
-        feat_id=args.get("feat_id"),
+        domain=args.get("domain"),
         priority=args.get("priority"),
     ))
 
@@ -2184,6 +2553,55 @@ def handle_calendar_update(args: dict) -> str:
         return _json({"error": f"Invalid action: {action}", "valid": ["update", "delete"]})
 
 
+def handle_task_dispatch(args: dict) -> str:
+    story_id = (args.get("story_id") or "").strip()
+    if not story_id:
+        return _json({"error": "story_id required"})
+
+    story = task_engine.get_item(story_id)
+    if not story:
+        return _json({"error": f"Story not found: {story_id}"})
+
+    assignee = (args.get("override_assignee") or story.get("assignee") or "").strip()
+    if not assignee:
+        return _json({"error": "Story has no assignee and no override_assignee provided"})
+    if assignee not in ("code", "research", "audit", "plan"):
+        return _json({"error": f"Invalid assignee: {assignee}", "valid": ["code", "research", "audit", "plan"]})
+
+    # Build job instructions from story fields
+    instructions = story.get("title", "")
+    desc = story.get("description", "")
+    if desc:
+        instructions += f"\n\n{desc}"
+    criteria = story.get("acceptance_criteria", [])
+    if criteria:
+        instructions += "\n\nAcceptance Criteria:\n" + "\n".join(f"- [ ] {c}" for c in criteria)
+
+    # Map priority
+    priority_map = {"critical": "high", "high": "high", "medium": "normal", "low": "low"}
+    priority = priority_map.get(story.get("priority", "medium"), "normal")
+
+    result = {
+        "dispatched": story_id,
+        "assignee": assignee,
+        "priority": priority,
+        "instructions_preview": instructions[:200] + ("..." if len(instructions) > 200 else ""),
+        "note": "Pool dispatch ready — call pool_submit with these parameters to execute",
+        "pool_params": {
+            "instructions": instructions,
+            "job_type": assignee,
+            "priority": priority,
+            "kronos_fdo_ids": [story.get("project", "")],
+        },
+    }
+
+    # Update story assignee if override was used
+    if args.get("override_assignee"):
+        task_engine.update_item(story_id, {"assignee": assignee})
+
+    return _json(result)
+
+
 def handle_calendar_sync(args: dict) -> str:
     return _json(calendar_engine.sync_schedule(start_date=args.get("start_date")))
 
@@ -2203,6 +2621,10 @@ HANDLERS = {
     "kronos_navigate": handle_navigate,
     "kronos_read_source": handle_read_source,
     "kronos_search_source": handle_search_source,
+    # Code intelligence tools
+    "kronos_validate_sources": handle_validate_sources,
+    "kronos_find_implementation": handle_find_implementation,
+    "kronos_git_recent": handle_git_recent,
     # Memory tools
     "kronos_memory_read": handle_memory_read,
     "kronos_memory_update": handle_memory_update,
@@ -2215,6 +2637,7 @@ HANDLERS = {
     "kronos_task_get": handle_task_get,
     "kronos_task_list": handle_task_list,
     "kronos_task_move": handle_task_move,
+    "kronos_task_dispatch": handle_task_dispatch,
     "kronos_task_archive": handle_task_archive,
     "kronos_board_view": handle_board_view,
     "kronos_backlog_view": handle_backlog_view,
@@ -2239,11 +2662,14 @@ TOOL_TIMEOUTS: dict[str, float] = {
     # Writes (15s)
     "kronos_create": 15, "kronos_update": 15, "kronos_memory_update": 15,
     "kronos_task_create": 15, "kronos_task_update": 15, "kronos_task_move": 15,
-    "kronos_task_archive": 15, "kronos_calendar_add": 15,
+    "kronos_task_dispatch": 15, "kronos_task_archive": 15, "kronos_calendar_add": 15,
     "kronos_calendar_update": 15, "kronos_calendar_sync": 15, "kronos_note_append": 15,
     # Search / index-heavy (45s)
     "kronos_search": 45, "kronos_graph": 45, "kronos_validate": 45,
     "kronos_deep_dive": 45, "kronos_search_source": 30,
+    # Code intelligence (30-60s)
+    "kronos_validate_sources": 30, "kronos_find_implementation": 60,
+    "kronos_git_recent": 15,
     # Other (15s)
     "kronos_navigate": 15, "kronos_read_source": 15, "kronos_notes_recent": 15,
 }
@@ -2251,6 +2677,21 @@ DEFAULT_TIMEOUT: float = 30.0
 
 
 # ── MCP wiring ───────────────────────────────────────────────────────────────
+
+# Serialise all tool calls. The MCP SDK dispatches concurrent requests via
+# anyio task groups, but our handlers share mutable state (vault index,
+# search engine, task engine, board YAML) across threads.  Concurrent
+# asyncio.to_thread() calls cause race conditions and lockups on Windows.
+# Each handler is fast (<1s for reads, <2s for writes), so serialisation
+# has negligible latency impact.
+_tool_lock: asyncio.Lock | None = None
+
+def _get_tool_lock() -> asyncio.Lock:
+    """Lazy-init the lock inside the running event loop."""
+    global _tool_lock
+    if _tool_lock is None:
+        _tool_lock = asyncio.Lock()
+    return _tool_lock
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -2268,25 +2709,30 @@ async def call_tool(
     if not handler:
         raise ValueError(f"Unknown tool: {name}")
 
-    # ── Cache read (read-only tools only) ─────────────────────────────────────
-    cached = cache.get(name, arguments)
-    if cached is not None:
-        return [TextContent(type="text", text=cached)]
+    # ── Execute handler (serialised) ──────────────────────────────────────────
+    async with _get_tool_lock():
+        # Lazy-init engines on first call (deferred from module load to avoid
+        # blocking the MCP init handshake and causing rapid respawning).
+        if not _engines_initialized:
+            await asyncio.to_thread(_ensure_initialized)
 
-    # ── Execute handler ───────────────────────────────────────────────────────
-    try:
-        timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
-        result = await asyncio.wait_for(
-            asyncio.to_thread(handler, arguments),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
-        logger.error(f"Tool {name} timed out after {timeout}s")
-        return [TextContent(type="text", text=_json({"error": f"{name} timed out after {timeout}s"}))]
-    except Exception as e:
-        logger.error(f"Tool {name} failed: {e}", exc_info=True)
-        return [TextContent(type="text", text=_json({"error": str(e)}))]
+        # Cache read (only after engines are initialized)
+        cached = cache.get(name, arguments)
+        if cached is not None:
+            return [TextContent(type="text", text=cached)]
+        try:
+            timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(handler, arguments),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            timeout = TOOL_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
+            logger.error(f"Tool {name} timed out after {timeout}s")
+            return [TextContent(type="text", text=_json({"error": f"{name} timed out after {timeout}s"}))]
+        except Exception as e:
+            logger.error(f"Tool {name} failed: {e}", exc_info=True)
+            return [TextContent(type="text", text=_json({"error": str(e)}))]
 
     # ── Cache write / invalidation ────────────────────────────────────────────
     if name in WRITE_TOOLS or name in MEMORY_WRITE_TOOLS or name in TASK_WRITE_TOOLS:

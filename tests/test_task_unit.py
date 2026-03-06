@@ -40,6 +40,7 @@ _calendar_mod = _load_module("kronos_mcp.calendar", _mcp_src / "calendar.py")
 TaskEngine = _tasks_mod.TaskEngine
 VALID_STATUSES = _tasks_mod.VALID_STATUSES
 VALID_PRIORITIES = _tasks_mod.VALID_PRIORITIES
+VALID_ASSIGNEES = _tasks_mod.VALID_ASSIGNEES
 PRIORITY_ORDER = _tasks_mod.PRIORITY_ORDER
 BoardEngine = _board_mod.BoardEngine
 COLUMNS = _board_mod.COLUMNS
@@ -51,39 +52,37 @@ _add_workdays = _calendar_mod._add_workdays
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
-MINIMAL_FEATURE_FDO = """\
+MINIMAL_PROJECT_FDO = """\
 ---
-id: feat-test-alpha
-title: "Test Feature Alpha"
-domain: ai-systems
+id: proj-test-alpha
+title: "Test Project Alpha"
+domain: projects
 created: "2026-03-01"
 updated: "2026-03-01"
 status: developing
 confidence: 0.5
-related:
-  - proj-test
-tags: [test]
+related: []
+tags: [test, epic]
 stories: []
 ---
 
-# Test Feature Alpha
+# Test Project Alpha
 
 ## Summary
-A minimal feature for unit tests.
+A minimal project for unit tests.
 """
 
-FEATURE_WITH_STORIES = """\
+PROJECT_WITH_STORIES = """\
 ---
-id: feat-test-beta
-title: "Test Feature Beta"
-domain: ai-systems
+id: proj-test-beta
+title: "Test Project Beta"
+domain: projects
 created: "2026-03-01"
 updated: "2026-03-01"
 status: developing
 confidence: 0.7
-related:
-  - proj-test
-tags: [test]
+related: []
+tags: [test, epic]
 stories:
   - id: story-test-beta-001
     title: "Pre-existing story"
@@ -91,15 +90,9 @@ stories:
     priority: high
     estimate_days: 3
     description: "A story that already exists"
+    assignee: "code"
     acceptance_criteria:
       - "Criterion 1"
-    tasks:
-      - id: task-001
-        title: "Existing task"
-        status: new
-        estimate_days: 1
-        assignee: ""
-        notes: ""
     tags: [test]
     created: "2026-03-01"
     updated: "2026-03-01"
@@ -111,8 +104,8 @@ stories:
     priority: medium
     estimate_days: 1
     description: ""
+    assignee: ""
     acceptance_criteria: []
-    tasks: []
     tags: []
     created: "2026-03-01"
     updated: "2026-03-01"
@@ -120,46 +113,89 @@ stories:
       - "2026-03-01: Story created"
 ---
 
-# Test Feature Beta
+# Test Project Beta
 
 ## Summary
-Feature with pre-existing stories for testing.
+Project with pre-existing stories for testing.
 """
 
-NON_FEATURE_FDO = """\
+PROJECT_WITH_CLOSED = """\
 ---
-id: proj-test
-title: "Test Project"
+id: proj-test-gamma
+title: "Test Project Gamma"
 domain: projects
 created: "2026-03-01"
 updated: "2026-03-01"
 status: developing
+confidence: 0.6
+related: []
+tags: [test, epic]
+stories:
+  - id: story-test-gamma-001
+    title: "Gamma story active"
+    status: active
+    priority: critical
+    estimate_days: 2
+    description: ""
+    assignee: "research"
+    acceptance_criteria: []
+    tags: []
+    created: "2026-03-01"
+    updated: "2026-03-01"
+    log: []
+  - id: story-test-gamma-002
+    title: "Gamma story closed"
+    status: closed
+    priority: low
+    estimate_days: 1
+    description: ""
+    assignee: ""
+    acceptance_criteria: []
+    tags: []
+    created: "2026-03-01"
+    updated: "2026-03-01"
+    log: []
+---
+
+# Test Project Gamma
+"""
+
+# A non-project FDO to verify it's excluded from scans
+AI_SYSTEMS_FDO = """\
+---
+id: grim-test-fdo
+title: "Non-project FDO"
+domain: ai-systems
+created: "2026-03-01"
+updated: "2026-03-01"
+status: developing
 confidence: 0.5
-related:
-  - feat-test-alpha
+related: []
 tags: [test]
 ---
 
-# Test Project
+# Non-project FDO
 """
 
 
-def make_temp_vault(*features: str) -> tuple[str, Path]:
-    """Create a temp vault with feature FDOs. Returns (vault_path, tmp_dir)."""
+def make_temp_vault(*fdo_contents: str) -> tuple[str, Path]:
+    """Create a temp vault with project FDOs. Returns (vault_path, tmp_dir)."""
     tmp = Path(tempfile.mkdtemp(prefix="kronos-test-"))
-    (tmp / "ai-systems").mkdir()
     (tmp / "projects").mkdir()
     (tmp / "calendar").mkdir()
-    for feat_content in features:
-        # Extract ID from frontmatter
-        for line in feat_content.split("\n"):
+    for content in fdo_contents:
+        fdo_id = None
+        domain = "projects"
+        for line in content.split("\n"):
             if line.startswith("id: "):
                 fdo_id = line.split(": ", 1)[1].strip().strip('"')
-                break
-        if fdo_id.startswith("feat-"):
-            (tmp / "ai-systems" / f"{fdo_id}.md").write_text(feat_content, encoding="utf-8")
-        elif fdo_id.startswith("proj-"):
-            (tmp / "projects" / f"{fdo_id}.md").write_text(feat_content, encoding="utf-8")
+            if line.startswith("domain: "):
+                domain = line.split(": ", 1)[1].strip().strip('"')
+        if not fdo_id:
+            continue
+        domain_dir = tmp / domain
+        domain_dir.mkdir(exist_ok=True)
+        (domain_dir / f"{fdo_id}.md").write_text(content, encoding="utf-8")
     # Default board & calendar
     (tmp / "projects" / "board.yaml").write_text(
         "columns:\n  new: []\n  active: []\n  in_progress: []\n  resolved: []\n  closed: []\n",
@@ -180,24 +216,25 @@ def cleanup_vault(tmp: Path):
 
 class TestTaskEngineStoryCreate(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
         cleanup_vault(self.tmp)
 
     def test_create_story_basic(self):
-        result = self.engine.create_story("feat-test-alpha", "My first story")
+        result = self.engine.create_story("proj-test-alpha", "My first story")
         self.assertIn("created", result)
         self.assertEqual(result["created"], "story-test-alpha-001")
-        self.assertEqual(result["feature"], "feat-test-alpha")
+        self.assertEqual(result["project"], "proj-test-alpha")
 
     def test_create_story_with_all_fields(self):
         result = self.engine.create_story(
-            "feat-test-alpha", "Full story",
+            "proj-test-alpha", "Full story",
             priority="critical", estimate_days=5.0,
             description="Detailed description",
             acceptance_criteria=["AC1", "AC2", "AC3"],
+            assignee="code",
             tags=["backend", "urgent"],
         )
         self.assertIn("created", result)
@@ -207,44 +244,55 @@ class TestTaskEngineStoryCreate(TestCase):
         self.assertEqual(story["description"], "Detailed description")
         self.assertEqual(len(story["acceptance_criteria"]), 3)
         self.assertEqual(story["status"], "new")
+        self.assertEqual(story["assignee"], "code")
         self.assertIn("Story created", story["log"][0])
 
     def test_create_story_default_values(self):
-        result = self.engine.create_story("feat-test-alpha", "Defaults story")
+        result = self.engine.create_story("proj-test-alpha", "Defaults story")
         story = result["story"]
         self.assertEqual(story["priority"], "medium")
         self.assertEqual(story["estimate_days"], 1.0)
         self.assertEqual(story["description"], "")
         self.assertEqual(story["acceptance_criteria"], [])
-        self.assertEqual(story["tasks"], [])
+        self.assertEqual(story["assignee"], "")
 
     def test_create_story_invalid_priority(self):
-        result = self.engine.create_story("feat-test-alpha", "Bad priority", priority="ultra")
+        result = self.engine.create_story("proj-test-alpha", "Bad priority", priority="ultra")
         self.assertIn("error", result)
         self.assertIn("ultra", result["error"])
 
-    def test_create_story_missing_feature(self):
-        result = self.engine.create_story("feat-nonexistent", "Orphan")
+    def test_create_story_missing_project(self):
+        result = self.engine.create_story("proj-nonexistent", "Orphan")
         self.assertIn("error", result)
         self.assertIn("not found", result["error"])
 
     def test_create_story_sequential_ids(self):
-        r1 = self.engine.create_story("feat-test-alpha", "Story 1")
-        r2 = self.engine.create_story("feat-test-alpha", "Story 2")
-        r3 = self.engine.create_story("feat-test-alpha", "Story 3")
+        r1 = self.engine.create_story("proj-test-alpha", "Story 1")
+        r2 = self.engine.create_story("proj-test-alpha", "Story 2")
+        r3 = self.engine.create_story("proj-test-alpha", "Story 3")
         self.assertEqual(r1["created"], "story-test-alpha-001")
         self.assertEqual(r2["created"], "story-test-alpha-002")
         self.assertEqual(r3["created"], "story-test-alpha-003")
 
-    def test_create_story_non_feature_fdo_rejected(self):
-        """proj-* FDOs should not accept stories."""
-        result = self.engine.create_story("proj-test", "Bad story")
+    def test_create_story_with_assignee(self):
+        result = self.engine.create_story(
+            "proj-test-alpha", "Assigned story", assignee="research"
+        )
+        self.assertIn("created", result)
+        story = result["story"]
+        self.assertEqual(story["assignee"], "research")
+
+    def test_create_story_invalid_assignee(self):
+        result = self.engine.create_story(
+            "proj-test-alpha", "Bad assignee", assignee="invalid_agent"
+        )
         self.assertIn("error", result)
+        self.assertIn("assignee", result["error"].lower())
 
 
 class TestTaskEngineStoryWithExisting(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
@@ -252,7 +300,7 @@ class TestTaskEngineStoryWithExisting(TestCase):
 
     def test_create_story_continues_numbering(self):
         """New stories should continue from existing max ID."""
-        result = self.engine.create_story("feat-test-beta", "Third story")
+        result = self.engine.create_story("proj-test-beta", "Third story")
         self.assertEqual(result["created"], "story-test-beta-003")
 
     def test_get_existing_story(self):
@@ -262,97 +310,64 @@ class TestTaskEngineStoryWithExisting(TestCase):
         self.assertEqual(item["title"], "Pre-existing story")
         self.assertEqual(item["priority"], "high")
         self.assertEqual(item["estimate_days"], 3)
-        self.assertEqual(item["feature"], "feat-test-beta")
-        self.assertEqual(item["project"], "proj-test")
+        self.assertEqual(item["project"], "proj-test-beta")
+        self.assertEqual(item["assignee"], "code")
+
+    def test_get_existing_story_has_domain(self):
+        item = self.engine.get_item("story-test-beta-001")
+        self.assertIn("domain", item)
+        self.assertEqual(item["domain"], "projects")
 
     def test_get_nonexistent_story(self):
         item = self.engine.get_item("story-test-beta-999")
         self.assertIsNone(item)
 
     def test_list_items_all(self):
-        items = self.engine.list_items(feat_id="feat-test-beta")
+        items = self.engine.list_items(project_id="proj-test-beta")
         self.assertEqual(len(items), 2)
 
     def test_list_items_by_status(self):
-        items = self.engine.list_items(feat_id="feat-test-beta", status="active")
+        items = self.engine.list_items(project_id="proj-test-beta", status="active")
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["id"], "story-test-beta-001")
 
     def test_list_items_by_priority(self):
-        items = self.engine.list_items(feat_id="feat-test-beta", priority="high")
+        items = self.engine.list_items(project_id="proj-test-beta", priority="high")
         self.assertEqual(len(items), 1)
 
     def test_list_items_by_project(self):
-        items = self.engine.list_items(project_id="proj-test")
+        items = self.engine.list_items(project_id="proj-test-beta")
         self.assertEqual(len(items), 2)
 
     def test_list_items_sorted_by_priority(self):
         """Critical/high should come before medium/low."""
-        items = self.engine.list_items(feat_id="feat-test-beta")
+        items = self.engine.list_items(project_id="proj-test-beta")
         priorities = [i["priority"] for i in items]
         self.assertEqual(priorities, ["high", "medium"])
 
     def test_list_items_empty_filter(self):
-        items = self.engine.list_items(feat_id="feat-nonexistent")
+        items = self.engine.list_items(project_id="proj-nonexistent")
         self.assertEqual(len(items), 0)
 
+    def test_list_items_has_assignee_and_job_id(self):
+        """list_items results should include assignee and job_id fields."""
+        items = self.engine.list_items(project_id="proj-test-beta")
+        for item in items:
+            self.assertIn("assignee", item)
+            self.assertIn("job_id", item)
+            self.assertIn("domain", item)
 
-class TestTaskEngineTaskCRUD(TestCase):
-    def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
-        self.engine = TaskEngine(self.vault_path)
-
-    def tearDown(self):
-        cleanup_vault(self.tmp)
-
-    def test_create_task(self):
-        result = self.engine.create_task("story-test-beta-001", "New task")
-        self.assertIn("created", result)
-        # task-001 exists in legacy format; new tasks use story-namespaced format
-        self.assertEqual(result["created"], "task-test-beta-001-002")
-        self.assertEqual(result["story"], "story-test-beta-001")
-
-    def test_create_task_with_fields(self):
-        result = self.engine.create_task(
-            "story-test-beta-001", "Detailed task",
-            estimate_days=2.5, assignee="peter", notes="Important"
-        )
-        task = result["task"]
-        self.assertEqual(task["estimate_days"], 2.5)
-        self.assertEqual(task["assignee"], "peter")
-        self.assertEqual(task["notes"], "Important")
-        self.assertEqual(task["status"], "new")
-
-    def test_create_task_missing_story(self):
-        result = self.engine.create_task("story-nonexistent-999", "Orphan task")
-        self.assertIn("error", result)
-
-    def test_get_task(self):
-        item = self.engine.get_item("task-001")
-        self.assertIsNotNone(item)
-        self.assertEqual(item["type"], "task")
-        self.assertEqual(item["title"], "Existing task")
-        self.assertEqual(item["story"], "story-test-beta-001")
-
-    def test_get_nonexistent_task(self):
-        item = self.engine.get_item("task-nonexistent-999")
-        self.assertIsNone(item)
-
-    def test_create_task_sequential_ids(self):
-        r1 = self.engine.create_task("story-test-beta-001", "Task A")
-        r2 = self.engine.create_task("story-test-beta-001", "Task B")
-        self.assertEqual(r1["created"], "task-test-beta-001-002")
-        self.assertEqual(r2["created"], "task-test-beta-001-003")
-
-    def test_create_task_on_empty_story(self):
-        """Create task on story-test-beta-002 which has no existing tasks."""
-        result = self.engine.create_task("story-test-beta-002", "First task")
-        self.assertEqual(result["created"], "task-test-beta-002-001")
+    def test_list_items_by_domain(self):
+        """Filter stories by domain."""
+        items = self.engine.list_items(domain="projects")
+        self.assertEqual(len(items), 2)
+        items_bad = self.engine.list_items(domain="ai-systems")
+        self.assertEqual(len(items_bad), 0)
 
 
 class TestTaskEngineUpdate(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
@@ -402,99 +417,127 @@ class TestTaskEngineUpdate(TestCase):
         self.assertEqual(item["id"], "story-test-beta-001")
         self.assertEqual(item["title"], "New title")
 
-    def test_update_task_status(self):
-        # task-001 is a legacy-format ID from the fixture
-        result = self.engine.update_item("task-001", {"status": "in_progress"})
-        self.assertIn("updated", result)
-        item = self.engine.get_item("task-001")
-        self.assertEqual(item["status"], "in_progress")
-
-    def test_update_task_notes(self):
-        result = self.engine.update_item("task-001", {"notes": "Working on this"})
-        self.assertIn("updated", result)
-        item = self.engine.get_item("task-001")
-        self.assertEqual(item["notes"], "Working on this")
-
     def test_update_nonexistent_story(self):
         result = self.engine.update_item("story-nonexistent-999", {"title": "X"})
-        self.assertIn("error", result)
-
-    def test_update_nonexistent_task(self):
-        result = self.engine.update_item("task-nonexistent-999", {"title": "X"})
         self.assertIn("error", result)
 
     def test_update_empty_fields(self):
         result = self.engine.update_item("story-test-beta-001", {})
         self.assertIn("error", result)
 
+    def test_update_assignee(self):
+        result = self.engine.update_item("story-test-beta-001", {"assignee": "audit"})
+        self.assertIn("updated", result)
+        self.assertIn("assignee", result["fields_changed"])
+        item = self.engine.get_item("story-test-beta-001")
+        self.assertEqual(item["assignee"], "audit")
+        # Check log entry
+        log = item.get("log", [])
+        self.assertTrue(any("Assigned" in entry for entry in log))
+
+    def test_update_assignee_invalid(self):
+        result = self.engine.update_item("story-test-beta-001", {"assignee": "invalid_agent"})
+        self.assertIn("error", result)
+
+    def test_update_assignee_clear(self):
+        """Setting assignee to empty string should clear it."""
+        result = self.engine.update_item("story-test-beta-001", {"assignee": ""})
+        self.assertIn("updated", result)
+        item = self.engine.get_item("story-test-beta-001")
+        self.assertEqual(item["assignee"], "")
+
+    def test_update_job_id(self):
+        result = self.engine.update_item("story-test-beta-001", {"job_id": "job-abc-123"})
+        self.assertIn("updated", result)
+        self.assertIn("job_id", result["fields_changed"])
+        item = self.engine.get_item("story-test-beta-001")
+        self.assertEqual(item["job_id"], "job-abc-123")
+        # Check log entry
+        log = item.get("log", [])
+        self.assertTrue(any("pool job" in entry for entry in log))
+
+    def test_update_returns_project(self):
+        """Update result should include the project ID."""
+        result = self.engine.update_item("story-test-beta-001", {"title": "Updated title"})
+        self.assertIn("project", result)
+        self.assertEqual(result["project"], "proj-test-beta")
+
 
 class TestTaskEngineArchive(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
         cleanup_vault(self.tmp)
 
     def test_archive_no_closed(self):
-        result = self.engine.archive_closed("feat-test-beta")
+        result = self.engine.archive_closed("proj-test-beta")
         self.assertEqual(result["archived"], 0)
 
     def test_archive_closed_stories(self):
         # Close a story first
         self.engine.update_item("story-test-beta-002", {"status": "closed"})
-        result = self.engine.archive_closed("feat-test-beta")
+        result = self.engine.archive_closed("proj-test-beta")
         self.assertEqual(result["archived"], 1)
-        self.assertIn("feat-test-beta", result["features"])
+        self.assertIn("proj-test-beta", result["projects"])
 
         # Verify the closed story is gone from active stories
-        items = self.engine.list_items(feat_id="feat-test-beta")
+        items = self.engine.list_items(project_id="proj-test-beta")
         ids = [i["id"] for i in items]
         self.assertNotIn("story-test-beta-002", ids)
 
-    def test_archive_all_features(self):
-        """archive_closed with no feat_id scans all features."""
+    def test_archive_all_projects(self):
+        """archive_closed with no proj_id scans all projects."""
         self.engine.update_item("story-test-beta-002", {"status": "closed"})
         result = self.engine.archive_closed()
         self.assertEqual(result["archived"], 1)
 
-    def test_archive_nonexistent_feature(self):
-        result = self.engine.archive_closed("feat-nonexistent")
+    def test_archive_nonexistent_project(self):
+        result = self.engine.archive_closed("proj-nonexistent")
         self.assertEqual(result["archived"], 0)
 
 
-class TestTaskEngineFeatureDiscovery(TestCase):
+class TestTaskEngineProjectDiscovery(TestCase):
     def setUp(self):
         self.vault_path, self.tmp = make_temp_vault(
-            MINIMAL_FEATURE_FDO, FEATURE_WITH_STORIES, NON_FEATURE_FDO
+            MINIMAL_PROJECT_FDO, PROJECT_WITH_STORIES, AI_SYSTEMS_FDO
         )
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
         cleanup_vault(self.tmp)
 
-    def test_get_all_features(self):
-        features = self.engine.get_all_features()
-        ids = [f["id"] for f in features]
-        self.assertIn("feat-test-alpha", ids)
-        self.assertIn("feat-test-beta", ids)
-        self.assertNotIn("proj-test", ids)
+    def test_get_all_projects(self):
+        projects = self.engine.get_all_projects()
+        ids = [p["id"] for p in projects]
+        self.assertIn("proj-test-alpha", ids)
+        self.assertIn("proj-test-beta", ids)
+        # Non-project FDOs should not appear
+        self.assertNotIn("grim-test-fdo", ids)
 
-    def test_feature_summary_includes_story_count(self):
-        features = self.engine.get_all_features()
-        beta = next(f for f in features if f["id"] == "feat-test-beta")
+    def test_project_summary_includes_story_count(self):
+        projects = self.engine.get_all_projects()
+        beta = next(p for p in projects if p["id"] == "proj-test-beta")
         self.assertEqual(beta["story_count"], 2)
         self.assertEqual(beta["stories_done"], 0)
 
-    def test_feature_summary_project_link(self):
+    def test_project_summary_includes_domain(self):
+        projects = self.engine.get_all_projects()
+        alpha = next(p for p in projects if p["id"] == "proj-test-alpha")
+        self.assertIn("domain", alpha)
+        self.assertEqual(alpha["domain"], "projects")
+
+    def test_legacy_get_all_features_alias(self):
+        """get_all_features() should still work as a legacy alias."""
         features = self.engine.get_all_features()
-        alpha = next(f for f in features if f["id"] == "feat-test-alpha")
-        self.assertEqual(alpha["project"], "proj-test")
+        ids = [f["id"] for f in features]
+        self.assertIn("proj-test-alpha", ids)
 
 
 class TestTaskEngineThreadSafety(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
@@ -505,7 +548,7 @@ class TestTaskEngineThreadSafety(TestCase):
         results = []
 
         def create(i):
-            return self.engine.create_story("feat-test-alpha", f"Concurrent {i}")
+            return self.engine.create_story("proj-test-alpha", f"Concurrent {i}")
 
         with ThreadPoolExecutor(max_workers=5) as pool:
             futures = [pool.submit(create, i) for i in range(5)]
@@ -516,30 +559,166 @@ class TestTaskEngineThreadSafety(TestCase):
         self.assertEqual(len(ids), 5, f"Expected 5 created, got {len(ids)}")
         self.assertEqual(len(set(ids)), 5, "Duplicate IDs detected!")
 
-    def test_concurrent_task_creates(self):
-        """Concurrent task creates on same story."""
-        self.engine.create_story("feat-test-alpha", "Concurrent target")
-        story_id = "story-test-alpha-001"
 
-        results = []
-        def create(i):
-            return self.engine.create_task(story_id, f"Task {i}")
+# ── Assignee Tests ──────────────────────────────────────────────────────────
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = [pool.submit(create, i) for i in range(3)]
-            for f in futures:
-                results.append(f.result(timeout=10))
+class TestTaskEngineAssignee(TestCase):
+    """Test assignee field validation and behavior."""
 
-        ids = [r["created"] for r in results if "created" in r]
-        self.assertEqual(len(ids), 3)
-        self.assertEqual(len(set(ids)), 3, "Duplicate task IDs!")
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_valid_assignees_constant(self):
+        """VALID_ASSIGNEES should include expected agent types."""
+        self.assertIn("code", VALID_ASSIGNEES)
+        self.assertIn("research", VALID_ASSIGNEES)
+        self.assertIn("audit", VALID_ASSIGNEES)
+        self.assertIn("plan", VALID_ASSIGNEES)
+        self.assertIn("", VALID_ASSIGNEES)
+
+    def test_create_with_each_valid_assignee(self):
+        for assignee in sorted(VALID_ASSIGNEES - {""}):
+            result = self.engine.create_story(
+                "proj-test-alpha", f"Story for {assignee}", assignee=assignee,
+            )
+            self.assertIn("created", result, f"Failed for assignee={assignee}")
+            story = result["story"]
+            self.assertEqual(story["assignee"], assignee)
+
+    def test_create_with_empty_assignee(self):
+        result = self.engine.create_story("proj-test-alpha", "Unassigned story", assignee="")
+        self.assertIn("created", result)
+        self.assertEqual(result["story"]["assignee"], "")
+
+    def test_create_rejects_invalid_assignee(self):
+        result = self.engine.create_story(
+            "proj-test-alpha", "Bad agent", assignee="copilot"
+        )
+        self.assertIn("error", result)
+        self.assertIn("valid", result)
+
+    def test_update_assignee_logs_change(self):
+        result = self.engine.create_story("proj-test-alpha", "Story to reassign")
+        story_id = result["created"]
+        self.engine.update_item(story_id, {"assignee": "audit"})
+        item = self.engine.get_item(story_id)
+        self.assertEqual(item["assignee"], "audit")
+        log = item.get("log", [])
+        self.assertTrue(any("Assigned" in entry and "audit" in entry for entry in log))
+
+    def test_update_assignee_unassign_logs(self):
+        result = self.engine.create_story(
+            "proj-test-alpha", "Assigned then cleared", assignee="code"
+        )
+        story_id = result["created"]
+        self.engine.update_item(story_id, {"assignee": ""})
+        item = self.engine.get_item(story_id)
+        self.assertEqual(item["assignee"], "")
+        log = item.get("log", [])
+        self.assertTrue(any("unassigned" in entry for entry in log))
+
+    def test_get_item_includes_assignee(self):
+        result = self.engine.create_story(
+            "proj-test-alpha", "Check get_item", assignee="research"
+        )
+        item = self.engine.get_item(result["created"])
+        self.assertEqual(item["assignee"], "research")
+
+
+# ── Job ID Tests ────────────────────────────────────────────────────────────
+
+class TestTaskEngineJobId(TestCase):
+    """Test job_id field for pool integration."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_new_story_has_no_job_id(self):
+        result = self.engine.create_story("proj-test-alpha", "No job yet")
+        item = self.engine.get_item(result["created"])
+        # job_id may be None or absent
+        self.assertFalse(item.get("job_id"))
+
+    def test_set_job_id(self):
+        result = self.engine.create_story("proj-test-alpha", "Will get a job")
+        story_id = result["created"]
+        update = self.engine.update_item(story_id, {"job_id": "job-pool-001"})
+        self.assertIn("updated", update)
+        item = self.engine.get_item(story_id)
+        self.assertEqual(item["job_id"], "job-pool-001")
+
+    def test_job_id_in_log(self):
+        result = self.engine.create_story("proj-test-alpha", "Job log test")
+        story_id = result["created"]
+        self.engine.update_item(story_id, {"job_id": "job-xyz"})
+        item = self.engine.get_item(story_id)
+        log = item.get("log", [])
+        self.assertTrue(any("job-xyz" in entry for entry in log))
+
+    def test_job_id_in_list_items(self):
+        result = self.engine.create_story("proj-test-alpha", "Job in list")
+        story_id = result["created"]
+        self.engine.update_item(story_id, {"job_id": "job-list-001"})
+        items = self.engine.list_items(project_id="proj-test-alpha")
+        found = next(i for i in items if i["id"] == story_id)
+        self.assertEqual(found["job_id"], "job-list-001")
+
+
+# ── Domain Tests ────────────────────────────────────────────────────────────
+
+class TestTaskEngineDomain(TestCase):
+    """Test domain field in story results."""
+
+    def setUp(self):
+        self.vault_path, self.tmp = make_temp_vault(
+            MINIMAL_PROJECT_FDO, PROJECT_WITH_STORIES
+        )
+        self.engine = TaskEngine(self.vault_path)
+
+    def tearDown(self):
+        cleanup_vault(self.tmp)
+
+    def test_get_item_includes_domain(self):
+        item = self.engine.get_item("story-test-beta-001")
+        self.assertIn("domain", item)
+        self.assertEqual(item["domain"], "projects")
+
+    def test_list_items_includes_domain(self):
+        items = self.engine.list_items(project_id="proj-test-beta")
+        for item in items:
+            self.assertIn("domain", item)
+            self.assertEqual(item["domain"], "projects")
+
+    def test_list_items_domain_filter(self):
+        items = self.engine.list_items(domain="projects")
+        self.assertGreater(len(items), 0)
+        for item in items:
+            self.assertEqual(item["domain"], "projects")
+
+    def test_list_items_domain_filter_empty(self):
+        items = self.engine.list_items(domain="physics")
+        self.assertEqual(len(items), 0)
+
+    def test_batch_includes_domain(self):
+        result = self.engine.get_items_batch(["story-test-beta-001"])
+        story = result["story-test-beta-001"]
+        self.assertIn("domain", story)
+        self.assertEqual(story["domain"], "projects")
 
 
 # ── BoardEngine Unit Tests ──────────────────────────────────────────────────
 
 class TestBoardEngineBasic(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
 
@@ -582,7 +761,7 @@ class TestBoardEngineBasic(TestCase):
 
 class TestBoardEngineMove(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
 
@@ -627,7 +806,7 @@ class TestBoardEngineMove(TestCase):
 
 class TestBoardEngineViews(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
         # Put stories on board
@@ -652,15 +831,16 @@ class TestBoardEngineViews(TestCase):
         self.assertEqual(story["id"], "story-test-beta-001")
         self.assertEqual(story["title"], "Pre-existing story")
         self.assertEqual(story["priority"], "high")
-        self.assertIn("task_count", story)
-        self.assertIn("tasks_done", story)
+        self.assertIn("project", story)
+        self.assertIn("domain", story)
+        self.assertIn("assignee", story)
 
     def test_board_view_total(self):
         view = self.board.board_view()
         self.assertEqual(view["total_stories"], 2)
 
     def test_board_view_project_filter(self):
-        view = self.board.board_view(project_id="proj-test")
+        view = self.board.board_view(project_id="proj-test-beta")
         self.assertEqual(view["total_stories"], 2)
 
         view2 = self.board.board_view(project_id="proj-nonexistent")
@@ -668,13 +848,13 @@ class TestBoardEngineViews(TestCase):
 
     def test_backlog_view(self):
         """Backlog should exclude stories already on board."""
-        backlog = self.board.backlog_view(feat_id="feat-test-beta")
+        backlog = self.board.backlog_view(project_id="proj-test-beta")
         self.assertEqual(backlog["count"], 0)  # Both stories are on board
 
     def test_backlog_view_with_backlog_items(self):
         """Create a 3rd story that's NOT on the board."""
-        self.engine.create_story("feat-test-beta", "Backlog story")
-        backlog = self.board.backlog_view(feat_id="feat-test-beta")
+        self.engine.create_story("proj-test-beta", "Backlog story")
+        backlog = self.board.backlog_view(project_id="proj-test-beta")
         self.assertEqual(backlog["count"], 1)
         self.assertEqual(backlog["backlog"][0]["id"], "story-test-beta-003")
 
@@ -696,12 +876,20 @@ class TestBoardEngineViews(TestCase):
         view = fresh_board.board_view()
         self.assertEqual(view["total_stories"], 0)
 
+    def test_board_view_domain_filter(self):
+        """Board view with domain filter should only include matching stories."""
+        view = self.board.board_view(domain="projects")
+        self.assertEqual(view["total_stories"], 2)
+
+        view2 = self.board.board_view(domain="ai-systems")
+        self.assertEqual(view2["total_stories"], 0)
+
 
 # ── CalendarEngine Unit Tests ───────────────────────────────────────────────
 
 class TestCalendarPersonalEvents(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
         self.calendar = CalendarEngine(self.vault_path, self.board)
@@ -763,7 +951,7 @@ class TestCalendarPersonalEvents(TestCase):
 
 class TestCalendarSync(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
         self.calendar = CalendarEngine(self.vault_path, self.board)
@@ -783,6 +971,16 @@ class TestCalendarSync(TestCase):
         self.assertEqual(entry["story_id"], "story-test-beta-001")
         self.assertEqual(entry["start_date"], "2026-03-03")
         self.assertEqual(entry["estimate_days"], 3)
+
+    def test_sync_includes_assignee_and_domain(self):
+        """Sync entries should include assignee and domain fields."""
+        self.board.move_story("story-test-beta-001", "active")
+        result = self.calendar.sync_schedule("2026-03-03")
+        entry = result["schedule"]["entries"][0]
+        self.assertIn("assignee", entry)
+        self.assertIn("domain", entry)
+        self.assertEqual(entry["assignee"], "code")
+        self.assertEqual(entry["domain"], "projects")
 
     def test_sync_priority_ordering(self):
         """Higher priority stories should come first in schedule."""
@@ -816,7 +1014,7 @@ class TestCalendarSync(TestCase):
 
 class TestCalendarView(TestCase):
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(FEATURE_WITH_STORIES)
+        self.vault_path, self.tmp = make_temp_vault(PROJECT_WITH_STORIES)
         self.engine = TaskEngine(self.vault_path)
         self.board = BoardEngine(self.vault_path, self.engine)
         self.calendar = CalendarEngine(self.vault_path, self.board)
@@ -906,61 +1104,12 @@ class TestDateHelpers(TestCase):
 
 # ── Batch Loading Tests ──────────────────────────────────────────────────────
 
-FEATURE_WITH_CLOSED = """\
----
-id: feat-test-gamma
-title: "Test Feature Gamma"
-domain: ai-systems
-created: "2026-03-01"
-updated: "2026-03-01"
-status: developing
-confidence: 0.6
-related:
-  - proj-test
-tags: [test]
-stories:
-  - id: story-test-gamma-001
-    title: "Gamma story active"
-    status: active
-    priority: critical
-    estimate_days: 2
-    description: ""
-    tasks:
-      - id: task-test-gamma-001-001
-        title: "Gamma task one"
-        status: new
-        estimate_days: 0.5
-      - id: task-test-gamma-001-002
-        title: "Gamma task two"
-        status: resolved
-        estimate_days: 1
-    tags: []
-    created: "2026-03-01"
-    updated: "2026-03-01"
-    log: []
-  - id: story-test-gamma-002
-    title: "Gamma story closed"
-    status: closed
-    priority: low
-    estimate_days: 1
-    description: ""
-    tasks: []
-    tags: []
-    created: "2026-03-01"
-    updated: "2026-03-01"
-    log: []
----
-
-# Test Feature Gamma
-"""
-
-
 class TestTaskEngineBatch(TestCase):
-    """Tests for get_items_batch() and _scan_all_features()."""
+    """Tests for get_items_batch() and _scan_all_projects()."""
 
     def setUp(self):
         self.vault_path, self.tmp = make_temp_vault(
-            MINIMAL_FEATURE_FDO, FEATURE_WITH_STORIES, FEATURE_WITH_CLOSED, NON_FEATURE_FDO
+            MINIMAL_PROJECT_FDO, PROJECT_WITH_STORIES, PROJECT_WITH_CLOSED
         )
         self.engine = TaskEngine(self.vault_path)
 
@@ -977,8 +1126,9 @@ class TestTaskEngineBatch(TestCase):
         story = result["story-test-beta-001"]
         self.assertEqual(story["title"], "Pre-existing story")
         self.assertEqual(story["priority"], "high")
-        self.assertEqual(story["feature"], "feat-test-beta")
-        self.assertEqual(story["project"], "proj-test")
+        self.assertEqual(story["project"], "proj-test-beta")
+        self.assertIn("domain", story)
+        self.assertIn("assignee", story)
 
     def test_batch_multiple_stories(self):
         ids = ["story-test-beta-001", "story-test-beta-002", "story-test-gamma-001"]
@@ -1000,25 +1150,14 @@ class TestTaskEngineBatch(TestCase):
         self.assertIn("story-test-gamma-001", result)
         self.assertNotIn("story-nonexistent-999", result)
 
-    def test_batch_enriches_task_counts(self):
+    def test_batch_story_fields(self):
+        """Batch results should include all expected fields."""
         result = self.engine.get_items_batch(["story-test-gamma-001"])
         story = result["story-test-gamma-001"]
-        self.assertEqual(story["task_count"], 2)
-        self.assertEqual(story["tasks_done"], 1)  # task-002 is resolved
-        self.assertEqual(len(story["tasks"]), 2)
-
-    def test_batch_includes_tasks(self):
-        result = self.engine.get_items_batch(["story-test-beta-001"])
-        story = result["story-test-beta-001"]
-        self.assertEqual(story["task_count"], 1)
-        self.assertEqual(story["tasks"][0]["id"], "task-001")
-
-    def test_batch_story_with_no_tasks(self):
-        result = self.engine.get_items_batch(["story-test-beta-002"])
-        story = result["story-test-beta-002"]
-        self.assertEqual(story["task_count"], 0)
-        self.assertEqual(story["tasks_done"], 0)
-        self.assertEqual(story["tasks"], [])
+        self.assertEqual(story["assignee"], "research")
+        self.assertIn("job_id", story)
+        self.assertIn("domain", story)
+        self.assertIn("project", story)
 
     def test_batch_closed_story(self):
         result = self.engine.get_items_batch(["story-test-gamma-002"])
@@ -1026,14 +1165,12 @@ class TestTaskEngineBatch(TestCase):
         self.assertEqual(story["status"], "closed")
         self.assertEqual(story["priority"], "low")
 
-    def test_scan_all_features(self):
-        results = self.engine._scan_all_features()
-        feat_ids = {fm["id"] for fm, _, _ in results}
-        self.assertIn("feat-test-alpha", feat_ids)
-        self.assertIn("feat-test-beta", feat_ids)
-        self.assertIn("feat-test-gamma", feat_ids)
-        # Non-feature FDOs should not be included
-        self.assertNotIn("proj-test", feat_ids)
+    def test_scan_all_projects(self):
+        results = self.engine._scan_all_projects()
+        proj_ids = {fm["id"] for fm, _, _ in results}
+        self.assertIn("proj-test-alpha", proj_ids)
+        self.assertIn("proj-test-beta", proj_ids)
+        self.assertIn("proj-test-gamma", proj_ids)
 
     def test_batch_early_exit(self):
         """When all requested stories are found, scanning should stop early."""
@@ -1047,7 +1184,7 @@ class TestBoardEngineBatch(TestCase):
 
     def setUp(self):
         self.vault_path, self.tmp = make_temp_vault(
-            MINIMAL_FEATURE_FDO, FEATURE_WITH_STORIES, FEATURE_WITH_CLOSED, NON_FEATURE_FDO
+            MINIMAL_PROJECT_FDO, PROJECT_WITH_STORIES, PROJECT_WITH_CLOSED
         )
         self.task_engine = TaskEngine(self.vault_path)
         self.board_engine = BoardEngine(self.vault_path, self.task_engine)
@@ -1066,7 +1203,6 @@ class TestBoardEngineBatch(TestCase):
 
     def test_board_view_with_stories(self):
         """Board view with stories should enrich them via batch loading."""
-        # Add stories to board
         self.board_engine.move_story("story-test-beta-001", "active")
         self.board_engine.move_story("story-test-gamma-001", "in_progress")
 
@@ -1078,7 +1214,9 @@ class TestBoardEngineBatch(TestCase):
         self.assertEqual(len(active), 1)
         self.assertEqual(active[0]["id"], "story-test-beta-001")
         self.assertEqual(active[0]["title"], "Pre-existing story")
-        self.assertIn("tasks", active[0])
+        self.assertIn("project", active[0])
+        self.assertIn("domain", active[0])
+        self.assertIn("assignee", active[0])
 
         # In progress should have gamma-001
         in_prog = result["columns"]["in_progress"]
@@ -1087,7 +1225,6 @@ class TestBoardEngineBatch(TestCase):
 
     def test_board_view_missing_story(self):
         """Board with a story ID that doesn't exist should include error entry."""
-        # Manually write a bad ID into board.yaml
         import yaml
         board_path = self.tmp / "projects" / "board.yaml"
         board_data = yaml.safe_load(board_path.read_text(encoding="utf-8"))
@@ -1105,15 +1242,11 @@ class TestBoardEngineBatch(TestCase):
         self.board_engine.move_story("story-test-beta-001", "active")
         self.board_engine.move_story("story-test-gamma-001", "active")
 
-        # Both stories are from proj-test, so filtering by proj-test should include both
-        result = self.board_engine.board_view(project_id="proj-test")
+        # Both are from different projects
+        result = self.board_engine.board_view(project_id="proj-test-beta")
         active = result["columns"]["active"]
-        self.assertEqual(len(active), 2)
-
-        # Filtering by non-existent project should return empty
-        result = self.board_engine.board_view(project_id="proj-other")
-        active = result["columns"]["active"]
-        self.assertEqual(len(active), 0)
+        beta_stories = [s for s in active if s.get("project") == "proj-test-beta"]
+        self.assertEqual(len(beta_stories), 1)
 
     def test_board_view_returns_all_columns(self):
         """board_view always returns all 5 columns even if empty."""
@@ -1122,7 +1255,6 @@ class TestBoardEngineBatch(TestCase):
 
     def test_backlog_view_excludes_board_stories(self):
         """Backlog should not include stories already on the board."""
-        # Put one story on board
         self.board_engine.move_story("story-test-beta-001", "active")
 
         result = self.board_engine.backlog_view()
@@ -1132,11 +1264,13 @@ class TestBoardEngineBatch(TestCase):
         self.assertIn("story-test-beta-002", backlog_ids)
 
 
+# ── Draft Status Tests ──────────────────────────────────────────────────────
+
 class TestDraftStatus(TestCase):
-    """Test draft status for AI-created items (v0.0.6 Phase 2)."""
+    """Test draft status for AI-created items."""
 
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
@@ -1149,7 +1283,7 @@ class TestDraftStatus(TestCase):
     def test_create_story_with_draft_status(self):
         """Creating a story with status=draft should work."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Draft story", priority="medium",
+            "proj-test-alpha", "Draft story", priority="medium",
             estimate_days=1, status="draft",
         )
         self.assertIn("created", result)
@@ -1159,7 +1293,7 @@ class TestDraftStatus(TestCase):
     def test_create_story_default_status_is_new(self):
         """Default status for story creation should be 'new'."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Normal story", priority="medium",
+            "proj-test-alpha", "Normal story", priority="medium",
             estimate_days=1,
         )
         story = self.engine.get_item(result["created"])
@@ -1168,7 +1302,7 @@ class TestDraftStatus(TestCase):
     def test_create_story_with_created_by(self):
         """Stories should track who created them."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Agent story", priority="medium",
+            "proj-test-alpha", "Agent story", priority="medium",
             estimate_days=1, created_by="agent:planning",
         )
         story = self.engine.get_item(result["created"])
@@ -1177,29 +1311,16 @@ class TestDraftStatus(TestCase):
     def test_create_story_default_created_by_is_human(self):
         """Default created_by should be 'human'."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Human story", priority="medium",
+            "proj-test-alpha", "Human story", priority="medium",
             estimate_days=1,
         )
         story = self.engine.get_item(result["created"])
         self.assertEqual(story["created_by"], "human")
 
-    def test_create_task_with_created_by(self):
-        """Tasks should track who created them."""
-        result = self.engine.create_story(
-            "feat-test-alpha", "Parent story", priority="medium",
-            estimate_days=1,
-        )
-        story_id = result["created"]
-        task_result = self.engine.create_task(
-            story_id, "Agent task", created_by="agent:planning",
-        )
-        task = self.engine.get_item(task_result["created"])
-        self.assertEqual(task["created_by"], "agent:planning")
-
     def test_create_story_rejects_invalid_status(self):
         """Creating with an invalid status should fail."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Bad status", priority="medium",
+            "proj-test-alpha", "Bad status", priority="medium",
             estimate_days=1, status="garbage",
         )
         self.assertIn("error", result)
@@ -1207,7 +1328,7 @@ class TestDraftStatus(TestCase):
     def test_draft_regression_blocked(self):
         """Cannot set status back to draft once promoted."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Story to promote", priority="medium",
+            "proj-test-alpha", "Story to promote", priority="medium",
             estimate_days=1, status="draft",
         )
         story_id = result["created"]
@@ -1222,7 +1343,7 @@ class TestDraftStatus(TestCase):
     def test_draft_to_draft_noop(self):
         """Setting draft to draft should be allowed (no-op)."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Draft story", priority="medium",
+            "proj-test-alpha", "Draft story", priority="medium",
             estimate_days=1, status="draft",
         )
         story_id = result["created"]
@@ -1231,11 +1352,13 @@ class TestDraftStatus(TestCase):
         self.assertNotIn("error", result)
 
 
+# ── Validation Tests ────────────────────────────────────────────────────────
+
 class TestValidateStoryCreation(TestCase):
     """Test validate_story_creation() pre-creation warnings."""
 
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
@@ -1243,72 +1366,70 @@ class TestValidateStoryCreation(TestCase):
 
     def test_short_title_warning(self):
         """Titles under 10 chars should trigger a warning."""
-        warnings = self.engine.validate_story_creation("feat-test-alpha", "Short")
+        warnings = self.engine.validate_story_creation("proj-test-alpha", "Short")
         self.assertTrue(any("title" in w.lower() for w in warnings))
 
     def test_good_title_no_warning(self):
         """A good title should not trigger title warning."""
         warnings = self.engine.validate_story_creation(
-            "feat-test-alpha", "A good descriptive story title",
+            "proj-test-alpha", "A good descriptive story title",
         )
         self.assertFalse(any("title" in w.lower() for w in warnings))
 
     def test_duplicate_title_warning(self):
         """Creating a story with a duplicate title should warn."""
         self.engine.create_story(
-            "feat-test-alpha", "Unique story title here", priority="medium",
+            "proj-test-alpha", "Unique story title here", priority="medium",
             estimate_days=1,
         )
         warnings = self.engine.validate_story_creation(
-            "feat-test-alpha", "Unique story title here",
+            "proj-test-alpha", "Unique story title here",
         )
         self.assertTrue(any("duplicate" in w.lower() for w in warnings))
 
     def test_large_estimate_warning(self):
-        """Estimate >10 days should suggest feature-level scope."""
+        """Estimate >10 days should suggest breaking into smaller stories."""
         warnings = self.engine.validate_story_creation(
-            "feat-test-alpha", "A very large story", estimate_days=15,
+            "proj-test-alpha", "A very large story", estimate_days=15,
         )
-        self.assertTrue(any("feature" in w.lower() or "large" in w.lower() for w in warnings))
+        self.assertTrue(any("large" in w.lower() for w in warnings))
 
     def test_all_clear_returns_empty(self):
         """No warnings when everything is fine."""
         warnings = self.engine.validate_story_creation(
-            "feat-test-alpha", "A perfectly normal story", estimate_days=3,
+            "proj-test-alpha", "A perfectly normal story", estimate_days=3,
         )
         self.assertEqual(warnings, [])
 
+
+# ── Archived ID Collision Tests ─────────────────────────────────────────────
 
 class TestArchivedIdCollision(TestCase):
     """Test that _next_story_id checks archived stories."""
 
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
 
     def tearDown(self):
         cleanup_vault(self.tmp)
 
-    def _get_feature_with_archived(self):
-        """Create a feature with an archived story."""
-        # Create a story
+    def _archive_a_story(self):
+        """Create a story, close it, and archive it."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Story to archive", priority="medium",
+            "proj-test-alpha", "Story to archive", priority="medium",
             estimate_days=1,
         )
         story_id = result["created"]
-        # Move to closed
         self.engine.update_item(story_id, {"status": "closed"})
-        # Archive it
-        self.engine.archive_closed("feat-test-alpha")
+        self.engine.archive_closed("proj-test-alpha")
         return story_id
 
     def test_next_id_skips_archived(self):
         """New story ID should not collide with archived story IDs."""
-        archived_id = self._get_feature_with_archived()
-        # Create another story — should get a new ID, not collide
+        archived_id = self._archive_a_story()
         result = self.engine.create_story(
-            "feat-test-alpha", "New story after archive", priority="medium",
+            "proj-test-alpha", "New story after archive", priority="medium",
             estimate_days=1,
         )
         self.assertIn("created", result)
@@ -1316,11 +1437,13 @@ class TestArchivedIdCollision(TestCase):
         self.assertNotEqual(new_id, archived_id)
 
 
+# ── Board Draft Guard Tests ─────────────────────────────────────────────────
+
 class TestBoardDraftGuard(TestCase):
     """Test board rejects draft stories."""
 
     def setUp(self):
-        self.vault_path, self.tmp = make_temp_vault(MINIMAL_FEATURE_FDO, NON_FEATURE_FDO)
+        self.vault_path, self.tmp = make_temp_vault(MINIMAL_PROJECT_FDO)
         self.engine = TaskEngine(self.vault_path)
         self.board_engine = BoardEngine(self.vault_path, self.engine)
 
@@ -1330,7 +1453,7 @@ class TestBoardDraftGuard(TestCase):
     def test_board_add_rejects_draft(self):
         """add_to_board should reject draft stories."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Draft story for board", priority="medium",
+            "proj-test-alpha", "Draft story for board", priority="medium",
             estimate_days=1, status="draft",
         )
         story_id = result["created"]
@@ -1341,7 +1464,7 @@ class TestBoardDraftGuard(TestCase):
     def test_board_move_rejects_draft(self):
         """move_story should reject draft stories not on board."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Draft story for move", priority="medium",
+            "proj-test-alpha", "Draft story for move", priority="medium",
             estimate_days=1, status="draft",
         )
         story_id = result["created"]
@@ -1352,7 +1475,7 @@ class TestBoardDraftGuard(TestCase):
     def test_promote_then_board_succeeds(self):
         """After promoting draft to new, board should accept."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Draft to promote", priority="medium",
+            "proj-test-alpha", "Draft to promote", priority="medium",
             estimate_days=1, status="draft",
         )
         story_id = result["created"]
@@ -1365,7 +1488,7 @@ class TestBoardDraftGuard(TestCase):
     def test_created_by_persists_through_get(self):
         """created_by should be visible when fetching the story."""
         result = self.engine.create_story(
-            "feat-test-alpha", "Tracked story", priority="medium",
+            "proj-test-alpha", "Tracked story", priority="medium",
             estimate_days=1, created_by="agent:memory",
         )
         story = self.engine.get_item(result["created"])
