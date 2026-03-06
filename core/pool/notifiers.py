@@ -27,6 +27,9 @@ _EMBED_COLORS = {
     PoolEventType.JOB_BLOCKED: 0xF39C12,    # Yellow
     PoolEventType.JOB_REVIEW: 0x3498DB,     # Blue
     PoolEventType.JOB_CANCELLED: 0x95A5A6,  # Grey
+    # Daemon intelligence events (Project Mewtwo Phase 3)
+    PoolEventType.DAEMON_ESCALATION: 0xE67E22,      # Orange
+    PoolEventType.DAEMON_AUTO_RESOLVED: 0x27AE60,   # Dark green
 }
 
 
@@ -147,6 +150,43 @@ class DiscordWebhookNotifier:
             return {
                 "title": f"Job Cancelled: {job_id}",
                 "description": "Job was cancelled.",
+                "color": color,
+                "timestamp": event.timestamp.isoformat(),
+            }
+
+        elif event.type == PoolEventType.DAEMON_ESCALATION:
+            question = event.data.get("question", "")
+            reason = event.data.get("reason", "")
+            story_id = event.data.get("story_id", "")
+            parts = []
+            if story_id:
+                parts.append(f"**Story:** {story_id}")
+            if question:
+                parts.append(f"**Question:** {question}")
+            if reason:
+                parts.append(reason)
+            return {
+                "title": f"Daemon Escalation: {job_id}",
+                "description": "\n".join(parts) or "Needs human attention",
+                "color": color,
+                "timestamp": event.timestamp.isoformat(),
+            }
+
+        elif event.type == PoolEventType.DAEMON_AUTO_RESOLVED:
+            question = event.data.get("question", "")
+            answer = event.data.get("answer", "")
+            source = event.data.get("source", "unknown")
+            confidence = event.data.get("confidence", 0.0)
+            story_id = event.data.get("story_id", "")
+            description = (
+                f"**Story:** {story_id}\n"
+                f"**Question:** {question}\n"
+                f"**Answer:** {answer}\n"
+                f"**Source:** {source} (confidence: {confidence:.0%})"
+            )
+            return {
+                "title": f"Daemon Resolved: {job_id}",
+                "description": description,
                 "color": color,
                 "timestamp": event.timestamp.isoformat(),
             }

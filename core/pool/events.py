@@ -38,6 +38,10 @@ class PoolEventType(str, Enum):
     JOB_CANCELLED = "job_cancelled"
     JOB_REVIEW = "job_review"
 
+    # Daemon intelligence events (Project Mewtwo Phase 3)
+    DAEMON_ESCALATION = "daemon_escalation"        # daemon needs human input
+    DAEMON_AUTO_RESOLVED = "daemon_auto_resolved"  # daemon answered a question
+
     # Streaming events — emitted per-message during agent execution
     AGENT_OUTPUT = "agent_output"
     AGENT_TOOL_RESULT = "agent_tool_result"

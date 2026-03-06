@@ -86,6 +86,7 @@ class PipelineItem(BaseModel):
     # Outcome
     error: Optional[str] = None
     attempts: int = 0
+    daemon_retries: int = 0              # Phase 3: daemon-level retry count
 
 
 class InvalidTransition(Exception):

@@ -74,7 +74,11 @@ class TaskEngine:
             return None
 
         try:
-            fm = yaml.safe_load(m.group(1))
+            from kronos_mcp.vault import _safe_load_yaml_with_timeout, _YAMLTimeout
+            fm = _safe_load_yaml_with_timeout(m.group(1), path)
+        except _YAMLTimeout:
+            logger.warning(f"YAML parse timed out in {path}")
+            return None
         except yaml.YAMLError as e:
             logger.warning(f"Invalid YAML in {path}: {e}")
             return None

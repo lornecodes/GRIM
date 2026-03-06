@@ -134,6 +134,8 @@ calendar_engine: CalendarEngine | None = None
 cache: KronosCache | None = None
 _engines_initialized = False
 
+_loading_at_startup = False  # Set True when called from main() before app.run()
+
 def _ensure_initialized():
     """Lazy-init all engines on first tool call. Must be called under _tool_lock."""
     global vault, search_engine, skills_engine, task_engine, board_engine
@@ -152,15 +154,25 @@ def _ensure_initialized():
     logger.info(f"Engines initialized in {time.time() - t0:.1f}s")
 
     # Build BM25+graph index eagerly (fast, <1s) so first search is instant.
-    # Semantic model loading is deferred to first semantic=true search because
-    # TensorFlow/PyTorch import holds the GIL for 10-15s, blocking all threads
-    # including handler threads — causing tool call timeouts.
     try:
         t1 = time.time()
         search_engine._ensure_indexed()
         logger.info(f"BM25 + graph indexed in {time.time() - t1:.1f}s")
     except Exception as e:
         logger.warning(f"Index build failed (search still works): {e}")
+
+    # Semantic model is loaded eagerly when called from main() (before
+    # app.run accepts connections), so the GIL-heavy PyTorch import
+    # doesn't block any handler threads.  When called lazily from
+    # call_tool(), we skip semantic here and let the first search
+    # trigger a non-blocking background load as before.
+    if _loading_at_startup:
+        try:
+            t2 = time.time()
+            search_engine._ensure_semantic(blocking=True)
+            logger.info(f"Semantic model loaded in {time.time() - t2:.1f}s")
+        except Exception as e:
+            logger.warning(f"Semantic model load failed (search still works without it): {e}")
 
 app = Server("kronos-mcp")
 
@@ -2657,13 +2669,15 @@ TOOL_TIMEOUTS: dict[str, float] = {
     "kronos_get": 10, "kronos_list": 10, "kronos_tags": 10,
     "kronos_memory_read": 10, "kronos_memory_sections": 10,
     "kronos_tool_groups": 10, "kronos_skills": 10, "kronos_skill_load": 10,
-    "kronos_task_get": 10, "kronos_task_list": 10,
-    "kronos_board_view": 10, "kronos_backlog_view": 10, "kronos_calendar_view": 10,
-    # Writes (15s)
-    "kronos_create": 15, "kronos_update": 15, "kronos_memory_update": 15,
-    "kronos_task_create": 15, "kronos_task_update": 15, "kronos_task_move": 15,
-    "kronos_task_dispatch": 15, "kronos_task_archive": 15, "kronos_calendar_add": 15,
-    "kronos_calendar_update": 15, "kronos_calendar_sync": 15, "kronos_note_append": 15,
+    "kronos_task_get": 10,
+    # Reads that scan the vault (20s — proj-* rglob + YAML parse per file)
+    "kronos_task_list": 20, "kronos_board_view": 20, "kronos_backlog_view": 20,
+    "kronos_calendar_view": 15,
+    # Writes (20s — vault scan to find project + atomic write + retry on Windows)
+    "kronos_create": 20, "kronos_update": 20, "kronos_memory_update": 15,
+    "kronos_task_create": 20, "kronos_task_update": 20, "kronos_task_move": 20,
+    "kronos_task_dispatch": 15, "kronos_task_archive": 20, "kronos_calendar_add": 15,
+    "kronos_calendar_update": 15, "kronos_calendar_sync": 20, "kronos_note_append": 15,
     # Search / index-heavy (45s)
     "kronos_search": 45, "kronos_graph": 45, "kronos_validate": 45,
     "kronos_deep_dive": 45, "kronos_search_source": 30,
@@ -2711,10 +2725,17 @@ async def call_tool(
 
     # ── Execute handler (serialised) ──────────────────────────────────────────
     async with _get_tool_lock():
-        # Lazy-init engines on first call (deferred from module load to avoid
-        # blocking the MCP init handshake and causing rapid respawning).
+        # Lazy-init engines on first call (fallback — normally done eagerly
+        # in main() before app.run()).
         if not _engines_initialized:
-            await asyncio.to_thread(_ensure_initialized)
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(_ensure_initialized),
+                    timeout=30,
+                )
+            except asyncio.TimeoutError:
+                logger.error("Engine initialization timed out after 30s")
+                return [TextContent(type="text", text=_json({"error": "Server initialization timed out — retry in a moment"}))]
 
         # Cache read (only after engines are initialized)
         cached = cache.get(name, arguments)
@@ -2744,6 +2765,8 @@ async def call_tool(
 
 
 async def main():
+    global _loading_at_startup
+
     from mcp.server.stdio import stdio_server
     import anyio
     from io import TextIOWrapper
@@ -2766,9 +2789,43 @@ async def main():
         TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")
     )
 
+    async def _eager_init():
+        """Pre-warm engines + semantic model concurrently with app.run().
+
+        Runs as a background task so the MCP handshake completes immediately.
+        By the time the first tool call arrives, engines are ready.  The
+        GIL-heavy PyTorch import happens here (no handler threads competing).
+        If this finishes before the first call_tool, the lazy-init path in
+        call_tool is a no-op.
+        """
+        global _loading_at_startup
+        _loading_at_startup = True
+        try:
+            async with _get_tool_lock():
+                await asyncio.wait_for(
+                    asyncio.to_thread(_ensure_initialized),
+                    timeout=90,  # generous — covers model download on first run
+                )
+        except asyncio.TimeoutError:
+            logger.error("Engine initialization timed out after 90s — starting without semantic")
+        except Exception as e:
+            logger.error(f"Engine initialization failed: {e}", exc_info=True)
+        finally:
+            _loading_at_startup = False
+
     async with stdio_server(stdout=fixed_stdout) as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options(),
-        )
+        # Start eager init concurrently — MCP handshake proceeds immediately
+        # while engines + semantic model load in background.
+        init_task = asyncio.create_task(_eager_init())
+        try:
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options(),
+            )
+        finally:
+            init_task.cancel()
+            try:
+                await init_task
+            except asyncio.CancelledError:
+                pass

@@ -76,6 +76,10 @@ Activate this skill when:
 2. Fill in:
    - **Context**: What problem or situation prompted this
    - **Decision**: What was decided and why
+   - **Decision Boundaries**: What GRIM can handle autonomously vs. escalate to human
+   - **Acceptance Criteria**: Verifiable completion conditions (checklist format)
+   - **Dependencies**: What must exist first (related ADRs, features, infrastructure)
+   - **Estimated Complexity**: Simple / Moderate / Complex with justification
    - **Alternatives**: What else was considered (table format)
    - **Code References**: Actual file paths, commit hashes, PRs
    - **Consequences**: Trade-offs, follow-up work
@@ -96,6 +100,8 @@ Activate this skill when:
 Check a project for completeness:
 - [ ] All completed features have ADRs
 - [ ] All planned features have design FDOs (or are too small to need one)
+- [ ] ADRs include Decision Boundaries section (autonomy contract for GRIM dispatch)
+- [ ] ADRs include Acceptance Criteria (verifiable completion conditions)
 - [ ] Project milestones are current
 - [ ] Current focus matches actual work
 - [ ] All FDOs are bidirectionally linked

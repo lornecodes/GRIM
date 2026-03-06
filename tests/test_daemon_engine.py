@@ -69,6 +69,14 @@ class MockConfig:
     daemon_auto_dispatch: bool = True
     daemon_db_path: Path = field(default_factory=lambda: Path("test.db"))
     vault_path: Path = field(default_factory=lambda: Path("vault"))
+    workspace_root: Path = field(default_factory=lambda: Path("vault").parent)
+    # Phase 3 intelligence (disabled by default in unit tests)
+    daemon_auto_resolve: bool = False
+    daemon_validate_output: bool = False
+    daemon_max_daemon_retries: int = 0
+    daemon_resolve_model: str = "claude-sonnet-4-6"
+    daemon_validate_model: str = "claude-opus-4-6"
+    daemon_resolve_confidence_threshold: float = 0.7
 
 
 # ── Fixtures ─────────────────────────────────────────────────────

@@ -2682,6 +2682,55 @@ async def retry_pipeline_item(item_id: str):
         return JSONResponse({"error": str(e)}, status_code=404)
 
 
+@app.get("/api/daemon/escalations")
+async def get_daemon_escalations():
+    """List pipeline items needing human attention (BLOCKED or FAILED)."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    from core.daemon.models import PipelineStatus
+    blocked = await _daemon_engine.store.list_items(status_filter=PipelineStatus.BLOCKED)
+    failed = await _daemon_engine.store.list_items(status_filter=PipelineStatus.FAILED)
+    items = blocked + failed
+    return JSONResponse([item.model_dump(mode="json") for item in items])
+
+
+@app.post("/api/daemon/escalations/{item_id}/resolve")
+async def resolve_daemon_escalation(item_id: str, request: Request):
+    """Provide a human answer to a blocked pipeline item."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    body = await request.json()
+    answer = body.get("answer", "")
+    if not answer:
+        return JSONResponse({"error": "Missing 'answer' field"}, status_code=400)
+
+    from core.daemon.models import PipelineStatus, InvalidTransition
+    # Look up the pipeline item
+    item = await _daemon_engine.store.get(item_id)
+    if item is None:
+        return JSONResponse({"error": f"Pipeline item not found: {item_id}"}, status_code=404)
+
+    if item.status != PipelineStatus.BLOCKED:
+        return JSONResponse(
+            {"error": f"Item is not blocked (status: {item.status.value})"},
+            status_code=400,
+        )
+
+    # Provide clarification to the pool job
+    if item.job_id and _execution_pool:
+        try:
+            await _execution_pool.queue.provide_clarification(item.job_id, answer)
+        except Exception as exc:
+            logger.warning("Could not provide clarification for job %s: %s", item.job_id, exc)
+
+    # Advance pipeline item BLOCKED → READY
+    try:
+        updated = await _daemon_engine.store.advance(item_id, PipelineStatus.READY)
+        return JSONResponse(updated.model_dump(mode="json"))
+    except InvalidTransition as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

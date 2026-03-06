@@ -101,19 +101,27 @@ class KronosCache:
 
         try:
             import redis as redis_lib
+            import concurrent.futures
             client = redis_lib.Redis.from_url(
                 url,
-                socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_connect_timeout=2,
+                socket_timeout=2,
                 health_check_interval=30,
                 retry_on_timeout=True,
                 decode_responses=True,
             )
-            client.ping()
+            # Wrap ping in explicit timeout — don't let a slow/dead Redis
+            # block server init for 5+ seconds.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(client.ping)
+                future.result(timeout=2)
             logger.info(f"Redis cache connected: {url}")
             return cls(redis_client=client)
         except ImportError:
             logger.warning("redis package not installed — caching disabled")
+            return cls(redis_client=None)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Redis ping timed out ({url}) — caching disabled")
             return cls(redis_client=None)
         except Exception as e:
             logger.warning(f"Redis unavailable ({url}): {e} — caching disabled")

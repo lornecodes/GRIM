@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import type { TraceEvent, ResponseMeta } from "@/lib/types";
+import { uuid } from "@/lib/uuid";
 import { useGrimStore } from "@/store";
 
 function getWsUrl(sessionId: string): string {
@@ -114,7 +115,7 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             let targetId = id;
             if (nodeName && nodeName !== "integrate" && nodeName !== "companion" && nodeName !== "sdk") {
               if (!stepBubbleIds.current.has(nodeName)) {
-                const stepId = crypto.randomUUID();
+                const stepId = uuid();
                 stepBubbleIds.current.set(nodeName, stepId);
                 state.appendMessage({
                   id: stepId,
@@ -175,7 +176,7 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
               });
             } else {
               state.appendMessage({
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "grim",
                 content: data.content,
                 traces: [],
@@ -192,7 +193,7 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             // Compact "memory updated" pill — creates a step bubble for evolve
             // without the full memory content dump
             if (!id) break;
-            const notifId = stepBubbleIds.current.get("evolve") || crypto.randomUUID();
+            const notifId = stepBubbleIds.current.get("evolve") || uuid();
             if (!stepBubbleIds.current.has("evolve")) {
               stepBubbleIds.current.set("evolve", notifId);
               state.appendMessage({
@@ -242,8 +243,8 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
       if (state.isStreaming) return;
       if (wsRef.current?.readyState !== WebSocket.OPEN) return;
 
-      const userId = crypto.randomUUID();
-      const responseId = crypto.randomUUID();
+      const userId = uuid();
+      const responseId = uuid();
       currentResponseId.current = responseId;
       currentTraces.current = [];
       currentNode.current = "";

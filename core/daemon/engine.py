@@ -6,7 +6,9 @@ Runs as an asyncio background task. Each cycle:
 3. Dispatches READY items by submitting Jobs to ExecutionPool
 4. Listens on PoolEventBus for job lifecycle events
 
-This is a purely mechanical Python loop — no LLM calls.
+Phase 3 adds intelligent event handling: auto-resolve blocked questions,
+validate completed output against acceptance criteria, and enrich retry
+instructions with feedback. LLM calls are surgical and optional.
 """
 from __future__ import annotations
 
@@ -73,6 +75,14 @@ class ManagementEngine:
         self._poll_interval = getattr(config, "daemon_poll_interval", 30.0)
         self._max_concurrent = getattr(config, "daemon_max_concurrent_jobs", 1)
         self._auto_dispatch = getattr(config, "daemon_auto_dispatch", True)
+
+        # Phase 3: Intelligence config
+        self._auto_resolve = config.daemon_auto_resolve
+        self._validate_output = config.daemon_validate_output
+        self._max_daemon_retries = config.daemon_max_daemon_retries
+
+        # Phase 3: Intelligence module (optional — degrades gracefully)
+        self._intelligence = self._make_intelligence(config)
 
         # Runtime state
         self._running = False
@@ -293,6 +303,32 @@ class ManagementEngine:
         except Exception:
             logger.warning("Failed to update vault story %s with job_id %s", story_id, job_id)
 
+    # ── Intelligence Factory ──────────────────────────────────────
+
+    @staticmethod
+    def _make_intelligence(config: Any) -> dict | None:
+        """Create intelligence components, or None if imports fail."""
+        try:
+            from core.daemon.intelligence import (
+                ClarificationResolver,
+                OutputValidator,
+                RetryEnricher,
+            )
+            resolve_model = config.daemon_resolve_model
+            validate_model = config.daemon_validate_model
+            confidence_threshold = config.daemon_resolve_confidence_threshold
+
+            return {
+                "resolver": ClarificationResolver(
+                    model=resolve_model,
+                    confidence_threshold=confidence_threshold,
+                ),
+                "validator": OutputValidator(model=validate_model),
+                "enricher": RetryEnricher(),
+            }
+        except ImportError:
+            return None
+
     # ── Pool Event Handler ────────────────────────────────────────
 
     async def _handle_pool_event(self, event: PoolEvent) -> None:
@@ -310,25 +346,249 @@ class ManagementEngine:
 
         try:
             if event.type == PoolEventType.JOB_COMPLETE:
-                workspace_id = event.data.get("workspace_id")
-                await self._store.advance(
-                    item.id, PipelineStatus.REVIEW,
-                    workspace_id=workspace_id,
-                )
-                logger.info("Job %s complete → REVIEW (%s)", job_id, item.story_id)
+                await self._handle_complete(item, job_id, event.data)
 
             elif event.type == PoolEventType.JOB_FAILED:
                 error = event.data.get("error", "Unknown error")
-                await self._store.advance(
-                    item.id, PipelineStatus.FAILED,
-                    error=error,
-                )
-                logger.warning("Job %s failed → FAILED (%s): %s", job_id, item.story_id, error)
+                await self._handle_failed(item, job_id, error)
 
             elif event.type == PoolEventType.JOB_BLOCKED:
+                question = event.data.get("question", "")
                 await self._store.advance(item.id, PipelineStatus.BLOCKED)
                 logger.info("Job %s blocked → BLOCKED (%s)", job_id, item.story_id)
+                # Try auto-resolution
+                await self._handle_blocked(item, job_id, question)
 
         except Exception:
             logger.exception("Failed to handle pool event for job %s", job_id)
             self._health.record_error(f"Event handler failed: {event.type} for {job_id}")
+
+    # ── Intelligent Event Handlers ─────────────────────────────
+
+    async def _handle_blocked(self, item: Any, job_id: str, question: str) -> None:
+        """Try to auto-resolve a blocked question from ADR context."""
+        from core.pool.events import PoolEvent, PoolEventType
+
+        if not self._intelligence or not self._auto_resolve or not question:
+            # Emit escalation for unresolvable
+            if question:
+                await self._pool_events.emit(PoolEvent(
+                    type=PoolEventType.DAEMON_ESCALATION,
+                    job_id=job_id,
+                    data={
+                        "question": question,
+                        "story_id": item.story_id,
+                        "reason": "Auto-resolve disabled or unavailable",
+                    },
+                ))
+            return
+
+        resolver = self._intelligence["resolver"]
+
+        # Get ADR context
+        boundaries = ""
+        adr_context = ""
+        if self._context_builder:
+            try:
+                adrs = self._context_builder._resolve_adrs(item.project_id)
+                boundaries = self._context_builder._resolve_decision_boundaries(adrs)
+                adr_context = self._context_builder._resolve_adr_context(adrs)
+            except Exception:
+                logger.warning("Failed to resolve ADR context for %s", item.story_id)
+
+        resolution = await resolver.resolve(question, boundaries, adr_context)
+
+        if resolution.answered and resolution.confidence >= resolver._confidence_threshold:
+            # Auto-resolve: provide clarification to the pool
+            await self._pool_queue.provide_clarification(job_id, resolution.answer)
+            await self._store.advance(item.id, PipelineStatus.READY)
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_AUTO_RESOLVED,
+                job_id=job_id,
+                data={
+                    "question": question,
+                    "answer": resolution.answer,
+                    "source": resolution.source,
+                    "confidence": resolution.confidence,
+                    "story_id": item.story_id,
+                },
+            ))
+            logger.info("Auto-resolved blocked job %s (%s) via %s",
+                        job_id, item.story_id, resolution.source)
+        else:
+            # Escalate to human
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_ESCALATION,
+                job_id=job_id,
+                data={
+                    "question": question,
+                    "story_id": item.story_id,
+                    "reason": f"Could not resolve (source={resolution.source}, "
+                              f"confidence={resolution.confidence:.2f})",
+                },
+            ))
+            logger.info("Escalating blocked job %s (%s) — confidence too low",
+                        job_id, item.story_id)
+
+    async def _handle_complete(self, item: Any, job_id: str, event_data: dict) -> None:
+        """Validate completed work and advance or retry."""
+        workspace_id = event_data.get("workspace_id")
+
+        if not self._intelligence or not self._validate_output:
+            # No validation — advance directly to REVIEW
+            await self._store.advance(
+                item.id, PipelineStatus.REVIEW,
+                workspace_id=workspace_id,
+            )
+            logger.info("Job %s complete → REVIEW (%s)", job_id, item.story_id)
+            return
+
+        # Get acceptance criteria
+        story_data = self._get_story_details(item.story_id)
+        ac = (story_data or {}).get("acceptance_criteria", [])
+
+        if not ac:
+            # No criteria to validate against
+            await self._store.advance(
+                item.id, PipelineStatus.REVIEW,
+                workspace_id=workspace_id,
+            )
+            logger.info("Job %s complete → REVIEW (%s) [no AC]", job_id, item.story_id)
+            return
+
+        # Get job result from pool
+        result_text = ""
+        try:
+            job = await self._pool_queue.get(job_id)
+            if job:
+                result_text = getattr(job, "result", "") or ""
+        except Exception:
+            logger.warning("Could not fetch job result for %s", job_id)
+
+        diff_stat = event_data.get("diff_stat", "")
+        changed_files = event_data.get("changed_files", [])
+
+        validator = self._intelligence["validator"]
+        verdict = await validator.validate(ac, result_text, diff_stat, changed_files)
+
+        if verdict.outcome == "pass":
+            await self._store.advance(
+                item.id, PipelineStatus.REVIEW,
+                workspace_id=workspace_id,
+            )
+            logger.info("Job %s validated PASS → REVIEW (%s)", job_id, item.story_id)
+
+        elif verdict.outcome == "fail":
+            if item.daemon_retries < self._max_daemon_retries:
+                await self._handle_retry(
+                    item, job_id, error="Validation failed",
+                    validation_feedback=verdict.reasoning,
+                    missing_criteria=verdict.missing_criteria,
+                )
+            else:
+                await self._store.advance(
+                    item.id, PipelineStatus.FAILED,
+                    error=f"Validation failed after {item.daemon_retries} retries: {verdict.reasoning}",
+                )
+                logger.warning("Job %s validation FAIL → FAILED (%s): %s",
+                              job_id, item.story_id, verdict.reasoning)
+
+        elif verdict.outcome == "partial":
+            # Advance to REVIEW but flag via escalation
+            await self._store.advance(
+                item.id, PipelineStatus.REVIEW,
+                workspace_id=workspace_id,
+            )
+            from core.pool.events import PoolEvent, PoolEventType
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_ESCALATION,
+                job_id=job_id,
+                data={
+                    "story_id": item.story_id,
+                    "reason": f"Partial validation: {verdict.reasoning}",
+                    "missing_criteria": verdict.missing_criteria,
+                },
+            ))
+            logger.info("Job %s validated PARTIAL → REVIEW (%s): %s",
+                        job_id, item.story_id, verdict.reasoning)
+
+    async def _handle_failed(self, item: Any, job_id: str, error: str) -> None:
+        """Handle failed job — retry with feedback or escalate."""
+        if self._intelligence and item.daemon_retries < self._max_daemon_retries:
+            await self._handle_retry(item, job_id, error=error)
+        else:
+            await self._store.advance(
+                item.id, PipelineStatus.FAILED,
+                error=error,
+            )
+            if self._intelligence:
+                from core.pool.events import PoolEvent, PoolEventType
+                await self._pool_events.emit(PoolEvent(
+                    type=PoolEventType.DAEMON_ESCALATION,
+                    job_id=job_id,
+                    data={
+                        "story_id": item.story_id,
+                        "reason": f"Job failed after {item.daemon_retries} daemon retries: {error}",
+                    },
+                ))
+            logger.warning("Job %s failed → FAILED (%s): %s", job_id, item.story_id, error)
+
+    async def _handle_retry(
+        self,
+        item: Any,
+        old_job_id: str,
+        error: str = "",
+        validation_feedback: str = "",
+        missing_criteria: list[str] | None = None,
+    ) -> None:
+        """Retry a job with enriched instructions."""
+        enricher = self._intelligence["enricher"]
+
+        # Build enriched instructions
+        original_instructions = self._build_instructions(item)
+        enriched = enricher.enrich_instructions(
+            original_instructions,
+            error=error,
+            validation_feedback=validation_feedback,
+            missing_criteria=missing_criteria,
+            attempt=item.daemon_retries + 1,
+        )
+
+        # Create new job
+        from core.pool.models import Job, JobType, JobPriority
+
+        type_map = {
+            "code": JobType.CODE,
+            "research": JobType.RESEARCH,
+            "audit": JobType.AUDIT,
+            "plan": JobType.PLAN,
+        }
+        priority_map = {0: JobPriority.CRITICAL, 1: JobPriority.HIGH, 2: JobPriority.NORMAL, 3: JobPriority.LOW}
+
+        job = Job(
+            job_type=type_map.get(item.assignee, JobType.CODE),
+            priority=priority_map.get(item.priority, JobPriority.NORMAL),
+            instructions=enriched,
+        )
+
+        await self._pool_queue.submit(job)
+
+        # Advance pipeline: DISPATCHED/FAILED → FAILED → READY → DISPATCHED
+        # We need to go through valid transitions
+        if item.status == PipelineStatus.DISPATCHED:
+            await self._store.advance(item.id, PipelineStatus.FAILED, error=error)
+        # FAILED → READY
+        await self._store.advance(item.id, PipelineStatus.READY)
+        # READY → DISPATCHED with new job_id
+        await self._store.advance(
+            item.id, PipelineStatus.DISPATCHED,
+            job_id=job.id,
+            attempts=item.attempts + 1,
+            daemon_retries=item.daemon_retries + 1,
+        )
+
+        # Write job_id back to vault
+        await self._update_vault_story(item.story_id, job.id)
+        self._health.record_dispatch()
+        logger.info("Retrying %s → new job %s (daemon retry %d)",
+                    item.story_id, job.id, item.daemon_retries + 1)

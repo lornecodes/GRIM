@@ -16,6 +16,9 @@ WORKDIR /ui
 COPY ui/package*.json ./
 RUN npm ci
 COPY ui/ ./
+# Clear localhost env so UI uses relative/same-origin URLs (works from any host)
+ENV NEXT_PUBLIC_GRIM_API=""
+ENV NEXT_PUBLIC_BRIDGE_URL=""
 RUN npm run build
 
 # ── Stage 2: Python backend ───────────────────────────────

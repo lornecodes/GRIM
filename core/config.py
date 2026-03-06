@@ -92,6 +92,13 @@ class GrimConfig:
     daemon_project_filter: list[str] = field(default_factory=list)  # limit to specific proj-* IDs
     daemon_auto_dispatch: bool = True           # auto-dispatch READY stories
     daemon_db_path: Path = field(default_factory=lambda: Path("local/daemon.db"))
+    # Phase 3: Intelligence
+    daemon_auto_resolve: bool = True            # auto-answer blocked questions from ADR context
+    daemon_validate_output: bool = True         # validate completed work against acceptance criteria
+    daemon_max_daemon_retries: int = 1          # max retries on validation failure (daemon-level)
+    daemon_resolve_model: str = "claude-sonnet-4-6"
+    daemon_validate_model: str = "claude-opus-4-6"
+    daemon_resolve_confidence_threshold: float = 0.7
 
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
@@ -291,6 +298,19 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.daemon_auto_dispatch = daemon["auto_dispatch"]
     if "db_path" in daemon:
         cfg.daemon_db_path = Path(daemon["db_path"])
+    # Phase 3: Intelligence
+    if "auto_resolve" in daemon:
+        cfg.daemon_auto_resolve = daemon["auto_resolve"]
+    if "validate_output" in daemon:
+        cfg.daemon_validate_output = daemon["validate_output"]
+    if "max_daemon_retries" in daemon:
+        cfg.daemon_max_daemon_retries = daemon["max_daemon_retries"]
+    if "resolve_model" in daemon:
+        cfg.daemon_resolve_model = daemon["resolve_model"]
+    if "validate_model" in daemon:
+        cfg.daemon_validate_model = daemon["validate_model"]
+    if "resolve_confidence_threshold" in daemon:
+        cfg.daemon_resolve_confidence_threshold = daemon["resolve_confidence_threshold"]
 
 
 def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:

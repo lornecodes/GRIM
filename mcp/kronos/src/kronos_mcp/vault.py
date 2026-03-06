@@ -7,6 +7,7 @@ No Obsidian dependency — pure filesystem operations.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import re
@@ -19,6 +20,28 @@ from datetime import date
 from typing import Any
 
 logger = logging.getLogger("kronos-mcp.vault")
+
+# ── YAML safety ────────────────────────────────────────────────────────────
+
+_YAML_PARSE_TIMEOUT = 5  # seconds — guard against malformed/huge YAML
+
+
+class _YAMLTimeout(Exception):
+    """Raised when YAML parsing exceeds the timeout."""
+
+
+def _safe_load_yaml_with_timeout(text: str, source: Any = None) -> dict:
+    """Parse YAML with a timeout guard.
+
+    Prevents malformed or deeply-nested YAML from hanging the server.
+    Raises _YAMLTimeout on timeout, yaml.YAMLError on parse failure.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(yaml.safe_load, text)
+        try:
+            return future.result(timeout=_YAML_PARSE_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            raise _YAMLTimeout(f"YAML parse exceeded {_YAML_PARSE_TIMEOUT}s: {source}")
 
 
 # ── FDO data model ──────────────────────────────────────────────────────────
@@ -168,7 +191,10 @@ class VaultEngine:
             return None
 
         try:
-            fm = yaml.safe_load(m.group(1))
+            fm = _safe_load_yaml_with_timeout(m.group(1), path)
+        except _YAMLTimeout:
+            logger.warning(f"YAML parse timed out in {path}")
+            return None
         except yaml.YAMLError as e:
             logger.warning(f"Invalid YAML frontmatter in {path}: {e}")
             return None

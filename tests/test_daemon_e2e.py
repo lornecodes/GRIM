@@ -14,6 +14,7 @@ import yaml
 
 from core.daemon.engine import ManagementEngine
 from core.daemon.health import HealthMonitor
+from core.daemon.intelligence import Resolution
 from core.daemon.models import PipelineItem, PipelineStatus, InvalidTransition
 from core.daemon.pipeline import PipelineStore
 from core.daemon.scanner import ProjectScanner
@@ -47,11 +48,19 @@ def _make_config(vault_path: Path, db_path: Path, **overrides):
     """Create a mock config object."""
     cfg = MagicMock()
     cfg.vault_path = vault_path
+    cfg.workspace_root = vault_path.parent
     cfg.daemon_poll_interval = 999  # prevent auto-loop
     cfg.daemon_max_concurrent_jobs = overrides.get("max_concurrent", 1)
     cfg.daemon_auto_dispatch = overrides.get("auto_dispatch", True)
     cfg.daemon_db_path = db_path
     cfg.daemon_project_filter = overrides.get("project_filter", [])
+    # Phase 3: intelligence config (disabled by default in E2E tests)
+    cfg.daemon_auto_resolve = overrides.get("auto_resolve", False)
+    cfg.daemon_validate_output = overrides.get("validate_output", False)
+    cfg.daemon_max_daemon_retries = overrides.get("max_daemon_retries", 0)
+    cfg.daemon_resolve_model = "claude-sonnet-4-6"
+    cfg.daemon_validate_model = "claude-opus-4-6"
+    cfg.daemon_resolve_confidence_threshold = 0.7
     return cfg
 
 
@@ -503,3 +512,207 @@ class TestEngineLifecycle:
             vault_path=vault,
         )
         await eng.stop()  # Should not raise
+
+
+# ── Mewtwo↔Charizard Seam Tests ──────────────────────────────
+
+
+class TestMewtwoCharizardSeam:
+    """Integration tests with real JobQueue (not mocked).
+
+    Validates the daemon↔pool interface boundary using real SQLite
+    for both daemon pipeline and pool job queue.
+    """
+
+    @pytest.fixture
+    async def seam(self, tmp_path):
+        vault_path = tmp_path / "vault"
+        _make_project_fdo(vault_path, "proj-seam", [
+            {
+                "id": "story-seam-001",
+                "title": "Seam test story 1",
+                "status": "active",
+                "priority": "high",
+                "assignee": "code",
+                "description": "Test the seam",
+                "acceptance_criteria": ["Tests pass"],
+            },
+            {
+                "id": "story-seam-002",
+                "title": "Seam test story 2",
+                "status": "active",
+                "priority": "medium",
+                "assignee": "research",
+            },
+        ])
+
+        daemon_db = tmp_path / "daemon.db"
+        pool_db = tmp_path / "pool.db"
+
+        from core.pool.queue import JobQueue
+        queue = JobQueue(pool_db)
+        await queue.initialize()
+
+        events = PoolEventBus()
+
+        cfg = _make_config(vault_path, daemon_db, max_concurrent=2)
+        engine = ManagementEngine(
+            config=cfg, pool_queue=queue, pool_events=events, vault_path=vault_path,
+        )
+        await engine.store.initialize()
+        events.subscribe(engine._event_callback)
+
+        yield engine, queue, events
+
+        events.unsubscribe(engine._event_callback)
+
+    @pytest.mark.asyncio
+    async def test_dispatch_creates_real_job(self, seam):
+        """Dispatch should create a real Job in JobQueue."""
+        engine, queue, _ = seam
+
+        await engine._scan_cycle()
+        await engine._promote_cycle()
+        await engine._dispatch_cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        assert len(dispatched) >= 1
+
+        # Verify the job actually exists in the real queue
+        job = await queue.get(dispatched[0].job_id)
+        assert job is not None
+        assert "Seam test story" in job.instructions
+
+    @pytest.mark.asyncio
+    async def test_complete_event_advances_review(self, seam):
+        """Simulated JOB_COMPLETE should advance pipeline to REVIEW."""
+        engine, queue, events = seam
+
+        await engine._scan_cycle()
+        await engine._promote_cycle()
+        await engine._dispatch_cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        # Simulate pool completing the job
+        from core.pool.models import JobStatus
+        await queue.update_status(job_id, JobStatus.COMPLETE, result="All done.")
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=job_id,
+            data={"workspace_id": "ws-seam-001"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.REVIEW
+        assert item.workspace_id == "ws-seam-001"
+
+    @pytest.mark.asyncio
+    async def test_blocked_event_stays_blocked(self, seam):
+        """JOB_BLOCKED with intelligence disabled should leave item BLOCKED."""
+        engine, queue, events = seam
+
+        await engine._scan_cycle()
+        await engine._promote_cycle()
+        await engine._dispatch_cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_BLOCKED,
+            job_id=job_id,
+            data={"question": "What should I do?"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.BLOCKED
+
+    @pytest.mark.asyncio
+    async def test_failed_event_advances_failed(self, seam):
+        """JOB_FAILED with retries disabled should advance to FAILED."""
+        engine, queue, events = seam
+
+        await engine._scan_cycle()
+        await engine._promote_cycle()
+        await engine._dispatch_cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_FAILED,
+            job_id=job_id,
+            data={"error": "Agent crashed hard"},
+        ))
+
+        item = await engine.store.get_by_job(job_id)
+        assert item.status == PipelineStatus.FAILED
+        assert item.error == "Agent crashed hard"
+
+    @pytest.mark.asyncio
+    async def test_full_lifecycle(self, seam):
+        """Scan → promote → dispatch → complete → verify REVIEW, then dispatch next."""
+        engine, queue, events = seam
+
+        # First cycle: scan + promote + dispatch (max_concurrent=2, so both dispatch)
+        await engine._cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        assert len(dispatched) == 2
+
+        # Complete the first job
+        first_job_id = dispatched[0].job_id
+        from core.pool.models import JobStatus
+        await queue.update_status(first_job_id, JobStatus.COMPLETE, result="Done.")
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id=first_job_id,
+            data={"workspace_id": "ws-lifecycle-001"},
+        ))
+
+        first = await engine.store.get_by_job(first_job_id)
+        assert first.status == PipelineStatus.REVIEW
+
+        # Second job still dispatched
+        second = await engine.store.get_by_job(dispatched[1].job_id)
+        assert second.status == PipelineStatus.DISPATCHED
+
+    @pytest.mark.asyncio
+    async def test_auto_resolve_provides_clarification(self, seam):
+        """With mocked resolver, auto-resolve should write clarification to real queue."""
+        engine, queue, events = seam
+
+        # Enable intelligence with mocked resolver
+        mock_resolver = AsyncMock()
+        mock_resolver.resolve = AsyncMock(return_value=Resolution(
+            answered=True, answer="Use pattern B.", confidence=0.9, source="mechanical",
+        ))
+        mock_resolver._confidence_threshold = 0.7
+        engine._auto_resolve = True
+        engine._intelligence = {
+            "resolver": mock_resolver,
+            "validator": AsyncMock(),
+            "enricher": MagicMock(),
+        }
+
+        await engine._scan_cycle()
+        await engine._promote_cycle()
+        await engine._dispatch_cycle()
+
+        dispatched = await engine.store.list_items(status_filter=PipelineStatus.DISPATCHED)
+        job_id = dispatched[0].job_id
+
+        # Block the job
+        from core.pool.models import JobStatus
+        await queue.update_status(job_id, JobStatus.BLOCKED)
+        await events.emit(PoolEvent(
+            type=PoolEventType.JOB_BLOCKED,
+            job_id=job_id,
+            data={"question": "Which pattern should I use?"},
+        ))
+
+        # Verify clarification was written to the real queue
+        job = await queue.get(job_id)
+        assert job.clarification_answer == "Use pattern B."

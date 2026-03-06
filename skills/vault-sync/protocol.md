@@ -327,7 +327,9 @@ Get-ChildItem "kronos-vault\**\*.md" -Recurse | ForEach-Object {
 2. Keep the original Decision and Context sections (those are historical record)
 3. Add an Evolution section if the implementation has diverged significantly
 4. Update Consequences to reflect what actually happened
-5. **Ripple**: Check if parent project FDOs reference the stale ADR content
+5. Check Decision Boundaries are still accurate (scope may have shifted during implementation)
+6. Verify Acceptance Criteria match what was actually delivered (check/uncheck items)
+7. **Ripple**: Check if parent project FDOs reference the stale ADR content
 
 ## Appendix B: Confidence Adjustment Guide
 

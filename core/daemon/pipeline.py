@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS pipeline (
     workspace_id TEXT,
     error TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
+    daemon_retries INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -90,9 +91,9 @@ class PipelineStore:
             await db.execute(
                 """INSERT INTO pipeline
                    (id, story_id, project_id, status, priority, assignee,
-                    job_id, workspace_id, error, attempts,
+                    job_id, workspace_id, error, attempts, daemon_retries,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     item.id,
                     item.story_id,
@@ -104,6 +105,7 @@ class PipelineStore:
                     item.workspace_id,
                     item.error,
                     item.attempts,
+                    item.daemon_retries,
                     item.created_at.isoformat(),
                     item.updated_at.isoformat(),
                 ),
@@ -149,8 +151,8 @@ class PipelineStore:
                 if key in ("job_id", "workspace_id", "error"):
                     sets.append(f"{key} = ?")
                     params.append(value)
-                elif key == "attempts":
-                    sets.append("attempts = ?")
+                elif key in ("attempts", "daemon_retries"):
+                    sets.append(f"{key} = ?")
                     params.append(value)
 
             params.append(item_id)
@@ -289,6 +291,7 @@ def _row_to_item(row: aiosqlite.Row) -> PipelineItem:
         workspace_id=row["workspace_id"],
         error=row["error"],
         attempts=row["attempts"],
+        daemon_retries=row["daemon_retries"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )

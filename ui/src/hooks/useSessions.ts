@@ -3,11 +3,12 @@
 import { useEffect, useCallback } from "react";
 import { useGrimStore } from "@/store";
 import { saveMessages, loadMessages, deleteMessages } from "@/lib/persistence";
+import { uuid } from "@/lib/uuid";
 
 const STORAGE_KEY = "grim-sessions";
 
 function generateId(): string {
-  return crypto.randomUUID().slice(0, 8);
+  return uuid().slice(0, 8);
 }
 
 export function useSessions() {
