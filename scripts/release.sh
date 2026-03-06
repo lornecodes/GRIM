@@ -506,6 +506,15 @@ cmd_integration() {
 cmd_prod() {
     GRIM_PROD=1
     _log "Production deploy ..."
+
+    # On Linux server, set vault/workspace paths if not already set
+    if [[ "$(uname)" == "Linux" ]]; then
+        local ws_root
+        ws_root="$(cd "$GRIM_DIR/.." && pwd)"
+        export VAULT_PATH="${VAULT_PATH:-$ws_root/kronos-vault}"
+        export WORKSPACE_PATH="${WORKSPACE_PATH:-$ws_root}"
+    fi
+
     cmd_unit || { _err "Unit tests failed — aborting prod deploy"; return 1; }
     cmd_build
     GRIM_PROD=1 _compose up -d
