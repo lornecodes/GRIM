@@ -1,6 +1,6 @@
 // ── WebSocket protocol types (matches server/app.py) ──
 
-export type TraceCategory = "node" | "llm" | "tool" | "claw" | "graph";
+export type TraceCategory = "node" | "llm" | "tool" | "graph";
 
 export interface TraceEvent {
   type: "trace";
@@ -15,7 +15,6 @@ export interface TraceEvent {
   input?: unknown;
   output_preview?: string;
   step_content?: string; // LLM output for this node (future per-step bubbles)
-  sandboxed?: boolean;   // true = executed through IronClaw sandbox
 }
 
 export interface StreamEvent {

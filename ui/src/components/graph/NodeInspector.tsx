@@ -88,11 +88,6 @@ export function NodeInspector({
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-grim-border/30 text-grim-text-dim">
               {node.node_type}
             </span>
-            {node.tier === "ironclaw" && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-400/15 text-orange-400 font-mono">
-                claw
-              </span>
-            )}
           </div>
           <p className="text-[10px] text-grim-text-dim mt-0.5">{node.role}</p>
         </div>

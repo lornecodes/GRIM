@@ -167,3 +167,31 @@ export function IconChevronRight({ size = defaults.size, className }: IconProps)
     </svg>
   );
 }
+
+export function IconMissionControl({ size = defaults.size, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Radar / grid control center */}
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="3" x2="12" y2="8" />
+      <line x1="12" y1="16" x2="12" y2="21" />
+      <line x1="3" y1="12" x2="8" y2="12" />
+      <line x1="16" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+
+export function IconAgentStudio({ size = defaults.size, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Terminal / studio view */}
+      <rect x="2" y="3" width="20" height="18" rx="2" />
+      <line x1="2" y1="8" x2="22" y2="8" />
+      <line x1="6" y1="5.5" x2="6" y2="5.5" strokeWidth="3" strokeLinecap="round" />
+      <line x1="10" y1="5.5" x2="10" y2="5.5" strokeWidth="3" strokeLinecap="round" />
+      <polyline points="7 13 9 15 7 17" />
+      <line x1="12" y1="17" x2="17" y2="17" />
+    </svg>
+  );
+}

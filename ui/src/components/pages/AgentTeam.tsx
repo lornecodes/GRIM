@@ -4,9 +4,17 @@ import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { IconAgents } from "@/components/icons/NavIcons";
 import { useGrimStore } from "@/store";
 import { useActiveAgents } from "@/hooks/useActiveAgents";
-import { usePoolStatus, type JobsByType } from "@/hooks/usePoolStatus";
+import { usePoolStatus } from "@/hooks/usePoolStatus";
+import { useJobDetail } from "@/hooks/useJobDetail";
 import { PoolStatusBar } from "@/components/pages/agents/PoolStatusBar";
 import { AgentDetailPanel } from "@/components/pages/agents/AgentDetailPanel";
+import { JobKanban } from "./mission/JobKanban";
+import { SubmitJobDialog } from "./mission/SubmitJobDialog";
+import { StudioHeader } from "./studio/StudioHeader";
+import { LiveTranscript } from "./studio/LiveTranscript";
+import { DiffViewer } from "./studio/DiffViewer";
+import { WorkspaceBrowser } from "./studio/WorkspaceBrowser";
+import { AuditPanel } from "./studio/AuditPanel";
 
 // Lazy-load Graph Studio (heavy — contains ForceGraph2D canvas)
 const GraphStudio = lazy(() =>
@@ -17,10 +25,10 @@ const GraphStudio = lazy(() =>
 
 const AGENT_TABS = [
   { id: "team", label: "Team" },
-  { id: "graph", label: "Graph Studio" },
+  { id: "jobs", label: "Jobs" },
+  { id: "studio", label: "Studio" },
+  { id: "graph", label: "Graph" },
 ] as const;
-
-type AgentTabId = (typeof AGENT_TABS)[number]["id"];
 
 // ── Agent ID → Pool JobType mapping ──
 
@@ -50,9 +58,11 @@ export function AgentTeam() {
   const [roster, setRoster] = useState<AgentRosterEntry[]>([]);
   const [togglingAgent, setTogglingAgent] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [showSubmit, setShowSubmit] = useState(false);
   const isStreaming = useGrimStore((s) => s.isStreaming);
 
-  const [activeTab, setActiveTab] = useState<AgentTabId>("team");
+  const agentsTab = useGrimStore((s) => s.agentsTab);
+  const setAgentsTab = useGrimStore((s) => s.setAgentsTab);
   const activeAgents = useActiveAgents(10);
   const { poolStatus, poolEnabled, jobs, jobsByType, fetchJobsByType } = usePoolStatus();
 
@@ -100,7 +110,7 @@ export function AgentTeam() {
       <div className="flex items-center gap-3">
         <IconAgents size={32} className="text-grim-accent" />
         <div>
-          <h2 className="text-lg font-semibold text-grim-text">Agent Team</h2>
+          <h2 className="text-lg font-semibold text-grim-text">Agents</h2>
           <p className="text-xs text-grim-text-dim">
             {roster.length} agents registered
             {poolEnabled && poolStatus?.running && (
@@ -120,9 +130,9 @@ export function AgentTeam() {
         {AGENT_TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => { setActiveTab(tab.id); setSelectedAgent(null); }}
+            onClick={() => { setAgentsTab(tab.id); setSelectedAgent(null); }}
             className={`px-4 py-2 text-xs font-medium transition-colors ${
-              activeTab === tab.id
+              agentsTab === tab.id
                 ? "border-b-2 border-grim-accent text-grim-accent"
                 : "text-grim-text-dim hover:text-grim-text"
             }`}
@@ -132,23 +142,9 @@ export function AgentTeam() {
         ))}
       </div>
 
-      {/* Graph Studio tab */}
-      {activeTab === "graph" && (
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-96 text-xs text-grim-text-dim">
-              Loading Graph Studio...
-            </div>
-          }
-        >
-          <GraphStudio />
-        </Suspense>
-      )}
-
       {/* Team tab */}
-      {activeTab === "team" && (
+      {agentsTab === "team" && (
         <>
-          {/* Pool Status Bar */}
           <PoolStatusBar
             status={poolStatus}
             enabled={poolEnabled}
@@ -156,7 +152,6 @@ export function AgentTeam() {
             queuedJobs={totalQueued}
           />
 
-          {/* Agent Detail Panel (when an agent is selected) */}
           {selectedRosterAgent ? (
             <AgentDetailPanel
               agent={selectedRosterAgent}
@@ -167,7 +162,6 @@ export function AgentTeam() {
             />
           ) : (
             <>
-              {/* Active agents indicator */}
               {activeAgents.length > 0 && (
                 <div className="flex items-center gap-2 text-xs text-grim-text-dim">
                   <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -175,7 +169,6 @@ export function AgentTeam() {
                 </div>
               )}
 
-              {/* Agent Roster */}
               {roster.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {roster.map((agent) => {
@@ -204,6 +197,176 @@ export function AgentTeam() {
             </>
           )}
         </>
+      )}
+
+      {/* Jobs tab */}
+      {agentsTab === "jobs" && (
+        <JobsTabContent
+          poolEnabled={poolEnabled}
+          showSubmit={showSubmit}
+          setShowSubmit={setShowSubmit}
+        />
+      )}
+
+      {/* Studio tab */}
+      {agentsTab === "studio" && <StudioTabContent />}
+
+      {/* Graph Studio tab */}
+      {agentsTab === "graph" && (
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-96 text-xs text-grim-text-dim">
+              Loading Graph Studio...
+            </div>
+          }
+        >
+          <GraphStudio />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+// ── Jobs Tab Content ──
+
+function JobsTabContent({
+  poolEnabled,
+  showSubmit,
+  setShowSubmit,
+}: {
+  poolEnabled: boolean;
+  showSubmit: boolean;
+  setShowSubmit: (v: boolean) => void;
+}) {
+  if (!poolEnabled) {
+    return (
+      <div className="bg-grim-surface border border-grim-border rounded-lg p-6 text-center">
+        <div className="text-grim-text-dim text-[12px] mb-2">Pool Offline</div>
+        <div className="text-[11px] text-grim-text-dim">
+          Enable the execution pool in <span className="font-mono text-grim-accent">grim.yaml</span> with{" "}
+          <span className="font-mono text-grim-accent">pool.enabled: true</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowSubmit(true)}
+          className="text-[11px] px-3 py-1.5 rounded border border-grim-accent bg-grim-accent/10 text-grim-accent hover:bg-grim-accent/20 transition-colors"
+        >
+          Submit Job
+        </button>
+      </div>
+      <JobKanban />
+      <SubmitJobDialog open={showSubmit} onClose={() => setShowSubmit(false)} />
+    </div>
+  );
+}
+
+// ── Studio Tab Content ──
+
+const STUDIO_TABS = [
+  { id: "transcript", label: "Transcript" },
+  { id: "diff", label: "Diff" },
+  { id: "workspace", label: "Workspace" },
+  { id: "audit", label: "Audit" },
+] as const;
+
+type StudioTabId = (typeof STUDIO_TABS)[number]["id"];
+
+function StudioTabContent() {
+  const [studioTab, setStudioTab] = useState<StudioTabId>("transcript");
+  const selectedJobId = useGrimStore((s) => s.selectedJobId);
+  const setAgentsTab = useGrimStore((s) => s.setAgentsTab);
+
+  const { job, transcript, isLive, loading, diff, refetch } = useJobDetail(selectedJobId);
+
+  if (!selectedJobId) {
+    return (
+      <div className="bg-grim-surface border border-grim-border rounded-lg p-6 text-center">
+        <div className="text-[12px] text-grim-text-dim mb-3">
+          No job selected. Pick one from the Jobs tab.
+        </div>
+        <button
+          onClick={() => setAgentsTab("jobs")}
+          className="text-[11px] px-3 py-1.5 rounded border border-grim-accent bg-grim-accent/10 text-grim-accent hover:bg-grim-accent/20 transition-colors"
+        >
+          View Jobs
+        </button>
+      </div>
+    );
+  }
+
+  if (loading && !job) {
+    return (
+      <div className="text-center py-8">
+        <div className="text-[11px] text-grim-text-dim">Loading job {selectedJobId}...</div>
+      </div>
+    );
+  }
+
+  if (!job) {
+    return (
+      <div className="text-center py-8">
+        <div className="text-[11px] text-red-400">Job not found: {selectedJobId}</div>
+        <button
+          onClick={() => setAgentsTab("jobs")}
+          className="text-[11px] text-grim-text-dim hover:text-grim-text mt-2"
+        >
+          &larr; Back to Jobs
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <StudioHeader job={job} onRefetch={refetch} />
+
+      {/* Studio sub-tabs */}
+      <div className="flex gap-0 border-b border-grim-border">
+        {STUDIO_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setStudioTab(tab.id)}
+            className={`px-4 py-2 text-[11px] border-b-2 transition-colors ${
+              studioTab === tab.id
+                ? "border-grim-accent text-grim-accent"
+                : "border-transparent text-grim-text-dim hover:text-grim-text"
+            }`}
+          >
+            {tab.label}
+            {tab.id === "transcript" && isLive && (
+              <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div>
+        {studioTab === "transcript" && (
+          <LiveTranscript jobId={job.id} transcript={transcript} isLive={isLive} />
+        )}
+        {studioTab === "diff" && <DiffViewer diff={diff} />}
+        {studioTab === "workspace" && <WorkspaceBrowser workspaceId={job.workspace_id} />}
+        {studioTab === "audit" && <AuditPanel transcript={transcript} jobType={job.job_type} />}
+      </div>
+
+      {job.error && (
+        <div className="bg-red-400/5 border border-red-400/20 rounded-md p-3">
+          <div className="text-[10px] text-red-400 uppercase tracking-wider mb-1">Error</div>
+          <div className="text-[11px] text-red-300 font-mono whitespace-pre-wrap">{job.error}</div>
+        </div>
+      )}
+
+      {job.result && (
+        <div className="bg-grim-surface border border-grim-border rounded-md p-3">
+          <div className="text-[10px] text-grim-text-dim uppercase tracking-wider mb-1">Result</div>
+          <div className="text-[11px] text-grim-text whitespace-pre-wrap">{job.result}</div>
+        </div>
       )}
     </div>
   );
@@ -238,7 +401,6 @@ function RosterCard({
       } ${active ? "ring-1 ring-green-400/30" : ""}`}
     >
       <div className="flex items-start gap-2">
-        {/* Color dot + active pulse */}
         <div className="relative mt-1 flex-shrink-0">
           <div
             className="w-2.5 h-2.5 rounded-full"
@@ -262,7 +424,6 @@ function RosterCard({
             {agent.description}
           </p>
 
-          {/* Pool job badges */}
           {jobCounts && (jobCounts.running > 0 || jobCounts.queued > 0) && (
             <div className="flex gap-1.5 mt-1.5">
               {jobCounts.running > 0 && (
@@ -278,7 +439,6 @@ function RosterCard({
             </div>
           )}
 
-          {/* Total completed jobs indicator */}
           {jobCounts && jobCounts.total > 0 && jobCounts.running === 0 && jobCounts.queued === 0 && (
             <div className="mt-1.5">
               <span className="text-[9px] text-grim-text-dim font-mono">
@@ -288,7 +448,6 @@ function RosterCard({
           )}
         </div>
 
-        {/* Toggle or always-on badge */}
         <div className="flex-shrink-0" onClick={(e) => e.stopPropagation()}>
           {agent.toggleable ? (
             <button
@@ -312,7 +471,6 @@ function RosterCard({
         </div>
       </div>
 
-      {/* Tools (collapsible) */}
       {agent.tools.length > 0 && (
         <div className="mt-2">
           <button

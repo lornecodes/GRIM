@@ -38,7 +38,7 @@ export interface TopologyNode {
   tools: string[];
   tools_detail?: ToolDetail[];
   color: string;
-  tier: "grim" | "ironclaw";
+  tier: string;
   toggleable: boolean;
   node_type: NodeType;
   col: number;

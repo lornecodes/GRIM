@@ -70,7 +70,7 @@ const MOCK_TOPOLOGY = {
     audit: {
       id: "audit", name: "Audit", role: "review",
       description: "Staging review", tools: ["staging_read"],
-      color: "#f97316", tier: "ironclaw", toggleable: true, node_type: "agent",
+      color: "#f97316", tier: "grim", toggleable: true, node_type: "agent",
       enabled: true, col: 8, row: 1,
       routing_rules: [
         { condition: "IronClaw artifacts", target: "audit" },
@@ -135,7 +135,6 @@ beforeEach(() => {
     chatPanelOpen: true,
     activePage: "dashboard",
     sidebarCollapsed: false,
-    ironclawStatus: "unknown",
   });
 });
 
@@ -411,20 +410,6 @@ describe("NodeInspector", () => {
       />
     );
     expect(screen.getByText("companion")).toBeInTheDocument();
-  });
-
-  it("shows ironclaw tier badge", () => {
-    const auditNode = MOCK_TOPOLOGY.nodes.audit;
-    render(
-      <NodeInspector
-        node={auditNode as any}
-        overlay={emptyOverlay}
-        toggling={false}
-        onToggle={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-    expect(screen.getByText("claw")).toBeInTheDocument();
   });
 
   it("shows routing rules for router nodes", () => {

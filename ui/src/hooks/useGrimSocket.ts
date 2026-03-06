@@ -112,7 +112,7 @@ export function useGrimSocket(sessionId: string): { send: (msg: string) => void 
             // Companion streams into the main response bubble (with avatar).
             // Other non-integrate nodes get step bubbles (rare — most don't stream).
             let targetId = id;
-            if (nodeName && nodeName !== "integrate" && nodeName !== "companion") {
+            if (nodeName && nodeName !== "integrate" && nodeName !== "companion" && nodeName !== "sdk") {
               if (!stepBubbleIds.current.has(nodeName)) {
                 const stepId = crypto.randomUUID();
                 stepBubbleIds.current.set(nodeName, stepId);

@@ -46,8 +46,6 @@ beforeEach(() => {
     chatPanelOpen: true,
     activePage: "dashboard",
     sidebarCollapsed: false,
-    activeDashboardWidget: "tokens",
-    ironclawStatus: "unknown",
   });
 });
 
@@ -67,10 +65,9 @@ describe("ChatApp", () => {
     expect(screen.getByText("chat")).toBeInTheDocument();
   });
 
-  it("shows Mission Control label in header", () => {
+  it("shows Agent Companion label in header", () => {
     render(<ChatApp />);
-    // AppHeader + DashboardHome both have "Mission Control" — check at least one exists
-    const elements = screen.getAllByText("Mission Control");
+    const elements = screen.getAllByText("Agent Companion");
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
 

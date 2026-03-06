@@ -9,21 +9,29 @@ const mockUseTasks = {
   board: null as unknown,
   backlog: null as unknown,
   allStories: [] as unknown[],
-  projects: [] as { id: string; title: string }[],
+  projects: [] as { id: string; title: string; domain?: string }[],
   selectedProject: "",
   setSelectedProject: vi.fn(),
+  selectedDomain: "",
+  setSelectedDomain: vi.fn(),
   loading: false,
   error: null as string | null,
   moving: null as string | null,
   moveStory: vi.fn(),
   createItem: vi.fn(),
   updateItem: vi.fn(),
-  updateTaskStatus: vi.fn(),
+  dispatchStory: vi.fn(),
   refresh: vi.fn(),
 };
 
 vi.mock("@/hooks/useTasks", () => ({
   useTasks: () => mockUseTasks,
+}));
+
+// Mock the store for pool jobs / live transcripts
+vi.mock("@/store", () => ({
+  useStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({ poolJobs: {}, liveTranscripts: {} }),
 }));
 
 // Import AFTER mock is set up
@@ -43,15 +51,10 @@ function makeBoardData(overrides: Record<string, unknown> = {}) {
           title: "Test Story Alpha",
           status: "active",
           priority: "high",
-          feature: "feat-test",
           project: "proj-test",
+          domain: "projects",
           estimate_days: 2,
-          tasks: [
-            { id: "task-001", title: "Task One", status: "new", estimate_days: 0.5 },
-            { id: "task-002", title: "Task Two", status: "resolved", estimate_days: 1 },
-          ],
-          task_count: 2,
-          tasks_done: 1,
+          assignee: "code",
           tags: [],
         },
       ],
@@ -72,13 +75,15 @@ function resetMock() {
   mockUseTasks.projects = [];
   mockUseTasks.selectedProject = "";
   mockUseTasks.setSelectedProject = vi.fn();
+  mockUseTasks.selectedDomain = "";
+  mockUseTasks.setSelectedDomain = vi.fn();
   mockUseTasks.loading = false;
   mockUseTasks.error = null;
   mockUseTasks.moving = null;
   mockUseTasks.moveStory = vi.fn();
   mockUseTasks.createItem = vi.fn();
   mockUseTasks.updateItem = vi.fn();
-  mockUseTasks.updateTaskStatus = vi.fn();
+  mockUseTasks.dispatchStory = vi.fn();
   mockUseTasks.refresh = vi.fn();
 }
 
@@ -141,13 +146,6 @@ describe("TasksBoard", () => {
       expect(screen.getByText("Test Story Alpha")).toBeDefined();
     });
 
-    it("renders feature group headers", () => {
-      mockUseTasks.board = makeBoardData();
-      render(<TasksBoard />);
-      // Feature header extracts label from feat ID
-      expect(screen.getByText("test")).toBeDefined();
-    });
-
     it("renders column headers", () => {
       mockUseTasks.board = makeBoardData();
       render(<TasksBoard />);
@@ -157,17 +155,16 @@ describe("TasksBoard", () => {
       expect(screen.getByText("Resolved")).toBeDefined();
     });
 
-    it("renders task chips for stories", () => {
-      mockUseTasks.board = makeBoardData();
-      render(<TasksBoard />);
-      expect(screen.getByText("Task One")).toBeDefined();
-      expect(screen.getByText("Task Two")).toBeDefined();
-    });
-
     it("shows story count", () => {
       mockUseTasks.board = makeBoardData();
       render(<TasksBoard />);
       expect(screen.getByText(/1 active stories/)).toBeDefined();
+    });
+
+    it("renders assignee badge for stories with agents", () => {
+      mockUseTasks.board = makeBoardData();
+      render(<TasksBoard />);
+      expect(screen.getByText("Code")).toBeDefined();
     });
   });
 
@@ -193,8 +190,8 @@ describe("TasksBoard", () => {
     });
   });
 
-  describe("project selector", () => {
-    it("renders project dropdown with options", () => {
+  describe("filter bar", () => {
+    it("renders domain and project dropdowns", () => {
       mockUseTasks.projects = [
         { id: "proj-grim", title: "GRIM" },
         { id: "proj-kronos", title: "Kronos" },
@@ -202,9 +199,8 @@ describe("TasksBoard", () => {
       mockUseTasks.board = makeBoardData();
       render(<TasksBoard />);
 
-      // The EpicSelector renders a <select> with "All Projects" default
-      const select = screen.getByDisplayValue("All Projects");
-      expect(select).toBeDefined();
+      expect(screen.getByDisplayValue("All Domains")).toBeDefined();
+      expect(screen.getByDisplayValue("All Projects")).toBeDefined();
     });
 
     it("calls setSelectedProject when project changes", () => {
@@ -217,6 +213,15 @@ describe("TasksBoard", () => {
       const select = screen.getByDisplayValue("All Projects");
       fireEvent.change(select, { target: { value: "proj-grim" } });
       expect(mockUseTasks.setSelectedProject).toHaveBeenCalledWith("proj-grim");
+    });
+
+    it("calls setSelectedDomain when domain changes", () => {
+      mockUseTasks.board = makeBoardData();
+      render(<TasksBoard />);
+
+      const select = screen.getByDisplayValue("All Domains");
+      fireEvent.change(select, { target: { value: "projects" } });
+      expect(mockUseTasks.setSelectedDomain).toHaveBeenCalledWith("projects");
     });
   });
 
@@ -252,8 +257,8 @@ describe("TasksBoard", () => {
               title: "Closed Story",
               status: "closed",
               priority: "medium",
-              feature: "feat-test",
-              tasks: [],
+              project: "proj-test",
+              domain: "projects",
             },
           ],
         },

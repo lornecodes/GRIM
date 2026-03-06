@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import type { ChatMessage, Session, ConnectionStatus, UICommand } from "@/lib/types";
+import type { PoolJob, PoolMetrics, PoolStatus, TranscriptEntry } from "@/lib/poolTypes";
 
 // ── Chat slice ──
 
@@ -29,25 +30,49 @@ interface ChatSlice {
 
 type UICommandHandler = (cmd: UICommand) => void;
 
+type DashboardTab = "overview" | "pool";
+type AgentsTab = "team" | "jobs" | "studio" | "graph";
+
 interface UISlice {
   chatPanelOpen: boolean;
   activePage: string;
   sidebarCollapsed: boolean;
-  activeDashboardWidget: string;  // legacy alias — use activePage
-  ironclawStatus: "connected" | "disconnected" | "unknown";
+  dashboardTab: DashboardTab;
+  agentsTab: AgentsTab;
   _commandHandlers: Set<UICommandHandler>;
   // Actions
   setChatPanelOpen: (v: boolean) => void;
   toggleChatPanel: () => void;
   setActivePage: (id: string) => void;
   toggleSidebar: () => void;
-  setActiveDashboardWidget: (name: string) => void;  // legacy alias
-  setIronclawStatus: (s: "connected" | "disconnected" | "unknown") => void;
+  setDashboardTab: (tab: DashboardTab) => void;
+  setAgentsTab: (tab: AgentsTab) => void;
   subscribeUICommand: (handler: UICommandHandler) => () => void;
   dispatchUICommand: (cmd: UICommand) => void;
 }
 
-export type GrimStore = ChatSlice & UISlice;
+// ── Pool slice ──
+
+interface PoolSlice {
+  poolStatus: PoolStatus | null;
+  poolEnabled: boolean;
+  poolMetrics: PoolMetrics | null;
+  poolJobs: PoolJob[];
+  liveTranscripts: Record<string, TranscriptEntry[]>;
+  selectedJobId: string | null;
+  // Actions
+  setPoolStatus: (s: PoolStatus | null) => void;
+  setPoolEnabled: (v: boolean) => void;
+  setPoolMetrics: (m: PoolMetrics | null) => void;
+  setPoolJobs: (jobs: PoolJob[]) => void;
+  upsertPoolJob: (job: Partial<PoolJob> & { id: string }) => void;
+  appendTranscriptEntry: (jobId: string, entry: TranscriptEntry) => void;
+  clearTranscript: (jobId: string) => void;
+  setSelectedJobId: (id: string | null) => void;
+  navigateToJob: (jobId: string) => void;
+}
+
+export type GrimStore = ChatSlice & UISlice & PoolSlice;
 
 export const useGrimStore = create<GrimStore>()(
   devtools(
@@ -96,16 +121,16 @@ export const useGrimStore = create<GrimStore>()(
       chatPanelOpen: true,
       activePage: "dashboard",
       sidebarCollapsed: false,
-      activeDashboardWidget: "tokens",  // legacy alias
-      ironclawStatus: "unknown" as const,
+      dashboardTab: "overview" as DashboardTab,
+      agentsTab: "team" as AgentsTab,
       _commandHandlers: new Set(),
 
       setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
       toggleChatPanel: () => set((s) => ({ chatPanelOpen: !s.chatPanelOpen })),
       setActivePage: (activePage) => set({ activePage }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-      setActiveDashboardWidget: (id) => set({ activeDashboardWidget: id, activePage: id }),
-      setIronclawStatus: (ironclawStatus) => set({ ironclawStatus }),
+      setDashboardTab: (dashboardTab) => set({ dashboardTab }),
+      setAgentsTab: (agentsTab) => set({ agentsTab }),
 
       subscribeUICommand: (handler) => {
         get()._commandHandlers.add(handler);
@@ -124,11 +149,48 @@ export const useGrimStore = create<GrimStore>()(
             break;
           case "navigate_dashboard":
             if (cmd.payload?.widget && typeof cmd.payload.widget === "string") {
-              set({ activePage: cmd.payload.widget, activeDashboardWidget: cmd.payload.widget });
+              set({ activePage: cmd.payload.widget });
             }
             break;
         }
       },
+      // ── Pool state ──
+      poolStatus: null,
+      poolEnabled: true,
+      poolMetrics: null,
+      poolJobs: [],
+      liveTranscripts: {},
+      selectedJobId: null,
+
+      setPoolStatus: (poolStatus) => set({ poolStatus }),
+      setPoolEnabled: (poolEnabled) => set({ poolEnabled }),
+      setPoolMetrics: (poolMetrics) => set({ poolMetrics }),
+      setPoolJobs: (poolJobs) => set({ poolJobs }),
+      upsertPoolJob: (patch) =>
+        set((s) => {
+          const idx = s.poolJobs.findIndex((j) => j.id === patch.id);
+          if (idx >= 0) {
+            const updated = [...s.poolJobs];
+            updated[idx] = { ...updated[idx], ...patch };
+            return { poolJobs: updated };
+          }
+          // New job — add to front (requires full PoolJob; ignore partial inserts)
+          return s;
+        }),
+      appendTranscriptEntry: (jobId, entry) =>
+        set((s) => ({
+          liveTranscripts: {
+            ...s.liveTranscripts,
+            [jobId]: [...(s.liveTranscripts[jobId] || []), entry],
+          },
+        })),
+      clearTranscript: (jobId) =>
+        set((s) => {
+          const { [jobId]: _, ...rest } = s.liveTranscripts;
+          return { liveTranscripts: rest };
+        }),
+      setSelectedJobId: (selectedJobId) => set({ selectedJobId }),
+      navigateToJob: (jobId) => set({ activePage: "agents", agentsTab: "studio" as AgentsTab, selectedJobId: jobId }),
     }),
     { name: "grim-store" }
   )

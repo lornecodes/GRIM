@@ -61,9 +61,6 @@ export function TraceLog({ traces, defaultExpanded }: TraceLogProps) {
           {counts.tool && (
             <span className="text-trace-tool">{counts.tool} tools</span>
           )}
-          {counts.claw && (
-            <span className="text-orange-400">{counts.claw} claw</span>
-          )}
           {counts.llm && (
             <span className="text-trace-llm">{counts.llm} llm</span>
           )}

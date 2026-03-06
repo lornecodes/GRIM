@@ -14,6 +14,10 @@ import { useGrimStore } from "@/store";
 import { KnowledgeGraph, DOMAIN_COLORS } from "@/components/ui/KnowledgeGraph";
 import type { GraphData, VaultStats } from "@/hooks/useVaultExplorer";
 import { GrimTypingSprite } from "@/components/GrimTypingSprite";
+import { MetricsBar } from "./mission/MetricsBar";
+import { SlotGrid } from "./mission/SlotGrid";
+import { JobKanban } from "./mission/JobKanban";
+import { SubmitJobDialog } from "./mission/SubmitJobDialog";
 
 // ---------------------------------------------------------------------------
 // Trace category colors (matches TraceEntry.tsx)
@@ -23,7 +27,6 @@ const catColors: Record<string, string> = {
   node: "text-trace-node",
   llm: "text-trace-llm",
   tool: "text-trace-tool",
-  claw: "text-orange-400",
   graph: "text-trace-graph",
 };
 
@@ -43,10 +46,12 @@ function ViewAllLink({ page }: { page: string }) {
   );
 }
 
-function StatusDot({ ok }: { ok: boolean }) {
+function StatusDot({ ok, neutral }: { ok: boolean; neutral?: boolean }) {
   return (
     <div
-      className={`w-2 h-2 rounded-full ${ok ? "bg-green-400" : "bg-red-400"}`}
+      className={`w-2 h-2 rounded-full ${
+        neutral ? "bg-grim-border" : ok ? "bg-green-400" : "bg-red-400"
+      }`}
     />
   );
 }
@@ -55,7 +60,18 @@ function StatusDot({ ok }: { ok: boolean }) {
 // Main
 // ---------------------------------------------------------------------------
 
+const DASHBOARD_TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "pool", label: "Pool" },
+] as const;
+
 export function DashboardHome() {
+  const dashboardTab = useGrimStore((s) => s.dashboardTab);
+  const setDashboardTab = useGrimStore((s) => s.setDashboardTab);
+  const poolEnabled = useGrimStore((s) => s.poolEnabled);
+  const poolRunning = useGrimStore((s) => s.poolStatus?.running ?? false);
+  const [showSubmit, setShowSubmit] = useState(false);
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-8">
       {/* Header */}
@@ -63,7 +79,7 @@ export function DashboardHome() {
         <IconDashboard size={32} className="text-grim-accent" />
         <div>
           <h2 className="text-lg font-semibold text-grim-text">
-            Mission Control
+            Dashboard
           </h2>
           <p className="text-xs text-grim-text-dim">
             Overview of active systems
@@ -71,19 +87,195 @@ export function DashboardHome() {
         </div>
       </div>
 
-      {/* Tile grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <HealthWidgetTile />
-        <MemoryWidgetTile />
-        <ActiveAgentsTile />
-        <TokenUsageTile />
-        <SkillsWidgetTile />
-        <ModelsWidgetTile />
-        <EngineWidgetTile />
-        <SettingsWidgetTile />
-        <VaultWidgetTile />
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 border-b border-grim-border">
+        {DASHBOARD_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setDashboardTab(tab.id)}
+            className={`px-4 py-2 text-xs font-medium transition-colors ${
+              dashboardTab === tab.id
+                ? "border-b-2 border-grim-accent text-grim-accent"
+                : "text-grim-text-dim hover:text-grim-text"
+            }`}
+          >
+            {tab.label}
+            {tab.id === "pool" && (
+              <span className="ml-1.5">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${poolEnabled && poolRunning ? "bg-green-400" : "bg-grim-border"}`} />
+              </span>
+            )}
+          </button>
+        ))}
       </div>
+
+      {/* Overview tab */}
+      {dashboardTab === "overview" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <HealthWidgetTile />
+          <PoolWidgetTile />
+          <MemoryWidgetTile />
+          <ActiveAgentsTile />
+          <TokenUsageTile />
+          <SkillsWidgetTile />
+          <ModelsWidgetTile />
+          <SettingsWidgetTile />
+          <VaultWidgetTile />
+        </div>
+      )}
+
+      {/* Pool tab */}
+      {dashboardTab === "pool" && (
+        <PoolTabContent
+          poolEnabled={poolEnabled}
+          poolRunning={poolRunning}
+          showSubmit={showSubmit}
+          setShowSubmit={setShowSubmit}
+        />
+      )}
     </div>
+  );
+}
+
+function PoolTabContent({
+  poolEnabled,
+  poolRunning,
+  showSubmit,
+  setShowSubmit,
+}: {
+  poolEnabled: boolean;
+  poolRunning: boolean;
+  showSubmit: boolean;
+  setShowSubmit: (v: boolean) => void;
+}) {
+  if (!poolEnabled) {
+    return (
+      <div className="bg-grim-surface border border-grim-border rounded-lg p-6 text-center">
+        <div className="text-grim-text-dim text-[12px] mb-2">Pool Offline</div>
+        <div className="text-[11px] text-grim-text-dim">
+          Enable the execution pool in <span className="font-mono text-grim-accent">grim.yaml</span> with{" "}
+          <span className="font-mono text-grim-accent">pool.enabled: true</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-2 h-2 rounded-full ${poolRunning ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+          <span className="text-[10px] text-grim-text-dim">
+            {poolRunning ? "Pool Active" : "Pool Stopped"}
+          </span>
+        </div>
+        <button
+          onClick={() => setShowSubmit(true)}
+          className="text-[11px] px-3 py-1.5 rounded border border-grim-accent bg-grim-accent/10 text-grim-accent hover:bg-grim-accent/20 transition-colors"
+        >
+          Submit Job
+        </button>
+      </div>
+      <MetricsBar />
+      <SlotGrid />
+      <JobKanban />
+      <SubmitJobDialog open={showSubmit} onClose={() => setShowSubmit(false)} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pool Widget Tile
+// ---------------------------------------------------------------------------
+
+function PoolWidgetTile() {
+  const poolStatus = useGrimStore((s) => s.poolStatus);
+  const poolEnabled = useGrimStore((s) => s.poolEnabled);
+  const poolMetrics = useGrimStore((s) => s.poolMetrics);
+  const poolJobs = useGrimStore((s) => s.poolJobs);
+  const setDashboardTab = useGrimStore((s) => s.setDashboardTab);
+  const navigateToJob = useGrimStore((s) => s.navigateToJob);
+
+  const running = poolStatus?.running ?? false;
+  const busySlots = poolStatus?.slots.filter((s) => s.busy).length ?? 0;
+  const totalSlots = poolStatus?.slots.length ?? 0;
+  const activeJobs = poolJobs.filter((j) => j.status === "running").length;
+  const queuedJobs = poolJobs.filter((j) => j.status === "queued").length;
+
+  return (
+    <DashboardTile
+      title="Execution Pool"
+      headerRight={
+        <div className="flex items-center gap-2">
+          <StatusDot ok={poolEnabled && running} neutral={!poolEnabled} />
+          <button
+            onClick={() => setDashboardTab("pool")}
+            className="text-[10px] text-grim-accent hover:underline"
+          >
+            view all
+          </button>
+        </div>
+      }
+    >
+      {!poolEnabled ? (
+        <div className="text-xs text-grim-text-dim py-4 text-center">
+          Pool offline
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {/* Slot utilization */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-grim-text-dim w-16">Slots</span>
+            <div className="flex gap-1">
+              {(poolStatus?.slots ?? []).map((slot) => (
+                <button
+                  key={slot.slot_id}
+                  onClick={() => slot.current_job_id ? navigateToJob(slot.current_job_id) : undefined}
+                  className={`w-3 h-3 rounded-sm ${
+                    slot.busy
+                      ? "bg-green-400 animate-pulse cursor-pointer"
+                      : "bg-grim-border cursor-default"
+                  }`}
+                  title={slot.busy ? `${slot.slot_id}: ${slot.current_job_id}` : `${slot.slot_id}: idle`}
+                />
+              ))}
+            </div>
+            <span className="text-grim-text font-mono ml-auto">{busySlots}/{totalSlots}</span>
+          </div>
+
+          {/* Active/queued counts */}
+          <div className="grid grid-cols-3 gap-2">
+            <MiniStat label="Active" value={activeJobs} />
+            <MiniStat label="Queued" value={queuedJobs} />
+            <MiniStat label="Done" value={poolMetrics?.completed_count ?? 0} />
+          </div>
+
+          {/* Recent running jobs */}
+          {poolJobs
+            .filter((j) => j.status === "running")
+            .slice(0, 3)
+            .map((job) => (
+              <button
+                key={job.id}
+                onClick={() => navigateToJob(job.id)}
+                className="flex items-center gap-2 text-[10px] w-full text-left hover:bg-grim-surface/50 rounded px-1 py-0.5 transition-colors"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+                <span className="text-grim-text font-mono truncate">{job.id}</span>
+                <span className="text-grim-text-dim ml-auto">{job.job_type}</span>
+              </button>
+            ))}
+
+          {/* Open Pool tab */}
+          <button
+            onClick={() => setDashboardTab("pool")}
+            className="text-[10px] text-grim-accent hover:underline w-full text-center pt-1"
+          >
+            Open Pool
+          </button>
+        </div>
+      )}
+    </DashboardTile>
   );
 }
 
@@ -96,7 +288,6 @@ interface HealthData {
   env: string;
   vault: string | null;
   graph: boolean;
-  ironclaw?: string;
 }
 
 function HealthWidgetTile() {
@@ -140,11 +331,6 @@ function HealthWidgetTile() {
           <HealthRow label="Server" ok={ok} detail={health.env} />
           <HealthRow label="Graph" ok={health.graph} detail={health.graph ? "ready" : "not loaded"} />
           <HealthRow label="Vault" ok={!!health.vault} detail={health.vault || "not set"} />
-          <HealthRow
-            label="IronClaw"
-            ok={health.ironclaw === "connected"}
-            detail={health.ironclaw ?? "unknown"}
-          />
         </div>
       )}
     </DashboardTile>
@@ -572,116 +758,6 @@ function ModelsWidgetTile() {
       )}
     </DashboardTile>
   );
-}
-
-// ---------------------------------------------------------------------------
-// IronClaw Engine Widget Tile
-// ---------------------------------------------------------------------------
-
-interface EngineStatus {
-  available: boolean;
-  version?: string;
-  uptime_secs?: number;
-  metrics?: {
-    requests_total: number;
-    requests_failed: number;
-    active_sessions: number;
-  };
-}
-
-function EngineWidgetTile() {
-  const [status, setStatus] = useState<EngineStatus | null>(null);
-  const apiBase = process.env.NEXT_PUBLIC_GRIM_API || "";
-
-  useEffect(() => {
-    async function fetchStatus() {
-      try {
-        const resp = await fetch(`${apiBase}/api/ironclaw/status`);
-        if (resp.ok) setStatus(await resp.json());
-        else setStatus({ available: false });
-      } catch {
-        setStatus({ available: false });
-      }
-    }
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
-  }, [apiBase]);
-
-  const up = status?.available ?? false;
-
-  return (
-    <DashboardTile
-      title="IronClaw"
-      headerRight={
-        <div className="flex items-center gap-2">
-          <StatusDot ok={up} />
-          <ViewAllLink page="engine" />
-        </div>
-      }
-    >
-      {!status ? (
-        <div className="text-xs text-grim-text-dim py-4 text-center">
-          Loading...
-        </div>
-      ) : !up ? (
-        <div className="text-xs text-red-400 py-4 text-center">
-          Engine offline
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <EngineRow label="Version" value={`v${status.version}`} />
-          <EngineRow label="Uptime" value={formatUptime(status.uptime_secs || 0)} />
-          {status.metrics && (
-            <>
-              <EngineRow
-                label="Requests"
-                value={`${status.metrics.requests_total}`}
-              />
-              {status.metrics.requests_failed > 0 && (
-                <EngineRow
-                  label="Errors"
-                  value={`${status.metrics.requests_failed}`}
-                  warn
-                />
-              )}
-              <EngineRow
-                label="Sessions"
-                value={`${status.metrics.active_sessions}`}
-              />
-            </>
-          )}
-        </div>
-      )}
-    </DashboardTile>
-  );
-}
-
-function EngineRow({
-  label,
-  value,
-  warn,
-}: {
-  label: string;
-  value: string;
-  warn?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="text-grim-text-dim w-16">{label}</span>
-      <span className={`font-mono ${warn ? "text-red-400" : "text-grim-text"}`}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function formatUptime(secs: number): string {
-  if (secs < 60) return `${Math.round(secs)}s`;
-  if (secs < 3600) return `${Math.round(secs / 60)}m`;
-  const h = Math.floor(secs / 3600);
-  const m = Math.round((secs % 3600) / 60);
-  return `${h}h ${m}m`;
 }
 
 // ---------------------------------------------------------------------------

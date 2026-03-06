@@ -50,11 +50,15 @@ export interface UsePoolStatusResult {
   fetchJobsByType: (jobType: string) => Promise<PoolJob[]>;
 }
 
-const POLL_INTERVAL = 5000;
+const POLL_INTERVAL_ACTIVE = 5_000;
+const POLL_INTERVAL_DISABLED = 60_000;
 
 /**
  * Poll the execution pool status and job list.
  * Derives per-job-type counts for agent roster badges.
+ *
+ * When pool returns 503 (disabled), backs off to 60s polling
+ * and only checks /status (skips /jobs to avoid 503 spam).
  */
 export function usePoolStatus(): UsePoolStatusResult {
   const [poolStatus, setPoolStatus] = useState<PoolStatus | null>(null);
@@ -62,26 +66,35 @@ export function usePoolStatus(): UsePoolStatusResult {
   const [jobs, setJobs] = useState<PoolJob[]>([]);
   const [jobsByType, setJobsByType] = useState<JobsByType>({});
   const apiBase = process.env.NEXT_PUBLIC_GRIM_API || "";
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disabledRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     try {
       const resp = await fetch(`${apiBase}/api/pool/status`);
       if (resp.status === 503) {
-        setPoolEnabled(false);
-        setPoolStatus(null);
+        if (!disabledRef.current) {
+          disabledRef.current = true;
+          setPoolEnabled(false);
+          setPoolStatus(null);
+        }
         return;
       }
       if (resp.ok) {
+        disabledRef.current = false;
         setPoolEnabled(true);
         setPoolStatus(await resp.json());
       }
     } catch {
-      setPoolEnabled(false);
+      if (!disabledRef.current) {
+        disabledRef.current = true;
+        setPoolEnabled(false);
+      }
     }
   }, [apiBase]);
 
   const fetchJobs = useCallback(async () => {
+    if (disabledRef.current) return; // Skip when pool disabled
     try {
       const resp = await fetch(`${apiBase}/api/pool/jobs?limit=100`);
       if (!resp.ok) return;
@@ -106,14 +119,23 @@ export function usePoolStatus(): UsePoolStatusResult {
   }, [apiBase]);
 
   useEffect(() => {
+    // Initial fetch
     fetchStatus();
     fetchJobs();
-    intervalRef.current = setInterval(() => {
-      fetchStatus();
-      fetchJobs();
-    }, POLL_INTERVAL);
+
+    // Adaptive polling — fast when active, slow when disabled
+    const schedulePoll = () => {
+      const interval = disabledRef.current ? POLL_INTERVAL_DISABLED : POLL_INTERVAL_ACTIVE;
+      timerRef.current = setTimeout(async () => {
+        await fetchStatus();
+        await fetchJobs();
+        schedulePoll();
+      }, interval);
+    };
+    schedulePoll();
+
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [fetchStatus, fetchJobs]);
 

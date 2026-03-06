@@ -13,15 +13,12 @@ export interface TaskItem {
   priority?: string;
   estimate_days?: number;
   description?: string;
-  notes?: string;
   assignee?: string;
-  tasks?: TaskItem[];
-  task_count?: number;
-  tasks_done?: number;
+  job_id?: string;
+  domain?: string;
   tags?: string[];
   created?: string;
   updated?: string;
-  feature?: string;
   project?: string;
   acceptance_criteria?: string[];
   log?: string[];
@@ -41,6 +38,7 @@ export interface BacklogData {
 export interface ProjectInfo {
   id: string;
   title: string;
+  domain?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +51,7 @@ export function useTasks() {
   const [allStories, setAllStories] = useState<TaskItem[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
+  const [selectedDomain, setSelectedDomain] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState<string | null>(null);
@@ -74,11 +73,11 @@ export function useTasks() {
     }
   }, [apiBase]);
 
-  // ── Fetch board (filtered by project) ───────────────────────────────────
+  // ── Fetch board (filtered by project and/or domain) ───────────────────
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchBoard = useCallback(async () => {
-    // Cancel any in-flight request (e.g. when project changes quickly)
+    // Cancel any in-flight request (e.g. when filter changes quickly)
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -86,11 +85,15 @@ export function useTasks() {
 
     try {
       setLoading(true);
-      const projectParam = selectedProject ? `?project_id=${selectedProject}` : "";
+      const params = new URLSearchParams();
+      if (selectedProject) params.set("project_id", selectedProject);
+      if (selectedDomain) params.set("domain", selectedDomain);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
       const [boardRes, backlogRes, listRes] = await Promise.all([
-        fetch(`${apiBase}/api/tasks/board${projectParam}`, { signal }),
-        fetch(`${apiBase}/api/tasks/backlog${projectParam}`, { signal }),
-        fetch(`${apiBase}/api/tasks/list${projectParam}`, { signal }),
+        fetch(`${apiBase}/api/tasks/board${qs}`, { signal }),
+        fetch(`${apiBase}/api/tasks/backlog${qs}`, { signal }),
+        fetch(`${apiBase}/api/tasks/list${qs}`, { signal }),
       ]);
 
       if (!boardRes.ok) {
@@ -98,7 +101,6 @@ export function useTasks() {
         throw new Error(errData.error || `Board fetch failed: ${boardRes.status}`);
       }
       const boardData = await boardRes.json();
-      // Validate the response has the expected shape
       if (boardData && boardData.columns && typeof boardData.columns === "object") {
         setBoard(boardData);
       } else {
@@ -124,7 +126,7 @@ export function useTasks() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, selectedProject]);
+  }, [apiBase, selectedProject, selectedDomain]);
 
   // ── Move story between board columns ────────────────────────────────────
   const moveStory = useCallback(async (storyId: string, column: string) => {
@@ -148,16 +150,13 @@ export function useTasks() {
     }
   }, [apiBase, fetchBoard]);
 
-  // ── Create story or task ────────────────────────────────────────────────
+  // ── Create story ──────────────────────────────────────────────────────────
   const createItem = useCallback(async (args: {
-    type: string;
     title: string;
-    feat_id?: string;
-    story_id?: string;
+    proj_id: string;
     priority?: string;
     estimate_days?: number;
     description?: string;
-    notes?: string;
     assignee?: string;
   }) => {
     try {
@@ -179,7 +178,7 @@ export function useTasks() {
     }
   }, [apiBase, fetchBoard]);
 
-  // ── Update story or task fields ─────────────────────────────────────────
+  // ── Update story fields ───────────────────────────────────────────────────
   const updateItem = useCallback(async (itemId: string, fields: Record<string, unknown>) => {
     try {
       const res = await fetch(`${apiBase}/api/tasks/${itemId}`, {
@@ -197,10 +196,28 @@ export function useTasks() {
     }
   }, [apiBase, fetchBoard]);
 
-  // ── Update task status (quick move) ─────────────────────────────────────
-  const updateTaskStatus = useCallback(async (taskId: string, status: string) => {
-    await updateItem(taskId, { status });
-  }, [updateItem]);
+  // ── Dispatch story to pool ────────────────────────────────────────────────
+  const dispatchStory = useCallback(async (storyId: string, overrideAssignee?: string) => {
+    try {
+      const body: Record<string, string> = {};
+      if (overrideAssignee) body.override_assignee = overrideAssignee;
+      const res = await fetch(`${apiBase}/api/tasks/${storyId}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Dispatch failed: ${res.status}`);
+      }
+      const data = await res.json();
+      await fetchBoard();
+      return data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dispatch failed");
+      return null;
+    }
+  }, [apiBase, fetchBoard]);
 
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -218,13 +235,15 @@ export function useTasks() {
     projects,
     selectedProject,
     setSelectedProject,
+    selectedDomain,
+    setSelectedDomain,
     loading,
     error,
     moving,
     moveStory,
     createItem,
     updateItem,
-    updateTaskStatus,
+    dispatchStory,
     refresh: fetchBoard,
   };
 }

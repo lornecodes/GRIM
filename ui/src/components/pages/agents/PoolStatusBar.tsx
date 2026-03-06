@@ -1,5 +1,6 @@
 "use client";
 
+import { useGrimStore } from "@/store";
 import type { PoolStatus } from "@/hooks/usePoolStatus";
 
 interface PoolStatusBarProps {
@@ -10,12 +11,23 @@ interface PoolStatusBarProps {
 }
 
 export function PoolStatusBar({ status, enabled, activeJobs, queuedJobs }: PoolStatusBarProps) {
+  const setActivePage = useGrimStore((s) => s.setActivePage);
+  const setDashboardTab = useGrimStore((s) => s.setDashboardTab);
+
+  const goToPool = () => {
+    setActivePage("dashboard");
+    setDashboardTab("pool");
+  };
+
   if (!enabled) {
     return (
-      <div className="bg-grim-surface border border-grim-border rounded-lg px-4 py-2 flex items-center gap-3 text-xs font-mono text-grim-text-dim">
+      <button
+        onClick={goToPool}
+        className="bg-grim-surface border border-grim-border rounded-lg px-4 py-2 flex items-center gap-3 text-xs font-mono text-grim-text-dim hover:border-grim-accent/30 transition-colors w-full"
+      >
         <div className="w-2 h-2 rounded-full bg-grim-border flex-shrink-0" />
         <span>Pool offline</span>
-      </div>
+      </button>
     );
   }
 
@@ -24,7 +36,10 @@ export function PoolStatusBar({ status, enabled, activeJobs, queuedJobs }: PoolS
   const running = status?.running ?? false;
 
   return (
-    <div className="bg-grim-surface border border-grim-border rounded-lg px-4 py-2 flex items-center gap-4 text-xs font-mono">
+    <button
+      onClick={goToPool}
+      className="bg-grim-surface border border-grim-border rounded-lg px-4 py-2 flex items-center gap-4 text-xs font-mono hover:border-grim-accent/30 transition-colors w-full"
+    >
       {/* Pool running indicator */}
       <div className="flex items-center gap-1.5">
         <div
@@ -62,6 +77,6 @@ export function PoolStatusBar({ status, enabled, activeJobs, queuedJobs }: PoolS
           <span className="text-grim-text-dim">idle</span>
         )}
       </div>
-    </div>
+    </button>
   );
 }

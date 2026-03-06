@@ -1,1 +1,1 @@
-export const GRIM_VERSION = "0.0.10.2";
+export const GRIM_VERSION = "0.0.12";

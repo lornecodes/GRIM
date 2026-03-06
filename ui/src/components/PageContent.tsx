@@ -17,7 +17,7 @@ export function PageContent() {
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="text-grim-accent text-3xl mb-3 font-bold">G</div>
-              <div className="text-sm text-grim-text-dim">GRIM Mission Control</div>
+              <div className="text-sm text-grim-text-dim">GRIM Agent Companion</div>
             </div>
           </div>
         )}
