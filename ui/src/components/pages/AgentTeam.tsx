@@ -15,6 +15,7 @@ import { LiveTranscript } from "./studio/LiveTranscript";
 import { DiffViewer } from "./studio/DiffViewer";
 import { WorkspaceBrowser } from "./studio/WorkspaceBrowser";
 import { AuditPanel } from "./studio/AuditPanel";
+import { CommitHistory } from "./studio/CommitHistory";
 
 // Lazy-load Graph Studio (heavy — contains ForceGraph2D canvas)
 const GraphStudio = lazy(() =>
@@ -271,7 +272,8 @@ function JobsTabContent({
 const STUDIO_TABS = [
   { id: "transcript", label: "Transcript" },
   { id: "diff", label: "Diff" },
-  { id: "workspace", label: "Workspace" },
+  { id: "workspace", label: "Files" },
+  { id: "commits", label: "Commits" },
   { id: "audit", label: "Audit" },
 ] as const;
 
@@ -352,6 +354,7 @@ function StudioTabContent() {
         )}
         {studioTab === "diff" && <DiffViewer diff={diff} />}
         {studioTab === "workspace" && <WorkspaceBrowser workspaceId={job.workspace_id} />}
+        {studioTab === "commits" && <CommitHistory workspaceId={job.workspace_id} />}
         {studioTab === "audit" && <AuditPanel transcript={transcript} jobType={job.job_type} />}
       </div>
 

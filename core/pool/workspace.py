@@ -193,6 +193,41 @@ class WorkspaceManager:
         except RuntimeError:
             return None
 
+    async def get_commits(
+        self, workspace_id: str, base_branch: str = "main",
+    ) -> list[dict] | None:
+        """Get commit history for workspace branch vs base.
+
+        Returns list of {hash, short_hash, message, author, date} dicts,
+        or None if workspace not found.
+        """
+        ws = self._workspaces.get(workspace_id)
+        if ws is None:
+            return None
+
+        try:
+            result = await _run_git(
+                ws.worktree_path,
+                "log", f"origin/{base_branch}..HEAD",
+                "--format=%H|%h|%s|%an|%aI",
+            )
+            if not result:
+                return []
+            commits = []
+            for line in result.splitlines():
+                parts = line.split("|", 4)
+                if len(parts) == 5:
+                    commits.append({
+                        "hash": parts[0],
+                        "short_hash": parts[1],
+                        "message": parts[2],
+                        "author": parts[3],
+                        "date": parts[4],
+                    })
+            return commits
+        except RuntimeError:
+            return None
+
     async def merge_to_base(
         self, workspace_id: str, base_branch: str = "main",
     ) -> bool:

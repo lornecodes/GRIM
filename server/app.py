@@ -2492,6 +2492,24 @@ async def api_pool_workspace_diff(workspace_id: str, base_branch: str = "main"):
     })
 
 
+@app.get("/api/pool/workspaces/{workspace_id}/commits")
+async def api_pool_workspace_commits(workspace_id: str, base_branch: str = "main"):
+    """Get commit history for a workspace branch."""
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+    mgr = _execution_pool.workspace_manager
+    if mgr is None:
+        return JSONResponse({"error": "Workspaces not configured"}, status_code=503)
+    ws = mgr.get(workspace_id)
+    if ws is None:
+        return JSONResponse({"error": "Workspace not found"}, status_code=404)
+    commits = await mgr.get_commits(workspace_id, base_branch)
+    return JSONResponse({
+        "workspace_id": workspace_id,
+        "commits": commits or [],
+    })
+
+
 @app.post("/api/pool/workspaces/{workspace_id}/merge")
 async def api_pool_workspace_merge(workspace_id: str, request: Request):
     """Squash-merge a workspace branch back to base and cleanup."""
