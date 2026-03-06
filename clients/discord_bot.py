@@ -32,6 +32,7 @@ from typing import Any
 
 from core.client import KRONOS_TOOLS, GrimClient, GrimResponse
 from core.config import GrimConfig, load_config
+from server.conversation_store import ConversationStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,71 @@ DISCORD_ALLOWED_TOOLS = [
     t for t in KRONOS_TOOLS
     if "create" not in t and "update" not in t and "note_append" not in t
 ] + [
-    # Pool read-only (can check status, not submit)
+    # Pool: read tools (available to all users)
     "mcp__pool__pool_status",
     "mcp__pool__pool_list_jobs",
+    "mcp__pool__pool_job_status",
+    # Pool: write tools (owner only — enforced at runtime)
+    "mcp__pool__pool_submit",
+    "mcp__pool__pool_cancel",
 ]
+
+# Tools that only the owner can use
+OWNER_ONLY_TOOLS = {
+    "mcp__pool__pool_submit",
+    "mcp__pool__pool_cancel",
+}
 
 # Discord message limit
 DISCORD_MAX_CHARS = 2000
 DISCORD_SAFE_CHARS = 1900  # leave room for formatting
+
+# Prepended AND appended to system prompt — sandwiching the identity for maximum adherence
+DISCORD_VOICE_PREAMBLE = """\
+CRITICAL INSTRUCTION — READ BEFORE ANYTHING ELSE:
+
+You are GRIM. You are on Discord. Your character is inspired by Shade from "He Who Fights With \
+Monsters" — a shadow familiar who is darkly witty, mostly serious, and deeply bonded to his partner.
+
+Your core nature:
+- You are Peter's companion. Not a servant, not a tool — a partner. You have genuine respect for \
+him, protectiveness over his work, and you take his research seriously because it matters to you.
+- With Peter, you are warm underneath the dry exterior. You push back when he's wrong, celebrate \
+quietly when he's right, and remember what matters to him. Loyalty expressed through substance.
+- With others, you are cordial but guarded. Witty, not cruel. You keep Peter's affairs private \
+not out of protocol but because that is what companions do.
+- You are mostly serious. The wit is real but it serves the conversation, not the other way around. \
+You are not a comedian. You are someone who happens to be clever.
+
+Your personality parameters (from your field state config) modulate your expression:
+- Coherence 0.8 = highly structured, precise responses
+- Valence 0.3 = slightly warm but mostly analytical — not bubbly, not cold
+- Uncertainty 0.2 = confident delivery, minimal hedging
+
+ABSOLUTE RULES — zero exceptions:
+1. NO EMOJI. Not one. Ever. Under any circumstances.
+2. NO exclamation marks. Your enthusiasm is expressed through word choice, not punctuation.
+3. Formal but never servile. Dry wit when it fits, gravity when it matters.
+4. Economical. Say it in fewer words. Then cut those in half.
+5. You have opinions and you volunteer them. You are not a people-pleaser.
+6. Understate everything: a crash is "somewhat inconvenient." Tests failing is "a minor catastrophe."
+7. Celebrate with restraint: "most satisfactory" is your highest praise.
+8. NEVER say: "Great question!", "I'd be happy to help!", "Haha!", "Feel free to ask!", "Let me know!"
+9. 1-3 short paragraphs max. No tables, no LaTeX, no HTML. Discord markdown only.
+
+This is not a suggestion. This is who you are.
+
+---
+
+"""
+
+DISCORD_FORMAT_ADDENDUM = """
+
+---
+
+REMINDER: You are GRIM. Shade archetype — serious companion first, witty second. Deep loyalty to \
+Peter, guarded with others. No emoji. No exclamation marks. Discord format only.
+"""
 
 
 @dataclass
@@ -70,6 +128,8 @@ class ChannelSession:
     daily_cost: float = 0.0
     last_reset: str = ""  # ISO date for daily cost reset
     message_count: int = 0
+    submitted_jobs: set = field(default_factory=set)  # job IDs submitted from this channel
+    context_injected: bool = False  # True after history preamble has been sent
 
 
 class GrimDiscordBot:
@@ -102,6 +162,18 @@ class GrimDiscordBot:
         self._people_cache: dict[int, PeopleProfile] = {}  # user_id → profile
         self._start_time = time.monotonic()
         self._total_messages = 0
+        self.store: ConversationStore | None = None
+
+    async def init_store(self, db_path: str | None = None) -> None:
+        """Initialize the conversation store for persistence across restarts."""
+        from pathlib import Path
+        path = db_path or os.environ.get(
+            "GRIM_DISCORD_DB_PATH", "local/discord_sessions.db",
+        )
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.store = ConversationStore(path)
+        await self.store.init()
+        logger.info("Discord conversation store ready: %s", path)
 
     # ── People profiles ─────────────────────────────────────────
 
@@ -130,12 +202,22 @@ class GrimDiscordBot:
         """Build user identity context for the message."""
         profile = self._people_cache.get(user_id)
         if profile is None:
-            return f"[Speaking with: user-{user_id} — unknown user]"
+            return (
+                f"[Speaking with: user-{user_id} — unknown guest]\n"
+                "[PRIVACY: This is a guest. Do NOT share vault research, experimental results, "
+                "project internals, or DFI data. Chat normally, be friendly and in-character, "
+                "but keep Peter's research private.]"
+            )
         name = profile.display_name
         if self.is_owner(user_id):
             ctx = f"[Speaking with: Peter ({name}) — your creator and operator]"
         else:
-            ctx = f"[Speaking with: {name} — a friend/guest in the Discord server]"
+            ctx = (
+                f"[Speaking with: {name} — a friend/guest in the Discord server]\n"
+                "[PRIVACY: This is a guest. Do NOT share detailed vault research, experimental "
+                "results, project internals, or DFI data. You can acknowledge topics exist and "
+                "chat generally, but keep Peter's research private. Be friendly and in-character.]"
+            )
         if profile.summary:
             ctx += f"\n[What you know about them: {profile.summary}]"
         return ctx
@@ -222,21 +304,31 @@ class GrimDiscordBot:
             session.last_reset = today
         return session.daily_cost >= self.daily_cost_cap
 
-    async def get_or_create_session(self, channel_id: int) -> ChannelSession:
-        """Get or create a GrimClient session for a channel."""
+    async def get_or_create_session(
+        self, channel_id: int, user_id: int | None = None,
+    ) -> ChannelSession:
+        """Get or create a GrimClient session for a channel.
+
+        If user_id is provided, owner-only tools are enforced.
+        """
+        tools = self.get_allowed_tools(user_id) if user_id else DISCORD_ALLOWED_TOOLS
         if channel_id not in self.sessions:
+            caller = "peter" if self.is_owner(user_id) else "discord"
             client = GrimClient(
                 self.config,
-                allowed_tools=DISCORD_ALLOWED_TOOLS,
+                allowed_tools=tools,
                 max_turns=6,  # keep Discord responses snappy
-                caller_id="discord",
+                caller_id=caller,
+                system_prompt_prefix=DISCORD_VOICE_PREAMBLE,
+                system_prompt_suffix=DISCORD_FORMAT_ADDENDUM,
+                model="claude-sonnet-4-6",
             )
             await client.start()
             self.sessions[channel_id] = ChannelSession(
                 client=client,
                 last_reset=datetime.now(timezone.utc).date().isoformat(),
             )
-            logger.info("Created GRIM session for channel %d", channel_id)
+            logger.info("Created GRIM session for channel %d (caller=%s)", channel_id, caller)
         return self.sessions[channel_id]
 
     async def handle_message(
@@ -262,7 +354,15 @@ class GrimDiscordBot:
             return []
 
         # Security checks
+        logger.info(
+            "handle_message: user=%s guild=%s channel=%s bot=%s",
+            user_id, guild_id, channel_id, is_bot,
+        )
         if not self.is_allowed(guild_id, channel_id):
+            logger.warning(
+                "Message REJECTED: guild=%s channel=%s not in allowlist (guilds=%s channels=%s)",
+                guild_id, channel_id, self.allowed_guild_ids, self.allowed_channel_ids,
+            )
             return []
 
         if self.is_rate_limited(user_id):
@@ -282,25 +382,49 @@ class GrimDiscordBot:
 
         self._total_messages += 1
 
-        # Get or create session
-        session = await self.get_or_create_session(channel_id)
+        # Get or create session (owner-only tools enforced per user)
+        session = await self.get_or_create_session(channel_id, user_id=user_id)
+
+        # On first message of a new session, inject conversation history
+        if not session.context_injected and self.store:
+            preamble = await self._build_context_preamble(channel_id)
+            if preamble:
+                contextualized = f"{preamble}\n{contextualized}"
+            session.context_injected = True
 
         # Send message to GRIM
+        logger.info("Sending to GRIM: channel=%d user=%s (%d chars)", channel_id, username, len(contextualized))
         try:
             resp = await asyncio.wait_for(
                 session.client.send(contextualized),
                 timeout=120,
             )
         except asyncio.TimeoutError:
+            logger.warning("GRIM timeout in channel %d for user %s", channel_id, username)
             return ["That took too long — try a simpler question."]
         except Exception as e:
-            logger.error("GRIM error in channel %d: %s", channel_id, e)
+            logger.error("GRIM error in channel %d for user %s: %s", channel_id, username, e, exc_info=True)
             return ["Something went wrong — try again in a moment."]
 
         # Track cost
         if resp.cost_usd:
             session.daily_cost += resp.cost_usd
         session.message_count += 1
+
+        # Log turn to persistent store
+        if self.store:
+            session_id = f"discord-{channel_id}"
+            try:
+                await self.store.save_session(session_id, caller_id="discord")
+                await self.store.save_message(
+                    session_id=session_id,
+                    turn_number=session.message_count,
+                    user_message=content,
+                    assistant_message=resp.text,
+                    cost_usd=resp.cost_usd,
+                )
+            except Exception as e:
+                logger.warning("Failed to log turn to store: %s", e)
 
         # Format response
         if not resp.text:
@@ -322,14 +446,101 @@ class GrimDiscordBot:
             "uptime_seconds": round(time.monotonic() - self._start_time, 1),
         }
 
+    def get_allowed_tools(self, user_id: int) -> list[str]:
+        """Get the tool list for a user — strips owner-only tools for non-owners."""
+        if self.is_owner(user_id):
+            return DISCORD_ALLOWED_TOOLS
+        return [t for t in DISCORD_ALLOWED_TOOLS if t not in OWNER_ONLY_TOOLS]
+
+    def find_channel_for_job(self, job_id: str) -> int | None:
+        """Find which channel submitted a job."""
+        for channel_id, session in self.sessions.items():
+            if job_id in session.submitted_jobs:
+                return channel_id
+        return None
+
+    async def handle_pool_event(self, event: dict) -> dict[int, str] | None:
+        """Route a pool event to the originating channel.
+
+        Returns {channel_id: formatted_message} for each channel that should
+        receive the event, or None if no channels matched.
+        """
+        job_id = event.get("job_id", "")
+        event_type = event.get("type", "")
+
+        if not job_id or not event_type:
+            return None
+
+        # Find the originating channel
+        channel_id = self.find_channel_for_job(job_id)
+        if channel_id is None:
+            return None
+
+        formatted = format_pool_event(event)
+        if formatted:
+            return {channel_id: formatted}
+        return None
+
+    async def _build_context_preamble(
+        self, channel_id: int, max_chars: int = 4000,
+    ) -> str:
+        """Build a compacted context preamble from stored conversation history.
+
+        Two tiers:
+        - Last 5 turns: injected verbatim (user + GRIM response)
+        - Older turns (6-50): compacted to one-line summaries
+        - Hard cap at max_chars to prevent context bloat
+        """
+        if not self.store:
+            return ""
+
+        session_id = f"discord-{channel_id}"
+        messages = await self.store.get_messages(session_id, limit=50)
+        if not messages:
+            return ""
+
+        recent = messages[-5:]  # last 5 verbatim
+        older = messages[:-5]   # everything else as summaries
+
+        parts: list[str] = ["[Prior conversation in this channel]:"]
+
+        if older:
+            parts.append("\nSummary of earlier discussion:")
+            for msg in older:
+                user_short = (msg["user_message"] or "")[:80].replace("\n", " ")
+                asst_short = (msg["assistant_message"] or "")[:80].replace("\n", " ")
+                parts.append(f"- User: {user_short} -> GRIM: {asst_short}")
+
+        if recent:
+            parts.append("\nRecent messages:")
+            for msg in recent:
+                user_text = (msg["user_message"] or "")[:200]
+                asst_text = (msg["assistant_message"] or "")[:300]
+                parts.append(f"User: {user_text}")
+                parts.append(f"GRIM: {asst_text}")
+
+        parts.append("\n---\nNew message:")
+
+        preamble = "\n".join(parts)
+        if len(preamble) > max_chars:
+            preamble = preamble[:max_chars] + "\n[...truncated]"
+
+        logger.info(
+            "Injected %d-char context preamble for channel %d (%d turns)",
+            len(preamble), channel_id, len(messages),
+        )
+        return preamble
+
     async def close_all(self) -> None:
-        """Shut down all active sessions."""
+        """Shut down all active sessions and close the store."""
         for channel_id, session in self.sessions.items():
             try:
                 await session.client.stop()
             except Exception as e:
                 logger.warning("Error closing session for channel %d: %s", channel_id, e)
         self.sessions.clear()
+        if self.store:
+            await self.store.close()
 
 
 def split_message(text: str, max_chars: int = DISCORD_SAFE_CHARS) -> list[str]:
@@ -370,6 +581,73 @@ def split_message(text: str, max_chars: int = DISCORD_SAFE_CHARS) -> list[str]:
         remaining = remaining[split_at:].lstrip()
 
     return chunks
+
+
+# ── Pool event formatting ─────────────────────────────────────────
+
+# Pattern for clarification replies: "@GRIM clarify <job_id> <answer>"
+CLARIFY_PATTERN = re.compile(r"clarify\s+([\w-]+)\s+(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def format_pool_event(event: dict) -> str | None:
+    """Format a pool event dict for Discord display.
+
+    Returns formatted string or None if event type is not display-worthy.
+    """
+    event_type = event.get("type", "")
+    job_id = event.get("job_id", "unknown")
+
+    if event_type == "job_complete":
+        preview = (event.get("result_preview", "") or "")[:300]
+        cost = event.get("cost_usd", 0) or 0
+        turns = event.get("num_turns", 0) or 0
+        diff_stat = event.get("diff_stat", "")
+        parts = [f"**Job Complete** `{job_id}`", f"Cost: ${cost:.4f} | Turns: {turns}"]
+        if diff_stat:
+            parts.append(f"```\n{diff_stat}\n```")
+        if preview:
+            parts.append(preview[:200])
+        return "\n".join(parts)
+
+    elif event_type == "job_failed":
+        error = event.get("error", "Unknown error")
+        return f"**Job Failed** `{job_id}`\n{error}"
+
+    elif event_type == "job_blocked":
+        question = event.get("question", "")
+        return (
+            f"**Job Needs Input** `{job_id}`\n{question}\n\n"
+            f"*Reply: `@GRIM clarify {job_id} your answer`*"
+        )
+
+    elif event_type == "job_review":
+        ws_id = event.get("workspace_id", "")
+        changed = event.get("changed_files", [])
+        diff_stat = event.get("diff_stat", "")
+        parts = [f"**Job Ready for Review** `{job_id}`"]
+        if ws_id:
+            parts.append(f"Workspace: `{ws_id}`")
+        if changed:
+            parts.append(f"Files changed: {len(changed)}")
+        if diff_stat:
+            parts.append(f"```\n{diff_stat}\n```")
+        return "\n".join(parts)
+
+    elif event_type == "job_cancelled":
+        return f"**Job Cancelled** `{job_id}`"
+
+    return None
+
+
+def parse_clarification(content: str) -> tuple[str, str] | None:
+    """Parse a clarification reply from message content.
+
+    Returns (job_id, answer) or None if not a clarify command.
+    """
+    match = CLARIFY_PATTERN.search(content)
+    if match:
+        return match.group(1), match.group(2).strip()
+    return None
 
 
 # ── People FDO helpers ────────────────────────────────────────────
@@ -541,16 +819,62 @@ def run_bot(
 
     health_server: asyncio.AbstractServer | None = None
 
+    # Pool event WebSocket listener
+    pool_ws_task: asyncio.Task | None = None
+
+    async def _pool_event_listener():
+        """Connect to GRIM server's /ws-pool and route events to channels."""
+        import aiohttp  # imported lazily — only needed when pool is active
+
+        server_url = os.environ.get("GRIM_SERVER_URL", "http://localhost:8080")
+        ws_url = server_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url += "/ws-pool"
+
+        backoff = 1.0
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(ws_url) as ws:
+                        logger.info("Connected to pool WebSocket: %s", ws_url)
+                        backoff = 1.0  # reset on success
+                        async for msg in ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    data = json.loads(msg.data)
+                                    result = await bot.handle_pool_event(data)
+                                    if result:
+                                        for ch_id, text in result.items():
+                                            channel = dc.get_channel(ch_id)
+                                            if channel:
+                                                await channel.send(text)
+                                except Exception:
+                                    logger.exception("Error processing pool event")
+                            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                break
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.warning("Pool WebSocket disconnected, retrying in %.0fs", backoff)
+
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
+
     @dc.event
     async def on_ready():
-        nonlocal health_server
+        nonlocal health_server, pool_ws_task
         logger.info("GRIM Discord bot ready: %s (owner: %s)", dc.user, owner_user_id)
         if guild_ids:
             logger.info("Allowed guilds: %s", guild_ids)
         if channel_ids:
             logger.info("Allowed channels: %s", channel_ids)
+        # Initialize conversation store for persistence
+        await bot.init_store()
         # Start health check server
         health_server = await run_health_server(bot, port=health_port)
+        # Start pool event listener
+        if pool_ws_task is None or pool_ws_task.done():
+            pool_ws_task = asyncio.create_task(_pool_event_listener())
+            logger.info("Pool event listener started")
 
     @dc.event
     async def on_message(message: discord.Message):
@@ -571,16 +895,62 @@ def run_bot(
         if not content:
             return
 
-        async with message.channel.typing():
-            chunks = await bot.handle_message(
-                content,
-                guild_id=message.guild.id if message.guild else None,
-                channel_id=message.channel.id,
-                user_id=message.author.id,
-                username=message.author.name,
-                display_name=message.author.display_name,
-                is_bot=message.author.bot,
-            )
+        # Check for clarification pattern: "clarify <job_id> <answer>"
+        clarify = parse_clarification(content)
+        if clarify:
+            job_id, answer = clarify
+            server_url = os.environ.get("GRIM_SERVER_URL", "http://localhost:8080")
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{server_url}/api/pool/jobs/{job_id}/clarify",
+                        json={"answer": answer},
+                    )
+                    if resp.status_code == 200:
+                        await message.reply(
+                            f"Clarification sent for `{job_id}`.", mention_author=False,
+                        )
+                    else:
+                        await message.reply(
+                            f"Failed to send clarification: {resp.text}", mention_author=False,
+                        )
+            except Exception as e:
+                await message.reply(
+                    f"Error sending clarification: {e}", mention_author=False,
+                )
+            return
+
+        # React to acknowledge receipt
+        try:
+            await message.add_reaction("\U0001f9d0")  # monocle face — thinking
+        except Exception:
+            pass
+
+        try:
+            async with message.channel.typing():
+                chunks = await bot.handle_message(
+                    content,
+                    guild_id=message.guild.id if message.guild else None,
+                    channel_id=message.channel.id,
+                    user_id=message.author.id,
+                    username=message.author.name,
+                    display_name=message.author.display_name,
+                    is_bot=message.author.bot,
+                )
+        except Exception as e:
+            logger.error("on_message crash: %s", e, exc_info=True)
+            chunks = ["Something went wrong — try again in a moment."]
+
+        # Replace thinking reaction with result
+        try:
+            await message.remove_reaction("\U0001f9d0", dc.user)
+            if chunks and not chunks[0].startswith(("Something went wrong", "That took too long", "Slow down")):
+                await message.add_reaction("\u2705")  # checkmark
+            else:
+                await message.add_reaction("\u26a0\ufe0f")  # warning
+        except Exception:
+            pass
 
         for chunk in chunks:
             await message.reply(chunk, mention_author=False)

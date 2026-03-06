@@ -94,6 +94,58 @@ async def usage_recent(limit: int = 50):
     return JSONResponse(await _tracker.recent(limit=min(limit, 500)))
 
 
+# ── System prompt hoisting ─────────────────────────────────
+
+def _hoist_system_to_messages(payload: dict, original_body: bytes) -> bytes:
+    """Move the ``system`` field into the first user message.
+
+    CLIProxyAPI replaces the ``system`` API parameter with its own Claude Code
+    instructions.  To preserve GRIM's system prompt we extract it here and
+    prepend it to the first user message.  The downstream payload filter then
+    strips the (now-replaced) system field harmlessly.
+
+    Returns the (possibly rewritten) body bytes.
+    """
+    system = payload.get("system")
+    if not system:
+        return original_body
+
+    # Normalise system to a plain string (it may be a list of content blocks)
+    if isinstance(system, list):
+        parts = []
+        for block in system:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        system_text = "\n".join(parts)
+    else:
+        system_text = str(system)
+
+    if not system_text.strip():
+        return original_body
+
+    # Prepend to the first user message
+    messages = payload.get("messages", [])
+    if messages and messages[0].get("role") == "user":
+        first = messages[0]
+        content = first.get("content", "")
+        if isinstance(content, str):
+            first["content"] = system_text + "\n\n---\n\n" + content
+        elif isinstance(content, list):
+            # Content-block style: prepend a text block
+            first["content"] = [{"type": "text", "text": system_text + "\n\n---\n\n"}] + content
+    else:
+        # No user message yet — insert a synthetic one
+        messages.insert(0, {"role": "user", "content": system_text})
+        payload["messages"] = messages
+
+    # Remove the system field so CLIProxyAPI's injection (+ filter) is the only thing there
+    payload.pop("system", None)
+
+    return json.dumps(payload).encode()
+
+
 # ── Proxy ───────────────────────────────────────────────────
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
@@ -120,6 +172,13 @@ async def proxy(request: Request, path: str):
         try:
             payload = json.loads(body)
             is_streaming = payload.get("stream", False)
+            # Move system prompt into messages before CLIProxyAPI can replace it.
+            # CLIProxyAPI's checkSystemInstructions() overwrites the system field
+            # with "You are Claude Code..." — so we inject our system content as
+            # a prefixed user message instead.
+            body = _hoist_system_to_messages(payload, body)
+            # Update Content-Length after body rewrite
+            headers["content-length"] = str(len(body))
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
 
