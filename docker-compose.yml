@@ -114,6 +114,8 @@ services:
       - KRONOS_SKILLS_PATH=/app/skills
       - KRONOS_REDIS_URL=redis://redis:6379/0
       - GRIM_REDIS_URL=redis://redis:6379/0
+      - POOL_JOB_TIMEOUT_SECS=${POOL_JOB_TIMEOUT_SECS:-600}
+      - POOL_DISCORD_WEBHOOK_URL=${POOL_DISCORD_WEBHOOK_URL:-}
     command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
     volumes:
       - ${WORKSPACE_PATH:-..}:/workspace

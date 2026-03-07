@@ -149,12 +149,30 @@ async def pool_job_status(job_id: str) -> str:
         if job.clarification_answer:
             lines.append(f"Clarification A: {job.clarification_answer}")
 
+        if job.target_repo:
+            lines.append(f"Target repo: {job.target_repo}")
+
         lines.append(f"\nInstructions: {job.instructions[:500]}")
 
         if job.result:
             lines.append(f"\nResult: {job.result[:1000]}")
         if job.error:
             lines.append(f"\nError: {job.error}")
+
+        if job.transcript:
+            lines.append(f"\nTranscript ({len(job.transcript)} messages):")
+            for entry in job.transcript[-10:]:
+                role = entry.get("role", "?")
+                content = entry.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        btype = block.get("type", "")
+                        if btype == "text":
+                            text = block.get("text", "")
+                            preview = text[:200] + "..." if len(text) > 200 else text
+                            lines.append(f"  [{role}] {preview}")
+                        elif btype == "tool_use":
+                            lines.append(f"  [{role}] tool: {block.get('name', '?')}")
 
         return "\n".join(lines)
 

@@ -158,7 +158,7 @@ class TestConfigDefaults:
         assert cfg.pool_num_slots == 2
         assert cfg.pool_poll_interval == 2.0
         assert cfg.pool_max_turns_per_job == 20
-        assert cfg.pool_job_timeout_secs == 300
+        assert cfg.pool_job_timeout_secs == 600
 
     def test_config_pool_db_path(self):
         from core.config import GrimConfig

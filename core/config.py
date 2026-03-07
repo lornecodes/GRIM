@@ -82,7 +82,7 @@ class GrimConfig:
     pool_poll_interval: float = 2.0
     pool_db_path: Path = field(default_factory=lambda: Path("local/pool.db"))
     pool_max_turns_per_job: int = 20
-    pool_job_timeout_secs: int = 300
+    pool_job_timeout_secs: int = 600
     pool_discord_webhook_url: str = ""
     pool_kronos_url: str = ""  # SSE URL (e.g. "http://127.0.0.1:8319"); empty = stdio
     pool_warm_on_start: bool = True  # health-check Kronos before accepting jobs
@@ -163,6 +163,12 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     workspace_override = os.getenv("GRIM_WORKSPACE_ROOT")
     if workspace_override:
         cfg.workspace_root = Path(workspace_override)
+
+    # Pool env var overrides (for Docker)
+    if os.getenv("POOL_JOB_TIMEOUT_SECS"):
+        cfg.pool_job_timeout_secs = int(os.getenv("POOL_JOB_TIMEOUT_SECS"))
+    if os.getenv("POOL_DISCORD_WEBHOOK_URL"):
+        cfg.pool_discord_webhook_url = os.getenv("POOL_DISCORD_WEBHOOK_URL")
 
     # Resolve relative paths against grim_root
     cfg.vault_path = _resolve(cfg.vault_path, grim_root)
