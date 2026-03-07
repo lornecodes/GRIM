@@ -1116,12 +1116,17 @@ def run_bot(
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
                                     data = json.loads(msg.data)
+                                    event_type = data.get("event_type", data.get("type", "?"))
+                                    logger.debug("WS event received: %s (job=%s)", event_type, data.get("job_id", "?"))
                                     result = await bot.handle_pool_event(data)
                                     if result:
                                         for ch_id, text in result.items():
                                             channel = dc.get_channel(ch_id)
                                             if channel:
                                                 await channel.send(text)
+                                                logger.info("Sent daemon event to channel %d: %s", ch_id, event_type)
+                                            else:
+                                                logger.warning("Channel %d not found for event %s", ch_id, event_type)
                                 except Exception:
                                     logger.exception("Error processing pool event")
                             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
