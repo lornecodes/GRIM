@@ -549,6 +549,15 @@ class GrimClient:
         if turns:
             self._total_turns += turns
 
+        logger.info(
+            "GrimClient response: turns=%s, cost=$%s, tool_calls=%d, text_len=%d",
+            turns, f"{cost:.4f}" if cost else "?",
+            len(tool_calls), len(text) if text else 0,
+        )
+        if tool_calls:
+            for tc in tool_calls[:5]:
+                logger.info("  tool_call: %s", tc.get("name", "?"))
+
         return GrimResponse(
             text=text,
             tool_calls=tool_calls,
