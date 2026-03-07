@@ -52,10 +52,10 @@ DISCORD_OWNER_TOOLS = list(KRONOS_TOOLS) + [
     "mcp__kronos__kronos_calendar_sync",
     "mcp__kronos__kronos_memory_update",
     # Pool proxy tools (forwarded to GRIM server REST API)
-    "mcp__pool_proxy__pool_submit",
-    "mcp__pool_proxy__pool_status",
-    "mcp__pool_proxy__pool_list_jobs",
-    "mcp__pool_proxy__pool_cancel",
+    "mcp__pool__pool_submit",
+    "mcp__pool__pool_status",
+    "mcp__pool__pool_list_jobs",
+    "mcp__pool__pool_cancel",
 ]
 
 # Discord message limit
@@ -322,7 +322,7 @@ class GrimDiscordBot:
             extra_mcp: dict = {}
             if self.is_owner(user_id):
                 try:
-                    extra_mcp["pool_proxy"] = _build_pool_proxy_mcp_server()
+                    extra_mcp["pool"] = _build_pool_proxy_mcp_server()
                 except Exception as e:
                     logger.warning("Could not build pool proxy MCP: %s", e)
             client = GrimClient(
@@ -878,7 +878,7 @@ def _build_pool_proxy_mcp_server():
             return {"content": [{"type": "text", "text": f"[ERROR] Pool server unreachable: {e}"}]}
 
     return create_sdk_mcp_server(
-        name="pool_proxy",
+        name="pool",
         version="0.1.0",
         tools=[pool_submit, pool_status, pool_list_jobs, pool_cancel],
     )

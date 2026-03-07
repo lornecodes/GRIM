@@ -692,7 +692,10 @@ class GrimClient:
 
         # Append SDK-specific instructions
         pool_instructions = ""
-        has_pool_proxy = "pool_proxy" in self._extra_mcp_servers
+        has_pool_proxy = (
+            not self.config.pool_enabled
+            and "pool" in self._extra_mcp_servers
+        )
         if self.config.pool_enabled:
             pool_instructions = (
                 "- You have an execution pool with coding agents. Use pool_submit to dispatch jobs.\n"
@@ -710,11 +713,11 @@ class GrimClient:
             )
         elif has_pool_proxy:
             pool_instructions = (
-                "- You have an execution pool available via proxy. The pool IS online and working.\n"
-                "- Your pool tools: mcp__pool_proxy__pool_submit, mcp__pool_proxy__pool_status, "
-                "mcp__pool_proxy__pool_list_jobs, mcp__pool_proxy__pool_cancel.\n"
+                "- You have an execution pool available. The pool IS online and working.\n"
+                "- Your pool tools: mcp__pool__pool_submit, mcp__pool__pool_status, "
+                "mcp__pool__pool_list_jobs, mcp__pool__pool_cancel.\n"
                 "- When the user asks you to submit a job, build, create, write, fix, or modify code/files, "
-                "ALWAYS call mcp__pool_proxy__pool_submit immediately. Do NOT say pool is offline or unavailable.\n"
+                "ALWAYS call mcp__pool__pool_submit immediately. Do NOT say pool is offline or unavailable.\n"
                 "- Set target_repo to the repository the agent should work in "
                 "(e.g. 'GRIM', 'dawn-field-theory', 'fracton'). The agent gets an isolated git worktree.\n"
                 "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
