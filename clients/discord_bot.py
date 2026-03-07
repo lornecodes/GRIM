@@ -43,7 +43,7 @@ DISCORD_GUEST_TOOLS = [
     and "memory_update" not in t and "task_move" not in t
 ]
 
-# Owner tool list — full Kronos + task management + Discord messaging
+# Owner tool list — full Kronos + task management + pool proxy
 DISCORD_OWNER_TOOLS = list(KRONOS_TOOLS) + [
     "mcp__kronos__kronos_task_dispatch",
     "mcp__kronos__kronos_task_archive",
@@ -51,6 +51,11 @@ DISCORD_OWNER_TOOLS = list(KRONOS_TOOLS) + [
     "mcp__kronos__kronos_calendar_update",
     "mcp__kronos__kronos_calendar_sync",
     "mcp__kronos__kronos_memory_update",
+    # Pool proxy tools (forwarded to GRIM server REST API)
+    "mcp__pool_proxy__pool_submit",
+    "mcp__pool_proxy__pool_status",
+    "mcp__pool_proxy__pool_list_jobs",
+    "mcp__pool_proxy__pool_cancel",
 ]
 
 # Discord message limit
@@ -311,6 +316,13 @@ class GrimDiscordBot:
         tools = self.get_allowed_tools(user_id) if user_id else DISCORD_GUEST_TOOLS
         if channel_id not in self.sessions:
             caller = "peter" if self.is_owner(user_id) else "discord"
+            # Owner gets pool proxy MCP server for job dispatch
+            extra_mcp: dict = {}
+            if self.is_owner(user_id):
+                try:
+                    extra_mcp["pool_proxy"] = _build_pool_proxy_mcp_server()
+                except Exception as e:
+                    logger.warning("Could not build pool proxy MCP: %s", e)
             client = GrimClient(
                 self.config,
                 allowed_tools=tools,
@@ -319,6 +331,7 @@ class GrimDiscordBot:
                 system_prompt_prefix=DISCORD_VOICE_PREAMBLE,
                 system_prompt_suffix=DISCORD_FORMAT_ADDENDUM,
                 model="claude-sonnet-4-6",
+                extra_mcp_servers=extra_mcp,
             )
             await client.start()
             self.sessions[channel_id] = ChannelSession(
@@ -720,6 +733,153 @@ def _create_people_fdo(fdo_path: Any, profile: PeopleProfile) -> None:
     )
     fdo_path.parent.mkdir(parents=True, exist_ok=True)
     fdo_path.write_text(frontmatter + "\n" + body, encoding="utf-8")
+
+
+# ── Pool proxy MCP server ────────────────────────────────────────
+
+def _build_pool_proxy_mcp_server():
+    """Build in-process MCP server that proxies pool ops to the GRIM server REST API.
+
+    Used by the Discord bot which has no direct pool access — it forwards
+    pool_submit/status/list/cancel to http://grim:8080/api/pool/*.
+    """
+    from claude_agent_sdk import tool, create_sdk_mcp_server
+
+    def _server_url():
+        return os.environ.get("GRIM_SERVER_URL", "http://grim:8080")
+
+    @tool(
+        name="pool_submit",
+        description="Submit a job to the execution pool. Returns a job ID.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "job_type": {
+                    "type": "string",
+                    "enum": ["code", "research", "audit", "plan"],
+                    "description": "Type of agent to execute the job",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "What the agent should do",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["critical", "high", "normal", "low", "background"],
+                    "description": "Job priority (default: normal)",
+                },
+                "target_repo": {
+                    "type": "string",
+                    "description": "Target repo (e.g. 'GRIM', 'dawn-field-theory'). Agent gets an isolated git worktree.",
+                },
+            },
+            "required": ["job_type", "instructions"],
+        },
+    )
+    async def pool_submit(args):
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{_server_url()}/api/pool/jobs",
+                    json={
+                        "job_type": args["job_type"],
+                        "instructions": args["instructions"],
+                        "priority": args.get("priority", "normal"),
+                        "target_repo": args.get("target_repo"),
+                    },
+                )
+                data = resp.json()
+                if resp.status_code == 200:
+                    return {"content": [{"type": "text", "text": f"Job submitted: {data['job_id']} (type={args['job_type']}, priority={args.get('priority', 'normal')})"}]}
+                return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown error')}"}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Pool server unreachable: {e}"}]}
+
+    @tool(
+        name="pool_status",
+        description="Get execution pool status — slot states and active jobs.",
+        input_schema={"type": "object", "properties": {}},
+    )
+    async def pool_status(args):
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{_server_url()}/api/pool/status")
+                data = resp.json()
+                if resp.status_code != 200:
+                    return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown')}"}]}
+                lines = [f"Pool running: {data.get('running', '?')}", f"Active jobs: {data.get('active_jobs', '?')}", ""]
+                for slot in data.get("slots", []):
+                    state = f"BUSY (job: {slot.get('current_job_id', '?')})" if slot.get("busy") else "IDLE"
+                    lines.append(f"  {slot.get('slot_id', '?')}: {state}")
+                return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Pool server unreachable: {e}"}]}
+
+    @tool(
+        name="pool_list_jobs",
+        description="List jobs in the execution pool queue.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["queued", "running", "complete", "failed", "cancelled"],
+                    "description": "Filter by status (optional)",
+                },
+            },
+        },
+    )
+    async def pool_list_jobs(args):
+        import httpx
+        try:
+            params = {}
+            if args.get("status"):
+                params["status"] = args["status"]
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{_server_url()}/api/pool/jobs", params=params)
+                if resp.status_code != 200:
+                    data = resp.json()
+                    return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown')}"}]}
+                jobs = resp.json()
+                if not jobs:
+                    return {"content": [{"type": "text", "text": "No jobs found."}]}
+                lines = []
+                for j in jobs:
+                    lines.append(f"{j.get('id', '?')}  {j.get('job_type', '?'):<10} {j.get('status', '?'):<10} {j.get('priority', '?'):<10} {j.get('instructions', '')[:60]}")
+                return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Pool server unreachable: {e}"}]}
+
+    @tool(
+        name="pool_cancel",
+        description="Cancel a queued or blocked pool job.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "Job ID to cancel"},
+            },
+            "required": ["job_id"],
+        },
+    )
+    async def pool_cancel(args):
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{_server_url()}/api/pool/jobs/{args['job_id']}/cancel")
+                data = resp.json()
+                if resp.status_code == 200:
+                    return {"content": [{"type": "text", "text": f"Job {args['job_id']} cancelled."}]}
+                return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown')}"}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Pool server unreachable: {e}"}]}
+
+    return create_sdk_mcp_server(
+        name="pool_proxy",
+        version="0.1.0",
+        tools=[pool_submit, pool_status, pool_list_jobs, pool_cancel],
+    )
 
 
 # ── Health check server ──────────────────────────────────────────

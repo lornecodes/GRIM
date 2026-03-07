@@ -81,6 +81,7 @@ POOL_TOOLS = [
     "mcp__pool__pool_submit",
     "mcp__pool__pool_status",
     "mcp__pool__pool_list_jobs",
+    "mcp__pool__pool_get_job",
 ]
 
 DISCORD_TOOLS = [
@@ -191,10 +192,75 @@ def _build_pool_mcp_server():
             lines.append(f"{j.id}  {j.job_type.value:<10} {j.status.value:<10} {j.priority.value:<10} {j.instructions[:60]}")
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
+    @tool(
+        name="pool_get_job",
+        description=(
+            "Get full details of a pool job — status, result, transcript, cost, workspace. "
+            "Use this to check what an agent produced, review its output, or get a status update on a running job."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": "The job ID to look up",
+                },
+            },
+            "required": ["job_id"],
+        },
+    )
+    async def pool_get_job(args):
+        pool = tool_context.execution_pool
+        if pool is None:
+            return {"content": [{"type": "text", "text": "[ERROR] Pool not enabled"}]}
+        job = await pool.queue.get(args["job_id"])
+        if job is None:
+            return {"content": [{"type": "text", "text": f"[ERROR] Job not found: {args['job_id']}"}]}
+
+        lines = [
+            f"Job: {job.id}",
+            f"Type: {job.job_type.value}",
+            f"Status: {job.status.value}",
+            f"Priority: {job.priority.value}",
+            f"Target repo: {job.target_repo or '(none)'}",
+            f"Workspace: {job.workspace_id or '(none)'}",
+            f"Slot: {job.assigned_slot or '(none)'}",
+            f"Retries: {job.retry_count}/{job.max_retries}",
+            f"Created: {job.created_at.isoformat()}",
+            f"Updated: {job.updated_at.isoformat()}",
+        ]
+
+        if job.error:
+            lines.append(f"\n## Error\n{job.error}")
+
+        if job.result:
+            # Truncate long results
+            result_text = job.result if len(job.result) <= 2000 else job.result[:2000] + "\n...(truncated)"
+            lines.append(f"\n## Result\n{result_text}")
+
+        if job.transcript:
+            lines.append(f"\n## Transcript ({len(job.transcript)} messages)")
+            # Show last 10 transcript entries to keep context manageable
+            recent = job.transcript[-10:]
+            for entry in recent:
+                role = entry.get("role", "?")
+                content = entry.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        btype = block.get("type", "")
+                        if btype == "text":
+                            text = block.get("text", "")
+                            preview = text[:200] + "..." if len(text) > 200 else text
+                            lines.append(f"  [{role}] {preview}")
+                        elif btype == "tool_use":
+                            lines.append(f"  [{role}] tool: {block.get('name', '?')}")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
     return create_sdk_mcp_server(
         name="pool",
         version="0.1.0",
-        tools=[pool_submit, pool_status, pool_list_jobs],
+        tools=[pool_submit, pool_status, pool_list_jobs, pool_get_job],
     )
 
 
@@ -309,6 +375,7 @@ class GrimClient:
         system_prompt_prefix: str = "",
         system_prompt_suffix: str = "",
         model: str | None = None,
+        extra_mcp_servers: dict[str, Any] | None = None,
     ):
         self.config = config
         self.on_message = on_message
@@ -317,6 +384,7 @@ class GrimClient:
         self._prompt_prefix = system_prompt_prefix
         self._prompt_suffix = system_prompt_suffix
         self._model = model
+        self._extra_mcp_servers = extra_mcp_servers or {}
 
         # Override allowed tools (e.g. Discord bot removes write tools)
         self._allowed_tools = allowed_tools
@@ -382,6 +450,9 @@ class GrimClient:
             mcp_servers["discord"] = _build_discord_mcp_server()
         except Exception as e:
             logger.warning("Could not build discord MCP server: %s", e)
+
+        # Extra MCP servers (injected by callers like the Discord bot)
+        mcp_servers.update(self._extra_mcp_servers)
 
         # 4. Build allowed tools list
         tools = self._allowed_tools
@@ -616,8 +687,9 @@ class GrimClient:
                 "(e.g. 'GRIM', 'dawn-field-theory', 'fracton'). This gives the agent an isolated git worktree.\n"
                 "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
                 "- After submitting, tell the user the job ID and that they can watch progress in the Studio tab.\n"
-                "- Use pool_job_status to check on running jobs when the user asks.\n"
-                "- Use pool_list_jobs to show all jobs when asked."
+                "- Use pool_get_job to check on a specific job — see its status, result, transcript, and cost.\n"
+                "- Use pool_list_jobs to show all jobs when asked.\n"
+                "- Use pool_status to check slot utilization."
             )
         else:
             pool_instructions = (

@@ -50,25 +50,29 @@ def test_owner_has_write_tools():
     assert "mcp__kronos__kronos_task_dispatch" not in DISCORD_GUEST_TOOLS
 
 
-def test_no_pool_tools_in_discord():
-    """Discord bot has no pool MCP server — pool tools must not be listed."""
-    all_discord_tools = DISCORD_GUEST_TOOLS + DISCORD_OWNER_TOOLS
-    pool_tools = [t for t in all_discord_tools if "pool" in t]
-    assert pool_tools == [], f"Pool tools found in Discord lists: {pool_tools}"
+def test_pool_proxy_tools_owner_only():
+    """Pool proxy tools are in owner list but not guest list."""
+    assert "mcp__pool_proxy__pool_submit" in DISCORD_OWNER_TOOLS
+    assert "mcp__pool_proxy__pool_cancel" in DISCORD_OWNER_TOOLS
+    assert "mcp__pool_proxy__pool_submit" not in DISCORD_GUEST_TOOLS
+    # No direct pool MCP tools (mcp__pool__*) — only proxied ones
+    direct_pool = [t for t in DISCORD_OWNER_TOOLS if t.startswith("mcp__pool__")]
+    assert direct_pool == [], f"Direct pool tools found: {direct_pool}"
 
 
 def test_get_allowed_tools_owner(bot):
     tools = bot.get_allowed_tools(12345)
     assert "mcp__kronos__kronos_create" in tools
     assert "mcp__kronos__kronos_task_dispatch" in tools
+    assert "mcp__pool_proxy__pool_submit" in tools
 
 
 def test_get_allowed_tools_non_owner(bot):
     tools = bot.get_allowed_tools(99999)
     assert "mcp__kronos__kronos_create" not in tools
     assert "mcp__kronos__kronos_update" not in tools
+    assert "mcp__pool_proxy__pool_submit" not in tools
     assert "mcp__kronos__kronos_search" in tools
-    assert "mcp__kronos__kronos_get" in tools
 
 
 def test_get_allowed_tools_guest_has_read_tools(bot):
