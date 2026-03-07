@@ -431,6 +431,33 @@ def format_daemon_event(event: dict) -> str | None:
             return formatted
         return "**Daily Summary** — no data available."
 
+    # Pool events routed to daemon channel
+    if event_type == "job_review":
+        story_id = data.get("story_id", "?")
+        pr_url = data.get("pr_url", "")
+        pr_number = data.get("pr_number", "")
+        diff_stat = data.get("diff_stat", "")
+        parts = [f"**PR Created** — `{story_id}` PR #{pr_number}"]
+        if pr_url:
+            parts.append(pr_url)
+        if diff_stat:
+            parts.append(f"```\n{diff_stat[:500]}\n```")
+        return "\n".join(parts)
+
+    if event_type == "job_complete":
+        story_id = data.get("story_id", "")
+        cost = data.get("cost_usd")
+        turns = data.get("num_turns")
+        parts = [f"**Job Complete** — `{story_id}`"]
+        if turns:
+            parts[0] += f" ({turns} turns, ${cost:.2f})" if cost else f" ({turns} turns)"
+        return parts[0]
+
+    if event_type == "job_failed":
+        story_id = data.get("story_id", "")
+        error = data.get("error", "unknown")
+        return f"**Job Failed** — `{story_id}`: {error[:200]}"
+
     return None
 
 
@@ -449,6 +476,10 @@ DAEMON_EVENT_TYPES = frozenset({
     "daemon_research_complete",
     "daemon_stuck_warning",
     "daemon_daily_summary",
+    # Pool events that should also route to daemon channel
+    "job_review",         # PR created — Peter wants Discord notification
+    "job_complete",       # Job finished (any type)
+    "job_failed",         # Job failed
 })
 
 

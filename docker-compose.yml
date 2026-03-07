@@ -120,6 +120,7 @@ services:
     volumes:
       - ${WORKSPACE_PATH:-..}:/workspace
       - ./local:/app/local
+      - ./config/grim.yaml:/app/config/grim.yaml:ro
     networks:
       - grim-net
     restart: unless-stopped

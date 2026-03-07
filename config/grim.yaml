@@ -142,7 +142,7 @@ pool:
   enabled: true                   # Phase 1 complete — pool active
   num_slots: 4                    # concurrent agent slots
   poll_interval: 2.0              # seconds between queue polls
-  db_path: "local/pool.db"       # SQLite queue persistence
+  db_path: "local/pool_v2.db"    # SQLite queue persistence (v2: fresh after SHM corruption)
   max_turns_per_job: 20           # safety valve on agent turns
   job_timeout_secs: 900           # 15 min max per job
 
