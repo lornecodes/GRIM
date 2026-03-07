@@ -1307,3 +1307,30 @@ class TestConfigPhase3Fields:
         assert cfg.daemon_resolve_model == "claude-haiku-4-5-20251001"
         assert cfg.daemon_validate_model == "claude-sonnet-4-6"
         assert cfg.daemon_resolve_confidence_threshold == 0.5
+
+
+# ── target_repo inference ────────────────────────────────────────
+
+
+class TestInferTargetRepo:
+    """Tests for ManagementEngine._PROJECT_REPO_MAP and _infer_target_repo."""
+
+    def test_proj_grim(self):
+        from core.daemon.engine import ManagementEngine
+        assert ManagementEngine._PROJECT_REPO_MAP["proj-grim"] == "GRIM"
+
+    def test_proj_charizard(self):
+        from core.daemon.engine import ManagementEngine
+        assert ManagementEngine._PROJECT_REPO_MAP["proj-charizard"] == "GRIM"
+
+    def test_proj_mewtwo(self):
+        from core.daemon.engine import ManagementEngine
+        assert ManagementEngine._PROJECT_REPO_MAP["proj-mewtwo"] == "GRIM"
+
+    def test_proj_dft(self):
+        from core.daemon.engine import ManagementEngine
+        assert ManagementEngine._PROJECT_REPO_MAP["proj-dft"] == "dawn-field-theory"
+
+    def test_unknown_project(self):
+        from core.daemon.engine import ManagementEngine
+        assert ManagementEngine._PROJECT_REPO_MAP.get("proj-unknown") is None

@@ -625,3 +625,223 @@ class TestPoolTools:
             assert "[ERROR]" in result
         finally:
             tool_context.execution_pool = old
+
+
+# ── target_repo tests ────────────────────────────────────────────
+
+
+class TestTargetRepo:
+    """Tests for target_repo field across model, queue, pool, and prompt."""
+
+    def test_job_model_default_none(self):
+        job = Job(job_type=JobType.CODE, instructions="test")
+        assert job.target_repo is None
+
+    def test_job_model_set(self):
+        job = Job(job_type=JobType.CODE, instructions="test", target_repo="GRIM")
+        assert job.target_repo == "GRIM"
+
+    def test_job_serialization(self):
+        job = Job(job_type=JobType.CODE, instructions="test", target_repo="dawn-field-theory")
+        data = job.model_dump()
+        assert data["target_repo"] == "dawn-field-theory"
+
+    @pytest.mark.asyncio
+    async def test_queue_roundtrip(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        queue = JobQueue(db_path)
+        await queue.initialize()
+
+        job = Job(job_type=JobType.CODE, instructions="build it", target_repo="GRIM")
+        await queue.submit(job)
+
+        fetched = await queue.get(job.id)
+        assert fetched is not None
+        assert fetched.target_repo == "GRIM"
+
+    @pytest.mark.asyncio
+    async def test_queue_roundtrip_none(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        queue = JobQueue(db_path)
+        await queue.initialize()
+
+        job = Job(job_type=JobType.CODE, instructions="build it")
+        await queue.submit(job)
+
+        fetched = await queue.get(job.id)
+        assert fetched is not None
+        assert fetched.target_repo is None
+
+    @pytest.mark.asyncio
+    async def test_queue_migration(self, tmp_path):
+        """Migration should add target_repo column to existing DB without error."""
+        import aiosqlite
+
+        db_path = tmp_path / "old.db"
+        # Create DB without target_repo column (simulates old schema)
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute("""
+                CREATE TABLE jobs (
+                    id TEXT PRIMARY KEY,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    priority INTEGER NOT NULL DEFAULT 2,
+                    workspace_id TEXT,
+                    instructions TEXT NOT NULL,
+                    plan TEXT,
+                    kronos_domains TEXT,
+                    kronos_fdo_ids TEXT,
+                    assigned_slot TEXT,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    max_retries INTEGER NOT NULL DEFAULT 2,
+                    clarification_question TEXT,
+                    clarification_answer TEXT,
+                    result TEXT,
+                    error TEXT,
+                    transcript TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            await db.commit()
+
+        # initialize() should migrate without error
+        queue = JobQueue(db_path)
+        await queue.initialize()
+
+        # New jobs should persist target_repo
+        job = Job(job_type=JobType.CODE, instructions="test", target_repo="fracton")
+        await queue.submit(job)
+        fetched = await queue.get(job.id)
+        assert fetched.target_repo == "fracton"
+
+    @pytest.mark.asyncio
+    async def test_pool_dispatch_with_target_repo(self):
+        """Pool should pass workspace_root/target_repo to WorkspaceManager.create."""
+        from core.pool.pool import ExecutionPool
+        from core.pool.slot import AgentSlot
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_root = Path(td)
+            (ws_root / "GRIM").mkdir()
+
+            config = MagicMock()
+            config.pool_enabled = True
+            config.pool_num_slots = 1
+            config.pool_poll_interval = 60
+            config.pool_job_timeout_secs = 30
+            config.pool_max_turns_per_job = 10
+            config.workspace_root = str(ws_root)
+            config.pool_db_path = ws_root / "pool.db"
+            config.pool_discord_webhook_url = None
+            config.pool_kronos_url = ""
+            config.kronos_mcp_command = ""
+            config.vault_path = None
+            config.skills_path = None
+
+            queue = JobQueue(config.pool_db_path)
+            await queue.initialize()
+
+            pool = ExecutionPool(queue, config)
+
+            # Manually create a slot (normally done in start())
+            slot = AgentSlot(slot_id="slot-0")
+            pool._slots = [slot]
+            pool._running = True
+
+            # Mock the workspace manager
+            mock_ws = MagicMock()
+            mock_ws.id = "workspace-test1234"
+            mock_ws.worktree_path = ws_root / ".grim" / "worktrees" / "workspace-test1234"
+            pool._workspace_mgr = AsyncMock()
+            pool._workspace_mgr.create = AsyncMock(return_value=mock_ws)
+
+            # Mock slot execution
+            slot.execute = AsyncMock(return_value=JobResult(
+                job_id="test", success=True, result="done",
+                transcript=[], cost_usd=0.01, num_turns=1,
+            ))
+
+            # Submit job with target_repo
+            job = Job(job_type=JobType.CODE, instructions="fix bug", target_repo="GRIM")
+            await queue.submit(job)
+
+            # Run one dispatch cycle
+            await pool._dispatch_cycle()
+            await asyncio.sleep(0.5)
+
+            # Verify WorkspaceManager.create was called with repo_path = ws_root / "GRIM"
+            pool._workspace_mgr.create.assert_called_once()
+            call_args = pool._workspace_mgr.create.call_args
+            assert call_args[0][1] == ws_root / "GRIM"
+
+            pool._running = False
+
+    @pytest.mark.asyncio
+    async def test_pool_dispatch_without_target_repo(self):
+        """Pool should NOT create workspace when target_repo is None."""
+        from core.pool.pool import ExecutionPool
+        from core.pool.slot import AgentSlot
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_root = Path(td)
+
+            config = MagicMock()
+            config.pool_enabled = True
+            config.pool_num_slots = 1
+            config.pool_poll_interval = 60
+            config.pool_job_timeout_secs = 30
+            config.pool_max_turns_per_job = 10
+            config.workspace_root = str(ws_root)
+            config.pool_db_path = ws_root / "pool.db"
+            config.pool_discord_webhook_url = None
+            config.pool_kronos_url = ""
+            config.kronos_mcp_command = ""
+            config.vault_path = None
+            config.skills_path = None
+
+            queue = JobQueue(config.pool_db_path)
+            await queue.initialize()
+
+            pool = ExecutionPool(queue, config)
+
+            # Manually create a slot
+            slot = AgentSlot(slot_id="slot-0")
+            pool._slots = [slot]
+            pool._running = True
+
+            # Mock workspace manager
+            pool._workspace_mgr = AsyncMock()
+
+            # Mock slot execution
+            slot.execute = AsyncMock(return_value=JobResult(
+                job_id="test", success=True, result="done",
+                transcript=[], cost_usd=0.01, num_turns=1,
+            ))
+
+            # Submit job WITHOUT target_repo
+            job = Job(job_type=JobType.CODE, instructions="fix bug")
+            await queue.submit(job)
+
+            await pool._dispatch_cycle()
+            await asyncio.sleep(0.5)
+
+            # WorkspaceManager.create should NOT have been called
+            pool._workspace_mgr.create.assert_not_called()
+
+            pool._running = False
+
+    def test_system_prompt_with_target_repo(self):
+        from core.pool.slot import _build_system_prompt
+
+        job = Job(job_type=JobType.CODE, instructions="test", target_repo="GRIM")
+        prompt = _build_system_prompt(job, "Base prompt.")
+        assert "GRIM" in prompt
+        assert "worktree" in prompt
+
+    def test_system_prompt_without_target_repo(self):
+        from core.pool.slot import _build_system_prompt
+
+        job = Job(job_type=JobType.CODE, instructions="test")
+        prompt = _build_system_prompt(job, "Base prompt.")
+        assert "worktree" not in prompt

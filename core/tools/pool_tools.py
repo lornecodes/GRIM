@@ -32,6 +32,7 @@ async def pool_submit(
     instructions: str,
     priority: str = "normal",
     plan: Optional[str] = None,
+    target_repo: Optional[str] = None,
     workspace_id: Optional[str] = None,
     kronos_domains: Optional[str] = None,
     kronos_fdo_ids: Optional[str] = None,
@@ -43,6 +44,7 @@ async def pool_submit(
         instructions: What the agent should do.
         priority: Job priority — "critical", "high", "normal", "low", "background".
         plan: Optional implementation plan for the agent to follow.
+        target_repo: Target repository name (e.g. "GRIM", "dawn-field-theory"). Agent gets an isolated git worktree.
         workspace_id: Optional workspace to bind the job to (sequential execution).
         kronos_domains: Comma-separated Kronos domains for context (e.g. "physics,ai-systems").
         kronos_fdo_ids: Comma-separated FDO IDs for context (e.g. "pac-comprehensive,grim-architecture").
@@ -75,6 +77,7 @@ async def pool_submit(
             priority=jp,
             instructions=instructions,
             plan=plan,
+            target_repo=target_repo,
             workspace_id=workspace_id,
             kronos_domains=domains,
             kronos_fdo_ids=fdo_ids,

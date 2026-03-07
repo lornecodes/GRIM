@@ -83,6 +83,7 @@ class Job(BaseModel):
 
     # Context binding
     workspace_id: Optional[str] = None
+    target_repo: Optional[str] = None  # e.g. "GRIM", "dawn-field-theory"
     kronos_domains: list[str] = Field(default_factory=list)
     kronos_fdo_ids: list[str] = Field(default_factory=list)
 

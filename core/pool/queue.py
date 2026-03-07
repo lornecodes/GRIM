@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status TEXT NOT NULL DEFAULT 'queued',
     priority INTEGER NOT NULL DEFAULT 2,
     workspace_id TEXT,
+    target_repo TEXT,
     instructions TEXT NOT NULL,
     plan TEXT,
     kronos_domains TEXT,
@@ -70,6 +71,11 @@ class JobQueue:
             await db.execute("PRAGMA foreign_keys=ON")
             await db.execute(_CREATE_TABLE)
             await db.execute(_CREATE_INDEX)
+            # Migration: add target_repo column if missing (existing DBs)
+            try:
+                await db.execute("ALTER TABLE jobs ADD COLUMN target_repo TEXT")
+            except Exception:
+                pass  # Column already exists
             await db.commit()
         logger.info("JobQueue initialized: %s", self._db_path)
 
@@ -78,18 +84,19 @@ class JobQueue:
         async with aiosqlite.connect(str(self._db_path)) as db:
             await db.execute(
                 """INSERT INTO jobs
-                   (id, job_type, status, priority, workspace_id, instructions,
-                    plan, kronos_domains, kronos_fdo_ids, assigned_slot,
-                    retry_count, max_retries, clarification_question,
-                    clarification_answer, result, error, transcript,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, job_type, status, priority, workspace_id, target_repo,
+                    instructions, plan, kronos_domains, kronos_fdo_ids,
+                    assigned_slot, retry_count, max_retries,
+                    clarification_question, clarification_answer,
+                    result, error, transcript, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.id,
                     job.job_type.value,
                     job.status.value,
                     PRIORITY_ORDER[job.priority],
                     job.workspace_id,
+                    job.target_repo,
                     job.instructions,
                     job.plan,
                     json.dumps(job.kronos_domains),
@@ -275,6 +282,7 @@ def _row_to_job(row: aiosqlite.Row) -> Job:
         status=row["status"],
         priority=_INT_TO_PRIORITY.get(row["priority"], JobPriority.NORMAL),
         workspace_id=row["workspace_id"],
+        target_repo=row["target_repo"] if "target_repo" in row.keys() else None,
         instructions=row["instructions"],
         plan=row["plan"],
         kronos_domains=json.loads(row["kronos_domains"] or "[]"),

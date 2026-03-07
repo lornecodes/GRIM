@@ -108,6 +108,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-placeholder-for-proxy}
       - ANTHROPIC_BASE_URL=http://ai-bridge:8318
       - GRIM_ENV=${GRIM_ENV:-debug}
+      - GRIM_WORKSPACE_ROOT=/workspace
       - GRIM_VAULT_PATH=/workspace/kronos-vault
       - KRONOS_VAULT_PATH=/workspace/kronos-vault
       - KRONOS_SKILLS_PATH=/app/skills
@@ -115,7 +116,7 @@ services:
       - GRIM_REDIS_URL=redis://redis:6379/0
     command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
     volumes:
-      - ${WORKSPACE_PATH:-..}:/workspace:ro
+      - ${WORKSPACE_PATH:-..}:/workspace
       - grim-sessions:/app/local/sessions
       - grim-evolution:/app/local/evolution
     networks:

@@ -2565,6 +2565,18 @@ def handle_calendar_update(args: dict) -> str:
         return _json({"error": f"Invalid action: {action}", "valid": ["update", "delete"]})
 
 
+_PROJECT_REPO_MAP = {
+    "proj-grim": "GRIM", "proj-charizard": "GRIM", "proj-mewtwo": "GRIM",
+    "proj-dft": "dawn-field-theory", "proj-fracton": "fracton",
+    "proj-reality-engine": "reality-engine",
+}
+
+
+def _infer_repo_from_project(project_id: str) -> str | None:
+    """Map a project FDO ID to its primary repository name."""
+    return _PROJECT_REPO_MAP.get(project_id)
+
+
 def handle_task_dispatch(args: dict) -> str:
     story_id = (args.get("story_id") or "").strip()
     if not story_id:
@@ -2603,6 +2615,7 @@ def handle_task_dispatch(args: dict) -> str:
             "instructions": instructions,
             "job_type": assignee,
             "priority": priority,
+            "target_repo": _infer_repo_from_project(story.get("project", "")),
             "kronos_fdo_ids": [story.get("project", "")],
         },
     }
@@ -2764,15 +2777,39 @@ async def call_tool(
     return [TextContent(type="text", text=result)]
 
 
-async def main():
-    global _loading_at_startup
+async def _eager_init():
+    """Pre-warm engines + semantic model.
 
+    When called from main()/main_sse(), runs as a background task so the MCP
+    handshake completes immediately.  By the time the first tool call arrives,
+    engines are ready.  The GIL-heavy PyTorch import happens here (no handler
+    threads competing).  If this finishes before the first call_tool, the
+    lazy-init path in call_tool is a no-op.
+    """
+    global _loading_at_startup
+    _loading_at_startup = True
+    try:
+        async with _get_tool_lock():
+            await asyncio.wait_for(
+                asyncio.to_thread(_ensure_initialized),
+                timeout=90,  # generous — covers model download on first run
+            )
+    except asyncio.TimeoutError:
+        logger.error("Engine initialization timed out after 90s — starting without semantic")
+    except Exception as e:
+        logger.error(f"Engine initialization failed: {e}", exc_info=True)
+    finally:
+        _loading_at_startup = False
+
+
+async def main():
+    """Run Kronos MCP over stdio (default mode — one process per client)."""
     from mcp.server.stdio import stdio_server
     import anyio
     from io import TextIOWrapper
     import sys
 
-    logger.info(f"Kronos MCP starting — vault: {vault_path}")
+    logger.info(f"Kronos MCP starting (stdio) — vault: {vault_path}")
     if skills_engine:
         logger.info(f"Skills path: {skills_path}")
 
@@ -2788,30 +2825,6 @@ async def main():
     fixed_stdout = anyio.wrap_file(
         TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")
     )
-
-    async def _eager_init():
-        """Pre-warm engines + semantic model concurrently with app.run().
-
-        Runs as a background task so the MCP handshake completes immediately.
-        By the time the first tool call arrives, engines are ready.  The
-        GIL-heavy PyTorch import happens here (no handler threads competing).
-        If this finishes before the first call_tool, the lazy-init path in
-        call_tool is a no-op.
-        """
-        global _loading_at_startup
-        _loading_at_startup = True
-        try:
-            async with _get_tool_lock():
-                await asyncio.wait_for(
-                    asyncio.to_thread(_ensure_initialized),
-                    timeout=90,  # generous — covers model download on first run
-                )
-        except asyncio.TimeoutError:
-            logger.error("Engine initialization timed out after 90s — starting without semantic")
-        except Exception as e:
-            logger.error(f"Engine initialization failed: {e}", exc_info=True)
-        finally:
-            _loading_at_startup = False
 
     async with stdio_server(stdout=fixed_stdout) as (read_stream, write_stream):
         # Start eager init concurrently — MCP handshake proceeds immediately
@@ -2829,3 +2842,83 @@ async def main():
                 await init_task
             except asyncio.CancelledError:
                 pass
+
+
+def make_sse_app(host: str = "127.0.0.1", port: int = 8319):
+    """Build a Starlette ASGI app that serves Kronos MCP over SSE.
+
+    Returns:
+        A Starlette Application instance ready for uvicorn.run().
+
+    Usage:
+        kronos-mcp --sse --port 8319
+    """
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.responses import JSONResponse
+    from mcp.server.sse import SseServerTransport
+
+    sse_transport = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        """SSE connection endpoint — clients GET this to open a stream."""
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send,
+        ) as (read_stream, write_stream):
+            await app.run(
+                read_stream,
+                write_stream,
+                app.create_initialization_options(),
+            )
+
+    async def handle_post(request):
+        """Message endpoint — clients POST tool calls here."""
+        await sse_transport.handle_post_message(
+            request.scope, request.receive, request._send,
+        )
+
+    async def handle_health(request):
+        """Health check for pool warm-up."""
+        return JSONResponse({
+            "status": "ok",
+            "engines_initialized": _engines_initialized,
+            "vault_path": vault_path,
+        })
+
+    return Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Route("/messages/", endpoint=handle_post, methods=["POST"]),
+            Route("/health", endpoint=handle_health),
+        ],
+    )
+
+
+async def main_sse(host: str = "127.0.0.1", port: int = 8319):
+    """Run Kronos MCP as a persistent SSE HTTP server.
+
+    Multiple Agent SDK clients can connect simultaneously.  Engines are
+    initialized once at startup and shared across all connections.
+    """
+    import uvicorn
+
+    logger.info(f"Kronos MCP starting (SSE) — vault: {vault_path}, {host}:{port}")
+
+    # Set a larger thread pool (same rationale as stdio mode).
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
+
+    # Pre-warm engines BEFORE accepting connections — SSE mode can afford
+    # the startup delay since it's a long-lived server.
+    await _eager_init()
+    logger.info("Engines pre-warmed, starting SSE server")
+
+    sse_app = make_sse_app(host, port)
+    config = uvicorn.Config(
+        sse_app,
+        host=host,
+        port=port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config)
+    await server.serve()

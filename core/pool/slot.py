@@ -26,6 +26,26 @@ from core.pool.models import (
     JobType,
 )
 
+# Eager import of Agent SDK — eliminates first-job import delay (~200ms).
+# Falls back gracefully if SDK not installed (tests mock it).
+# These are module-level names used by execute() and helpers.
+try:
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        PermissionResultAllow,
+        PermissionResultDeny,
+        ResultMessage,
+        TextBlock,
+        ToolUseBlock,
+    )
+    _SDK_AVAILABLE = True
+except ImportError:
+    # SDK not installed — execute() will fail at runtime, but import succeeds.
+    # This lets tests that mock the SDK work without installing it.
+    _SDK_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ── Agent type configurations ────────────────────────────────────
@@ -132,10 +152,12 @@ AGENT_CONFIGS: dict[JobType, dict[str, Any]] = {
 
 @dataclass
 class AgentSlot:
-    """Wraps a ClaudeSDKClient to execute a single job.
+    """Wraps a persistent ClaudeSDKClient to execute jobs.
 
-    Each slot is a logical execution unit. The ExecutionPool manages
-    multiple slots for concurrent job execution.
+    Each slot keeps a long-lived claude.exe subprocess. Jobs are dispatched
+    as isolated conversations via ``session_id``, so context does not bleed
+    between jobs. The subprocess is started once in ``warm()`` and reused
+    until ``shutdown()`` or crash (auto-reconnect on next execute).
     """
 
     slot_id: str
@@ -145,91 +167,167 @@ class AgentSlot:
     # Config — set by ExecutionPool at boot
     kronos_mcp_command: str = ""
     kronos_mcp_env: dict[str, str] = field(default_factory=dict)
+    kronos_mcp_url: str = ""  # SSE URL — when set, use SSE instead of stdio
     max_turns: int = 20
     cwd: Optional[str] = None
     add_dirs: list[str] = field(default_factory=list)
+
+    # Persistent client state (managed, not constructor args)
+    _client: Any = field(default=None, init=False, repr=False)
+    _client_job_type: Optional[JobType] = field(default=None, init=False, repr=False)
+    _job_counter: int = field(default=0, init=False, repr=False)
+    _warm: bool = field(default=False, init=False, repr=False)
+    _saved_claudecode: Optional[str] = field(default=None, init=False, repr=False)
+
+    def _build_mcp_servers(self) -> dict[str, Any]:
+        """Build MCP servers dict — prefer SSE (persistent) over stdio (spawn)."""
+        mcp_servers: dict[str, Any] = {}
+        if self.kronos_mcp_url:
+            mcp_servers["kronos"] = {
+                "type": "sse",
+                "url": self.kronos_mcp_url + "/sse",
+            }
+        elif self.kronos_mcp_command:
+            mcp_servers["kronos"] = {
+                "command": self.kronos_mcp_command,
+                "env": self.kronos_mcp_env,
+            }
+        return mcp_servers
+
+    def _build_options(self, job_type: JobType) -> Any:
+        """Build ClaudeAgentOptions for a given job type."""
+        config = AGENT_CONFIGS[job_type]
+        permission_cb = _make_permission_callback(
+            allow_writes=config.get("allow_writes", False),
+            allow_bash=config.get("allow_bash", False),
+        )
+        mcp_servers = self._build_mcp_servers()
+        return ClaudeAgentOptions(
+            system_prompt=config["system_prompt"],
+            mcp_servers=mcp_servers if mcp_servers else None,
+            allowed_tools=config["allowed_tools"],
+            can_use_tool=permission_cb,
+            max_turns=self.max_turns,
+            model=config.get("model"),
+            cwd=self.cwd,
+            add_dirs=self.add_dirs if self.add_dirs else [],
+        )
+
+    async def _ensure_client(self, job_type: JobType) -> None:
+        """Ensure a live client exists for the given job type.
+
+        Reuses the existing subprocess if the job type matches. Otherwise
+        tears down and respawns with the new config.
+        """
+        import time as _time
+
+        # Reuse if warm and same job type
+        if self._client and self._warm and self._client_job_type == job_type:
+            return
+
+        # Tear down old client if it exists
+        await self._teardown_client()
+
+        # Spawn new subprocess
+        t0 = _time.time()
+        options = self._build_options(job_type)
+
+        # Must unset CLAUDECODE to spawn child sessions from Claude Code
+        self._saved_claudecode = os.environ.pop("CLAUDECODE", None)
+
+        client = ClaudeSDKClient(options=options)
+        await client.connect()
+        self._client = client
+        self._client_job_type = job_type
+        self._warm = True
+        logger.info(
+            "Slot %s subprocess started for %s in %.1fs",
+            self.slot_id, job_type.value, _time.time() - t0,
+        )
+
+    async def _teardown_client(self) -> None:
+        """Disconnect the persistent client if it exists."""
+        if self._client:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                logger.debug("Slot %s disconnect error (ignored)", self.slot_id, exc_info=True)
+            self._client = None
+            self._warm = False
+            self._client_job_type = None
+
+        # Restore env var
+        if self._saved_claudecode is not None:
+            os.environ["CLAUDECODE"] = self._saved_claudecode
+            self._saved_claudecode = None
+
+    async def warm(self, job_type: JobType = JobType.RESEARCH) -> None:
+        """Pre-start the subprocess so the first job is instant.
+
+        Called by ExecutionPool.start(). Defaults to RESEARCH (most common
+        pool job type). The subprocess will be recycled if the first real
+        job has a different type.
+        """
+        try:
+            await self._ensure_client(job_type)
+            logger.info("Slot %s warmed (%s)", self.slot_id, job_type.value)
+        except Exception as e:
+            logger.warning("Slot %s warm failed: %s", self.slot_id, e)
+            # Not fatal — execute() will retry
+
+    async def shutdown(self) -> None:
+        """Stop the persistent subprocess. Called by ExecutionPool.stop()."""
+        await self._teardown_client()
+        logger.info("Slot %s shut down", self.slot_id)
 
     async def execute(
         self,
         job: Job,
         on_message: OnMessage | None = None,
     ) -> JobResult:
-        """Execute a job using Claude Agent SDK.
+        """Execute a job on the persistent subprocess.
+
+        Uses ``session_id`` to isolate each job's conversation context.
+        If the subprocess has died, it is automatically respawned.
 
         Args:
             job: The job to execute.
             on_message: Optional async callback ``(job_id, captured_msg) -> None``
-                called for each SDK message as it arrives. Used for live
-                streaming to WebSocket clients.
+                called for each SDK message as it arrives.
 
         Returns a JobResult with transcript, cost, and outcome.
         Raises ClarificationNeeded if the agent can't proceed.
         """
-        # Lazy import — claude_agent_sdk is an optional dependency
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ClaudeSDKClient,
-            ResultMessage,
-            TextBlock,
-            ToolUseBlock,
-        )
-
         self.busy = True
         self.current_job_id = job.id
         transcript: list[dict] = []
+        self._job_counter += 1
 
         try:
-            config = AGENT_CONFIGS[job.job_type]
+            # Ensure subprocess is alive for this job type
+            await self._ensure_client(job.job_type)
+
             prompt = _build_prompt(job)
-            system = _build_system_prompt(job, config["system_prompt"])
+            # Use unique session_id per job so conversations don't bleed
+            session_id = f"{self.slot_id}-{job.id}"
 
-            # Build MCP servers dict (only if Kronos is configured)
-            mcp_servers: dict[str, Any] = {}
-            if self.kronos_mcp_command:
-                mcp_servers["kronos"] = {
-                    "command": self.kronos_mcp_command,
-                    "env": self.kronos_mcp_env,
-                }
-
-            # Build permission callback from audit gate config
-            allow_writes = config.get("allow_writes", False)
-            allow_bash = config.get("allow_bash", False)
-            permission_cb = _make_permission_callback(
-                allow_writes=allow_writes, allow_bash=allow_bash,
-            )
-
-            options = ClaudeAgentOptions(
-                system_prompt=system,
-                mcp_servers=mcp_servers if mcp_servers else None,
-                allowed_tools=config["allowed_tools"],
-                can_use_tool=permission_cb,
-                max_turns=self.max_turns,
-                model=config.get("model"),
-                cwd=self.cwd,
-                add_dirs=self.add_dirs if self.add_dirs else [],
-            )
-
-            # Must unset CLAUDECODE to spawn child sessions from Claude Code
-            saved_claudecode = os.environ.pop("CLAUDECODE", None)
-
+            messages: list[Any] = []
             try:
-                messages: list[Any] = []
-                async with ClaudeSDKClient(options=options) as client:
-                    await client.query(prompt)
-                    async for msg in client.receive_response():
-                        messages.append(msg)
-                        captured = _capture_message(msg)
-                        transcript.append(captured)
-                        if on_message:
-                            try:
-                                await on_message(job.id, captured)
-                            except Exception:
-                                logger.debug("on_message callback error", exc_info=True)
-            finally:
-                # Restore env var
-                if saved_claudecode is not None:
-                    os.environ["CLAUDECODE"] = saved_claudecode
+                await self._client.query(prompt, session_id=session_id)
+                async for msg in self._client.receive_response():
+                    messages.append(msg)
+                    captured = _capture_message(msg)
+                    transcript.append(captured)
+                    if on_message:
+                        try:
+                            await on_message(job.id, captured)
+                        except Exception:
+                            logger.debug("on_message callback error", exc_info=True)
+            except Exception as e:
+                # Subprocess may have died — mark as not warm so next job reconnects
+                logger.warning("Slot %s client error, will reconnect: %s", self.slot_id, e)
+                self._warm = False
+                raise
 
             # Extract result from messages
             result_msg = next((m for m in messages if isinstance(m, ResultMessage)), None)
@@ -277,8 +375,6 @@ def _make_permission_callback(
     Returns PermissionResultAllow/Deny from claude_agent_sdk.
     """
     async def _permission_handler(tool_name, tool_input, context):
-        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
-
         result = can_use_tool(
             tool_name,
             tool_input if isinstance(tool_input, dict) else {},
@@ -305,6 +401,12 @@ def _build_system_prompt(job: Job, base_prompt: str) -> str:
         parts.append(f"Relevant FDOs: {', '.join(job.kronos_fdo_ids)}")
     if job.workspace_id:
         parts.append(f"Workspace: {job.workspace_id}")
+    if job.target_repo:
+        parts.append(
+            f"\nYou are working in the '{job.target_repo}' repository. "
+            f"Your working directory is an isolated git worktree branch for this job. "
+            f"Commit your changes to this branch when done."
+        )
 
     return "\n".join(parts)
 
@@ -328,13 +430,6 @@ def _build_prompt(job: Job) -> str:
 
 def _capture_message(msg: Any) -> dict:
     """Convert an SDK message to a serializable dict for transcript."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ResultMessage,
-        TextBlock,
-        ToolUseBlock,
-    )
-
     if isinstance(msg, AssistantMessage):
         blocks = []
         for block in msg.content:
@@ -361,8 +456,6 @@ def _capture_message(msg: Any) -> dict:
 
 def _extract_final_text(messages: list[Any]) -> str | None:
     """Extract the last text block from assistant messages."""
-    from claude_agent_sdk import AssistantMessage, TextBlock
-
     for msg in reversed(messages):
         if isinstance(msg, AssistantMessage):
             for block in reversed(msg.content):

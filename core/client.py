@@ -116,6 +116,10 @@ def _build_pool_mcp_server():
                     "enum": ["critical", "high", "normal", "low", "background"],
                     "description": "Job priority (default: normal)",
                 },
+                "target_repo": {
+                    "type": "string",
+                    "description": "Target repo (e.g. 'GRIM', 'dawn-field-theory'). Agent gets an isolated git worktree.",
+                },
             },
             "required": ["job_type", "instructions"],
         },
@@ -130,6 +134,7 @@ def _build_pool_mcp_server():
             job_type=JobType(args["job_type"]),
             instructions=args["instructions"],
             priority=JobPriority(args.get("priority", "normal")),
+            target_repo=args.get("target_repo"),
         )
         job_id = await pool.submit(job)
         return {"content": [{"type": "text", "text": f"Job submitted: {job_id} (type={args['job_type']}, priority={args.get('priority', 'normal')})"}]}
@@ -519,6 +524,8 @@ class GrimClient:
                 "ALWAYS submit it as a pool job using pool_submit. Do NOT write code in chat.\n"
                 "  Examples that should be dispatched: 'build me a webserver', 'write a script that...', "
                 "'create a FastAPI app', 'fix the bug in...', 'add tests for...'\n"
+                "- ALWAYS set target_repo to the repository the agent should work in "
+                "(e.g. 'GRIM', 'dawn-field-theory', 'fracton'). This gives the agent an isolated git worktree.\n"
                 "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
                 "- After submitting, tell the user the job ID and that they can watch progress in the Studio tab.\n"
                 "- Use pool_job_status to check on running jobs when the user asks.\n"

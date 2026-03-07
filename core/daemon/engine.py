@@ -254,10 +254,22 @@ class ManagementEngine:
             job_type=job_type,
             priority=priority,
             instructions=instructions,
+            target_repo=self._infer_target_repo(item),
         )
 
         await self._pool_queue.submit(job)
         return job.id
+
+    # Known project → repo mappings
+    _PROJECT_REPO_MAP: dict[str, str] = {
+        "proj-grim": "GRIM", "proj-charizard": "GRIM", "proj-mewtwo": "GRIM",
+        "proj-dft": "dawn-field-theory", "proj-fracton": "fracton",
+        "proj-reality-engine": "reality-engine",
+    }
+
+    def _infer_target_repo(self, item: Any) -> str | None:
+        """Infer target repo from project ID."""
+        return self._PROJECT_REPO_MAP.get(getattr(item, "project_id", None))
 
     def _build_instructions(self, item: Any) -> str:
         """Build agent instructions from pipeline item + vault story data."""

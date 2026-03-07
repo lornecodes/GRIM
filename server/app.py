@@ -2309,6 +2309,7 @@ async def api_pool_submit(request: Request):
             instructions=body["instructions"],
             priority=JobPriority(body.get("priority", "normal")),
             plan=body.get("plan"),
+            target_repo=body.get("target_repo"),
             workspace_id=body.get("workspace_id"),
             kronos_domains=body.get("kronos_domains", []),
             kronos_fdo_ids=body.get("kronos_fdo_ids", []),

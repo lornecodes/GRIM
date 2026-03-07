@@ -70,7 +70,8 @@ class ExecutionPool:
         # Resource lock for shared operations (pytest, pip, npm, git main)
         self._resource_lock = ResourceLock()
 
-        # Build Kronos MCP env from config
+        # Build Kronos MCP config — prefer SSE URL over stdio command
+        self._kronos_mcp_url = getattr(config, "pool_kronos_url", "") or ""
         self._kronos_mcp_command = getattr(config, "kronos_mcp_command", "")
         self._kronos_mcp_env: dict[str, str] = {}
         vault_path = getattr(config, "vault_path", None)
@@ -83,7 +84,9 @@ class ExecutionPool:
             self._kronos_mcp_env["KRONOS_WORKSPACE_ROOT"] = str(workspace_root)
 
     async def start(self) -> None:
-        """Initialize queue, refresh caches, and start the dispatch loop."""
+        """Initialize queue, refresh caches, warm Kronos, and start dispatch loop."""
+        import time as _time
+
         await self._queue.initialize()
 
         # Initialize codebase caches (non-blocking — failures are logged, not fatal)
@@ -96,6 +99,13 @@ class ExecutionPool:
             except Exception:
                 logger.exception("Failed to refresh codebase caches — continuing without")
 
+        # Warm Kronos MCP — verify SSE server or pre-check stdio availability
+        warm_on_start = getattr(self._config, "pool_warm_on_start", True)
+        if warm_on_start:
+            t0 = _time.time()
+            await self._warm_kronos()
+            logger.info("Kronos warm-up complete in %.1fs", _time.time() - t0)
+
         # Create agent slots
         num_slots = getattr(self._config, "pool_num_slots", 2)
         max_turns = getattr(self._config, "pool_max_turns_per_job", 20)
@@ -105,14 +115,23 @@ class ExecutionPool:
                 slot_id=f"slot-{i}",
                 kronos_mcp_command=self._kronos_mcp_command,
                 kronos_mcp_env=self._kronos_mcp_env,
+                kronos_mcp_url=self._kronos_mcp_url,
                 max_turns=max_turns,
             )
             for i in range(num_slots)
         ]
 
+        # Pre-warm slot subprocesses so first job is instant
+        if warm_on_start:
+            t1 = _time.time()
+            for slot in self._slots:
+                await slot.warm()
+            logger.info("Slot subprocesses warmed in %.1fs", _time.time() - t1)
+
         self._running = True
         self._loop_task = asyncio.create_task(self._main_loop())
-        logger.info("ExecutionPool started: %d slots", num_slots)
+        kronos_mode = "SSE" if self._kronos_mcp_url else "stdio"
+        logger.info("ExecutionPool started: %d slots, Kronos=%s", num_slots, kronos_mode)
 
     async def stop(self) -> None:
         """Gracefully shut down the pool."""
@@ -140,6 +159,10 @@ class ExecutionPool:
                     task.cancel()
 
         self._tasks.clear()
+
+        # Shutdown persistent slot subprocesses
+        for slot in self._slots:
+            await slot.shutdown()
 
         # Cleanup remaining workspaces
         if self._workspace_mgr:
@@ -191,6 +214,43 @@ class ExecutionPool:
             "active_workspaces": self._workspace_mgr.active_count if self._workspace_mgr else 0,
             "resource_locks": self._resource_lock.status(),
         }
+
+    # ── Kronos warm-up ─────────────────────────────────────────
+
+    async def _warm_kronos(self) -> None:
+        """Verify Kronos MCP is reachable before accepting jobs.
+
+        SSE mode: HTTP GET /health on the persistent server.
+        Stdio mode: just log that stdio will spawn on demand (no pre-check).
+        """
+        if self._kronos_mcp_url:
+            import httpx as _httpx
+
+            health_url = self._kronos_mcp_url.rstrip("/") + "/health"
+            try:
+                async with _httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(health_url)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    engines_ready = data.get("engines_initialized", False)
+                    if engines_ready:
+                        logger.info("Kronos SSE server healthy (engines initialized)")
+                    else:
+                        logger.warning(
+                            "Kronos SSE server reachable but engines not yet initialized "
+                            "— first job may be slow"
+                        )
+            except Exception as e:
+                logger.warning(
+                    "Kronos SSE server unreachable at %s: %s — "
+                    "falling back to stdio for this session",
+                    health_url, e,
+                )
+                self._kronos_mcp_url = ""  # Fall back to stdio
+        elif self._kronos_mcp_command:
+            logger.info("Kronos configured for stdio — MCP will spawn per-job")
+        else:
+            logger.info("No Kronos MCP configured — pool agents run without vault tools")
 
     # ── Agent streaming callback ────────────────────────────────
 
@@ -290,27 +350,29 @@ class ExecutionPool:
             data={"slot_id": slot.slot_id},
         ))
 
-        # Create workspace for code jobs (git worktree isolation)
+        # Create workspace for code jobs with a target repo (git worktree isolation)
         workspace_id: str | None = None
         if (
             job.job_type == JobType.CODE
             and self._workspace_mgr
             and self._workspace_root
+            and job.target_repo
         ):
+            repo_path = self._workspace_root / job.target_repo
             try:
-                ws = await self._workspace_mgr.create(job.id, self._workspace_root)
+                ws = await self._workspace_mgr.create(job.id, repo_path)
                 workspace_id = ws.id
                 self._job_workspace_map[job.id] = ws.id
                 slot.cwd = str(ws.worktree_path)
                 # Give CODE agents read access to full workspace alongside their worktree
                 if self._workspace_root:
                     slot.add_dirs = [str(self._workspace_root)]
-                logger.info("Job %s using workspace %s", job.id, ws.id)
+                logger.info("Job %s worktree in %s: %s", job.id, job.target_repo, ws.id)
             except Exception as e:
-                logger.warning("Failed to create workspace for %s: %s — running in main repo", job.id, e)
+                logger.warning("Failed to create workspace for %s in %s: %s", job.id, job.target_repo, e)
 
-        # Non-CODE jobs get workspace root as cwd (full access to core_workspace)
-        if job.job_type != JobType.CODE and self._workspace_root and not slot.cwd:
+        # Fallback: no target_repo or non-CODE → workspace root as cwd
+        if not slot.cwd and self._workspace_root:
             slot.cwd = str(self._workspace_root)
 
         try:

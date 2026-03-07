@@ -84,6 +84,8 @@ class GrimConfig:
     pool_max_turns_per_job: int = 20
     pool_job_timeout_secs: int = 300
     pool_discord_webhook_url: str = ""
+    pool_kronos_url: str = ""  # SSE URL (e.g. "http://127.0.0.1:8319"); empty = stdio
+    pool_warm_on_start: bool = True  # health-check Kronos before accepting jobs
 
     # Management Daemon (Project Mewtwo)
     daemon_enabled: bool = False
@@ -157,6 +159,10 @@ def load_config(config_path: Path | None = None, grim_root: Path | None = None) 
     vault_override = os.getenv("GRIM_VAULT_PATH")
     if vault_override:
         cfg.vault_path = Path(vault_override)
+
+    workspace_override = os.getenv("GRIM_WORKSPACE_ROOT")
+    if workspace_override:
+        cfg.workspace_root = Path(workspace_override)
 
     # Resolve relative paths against grim_root
     cfg.vault_path = _resolve(cfg.vault_path, grim_root)
