@@ -15,6 +15,15 @@ auth-dir: "/root/.cli-proxy-api"
 # No client API key auth — internal network only
 api-keys: []
 
+# Performance — reduce middleware overhead for high concurrency (4 pool slots + chat)
+commercial-mode: true
+usage-statistics-enabled: false
+
+# Retry — retry on transient errors, try all credentials
+request-retry: 3
+max-retry-credentials: 0
+max-retry-interval: 10
+
 # Strip the system field from Claude requests.
 # CLIProxyAPI's checkSystemInstructions() replaces the system field with
 # "You are Claude Code..." on every request. The ai-bridge compensates by

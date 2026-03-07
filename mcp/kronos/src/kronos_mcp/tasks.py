@@ -27,6 +27,7 @@ logger = logging.getLogger("kronos-mcp.tasks")
 VALID_STATUSES = {"draft", "new", "active", "in_progress", "resolved", "closed"}
 VALID_PRIORITIES = {"critical", "high", "medium", "low"}
 VALID_ASSIGNEES = {"code", "research", "audit", "plan", ""}
+VALID_OWNERS = {"grim", "human", ""}
 PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 # Map vault directory names to domain labels
@@ -153,6 +154,8 @@ class TaskEngine:
                         "estimate_days": story.get("estimate_days", 0),
                         "description": story.get("description", ""),
                         "assignee": story.get("assignee", ""),
+                        "owner": story.get("owner", ""),
+                        "depends_on": story.get("depends_on", []),
                         "job_id": story.get("job_id"),
                         "project": proj_id,
                         "domain": domain,
@@ -196,6 +199,8 @@ class TaskEngine:
         tags: list[str] | None = None,
         created_by: str = "human",
         status: str = "new",
+        owner: str = "",
+        depends_on: list[str] | None = None,
     ) -> dict:
         """Create a new story in a project FDO."""
         if status not in VALID_STATUSES:
@@ -204,6 +209,12 @@ class TaskEngine:
             return {"error": f"Invalid priority: {priority}", "valid": list(VALID_PRIORITIES)}
         if assignee and assignee not in VALID_ASSIGNEES:
             return {"error": f"Invalid assignee: {assignee}", "valid": sorted(VALID_ASSIGNEES - {""})}
+        if owner and owner not in VALID_OWNERS:
+            return {"error": f"Invalid owner: {owner}", "valid": sorted(VALID_OWNERS - {""})}
+        if depends_on:
+            for dep_id in depends_on:
+                if not isinstance(dep_id, str) or not dep_id.startswith("story-"):
+                    return {"error": f"Invalid depends_on ID: {dep_id} (must start with 'story-')"}
 
         lock = self._get_lock(proj_id)
         with lock:
@@ -231,6 +242,8 @@ class TaskEngine:
                 "description": description,
                 "acceptance_criteria": acceptance_criteria or [],
                 "assignee": assignee,
+                "owner": owner,
+                "depends_on": depends_on or [],
                 "tags": tags or [],
                 "created": today,
                 "updated": today,
@@ -256,6 +269,15 @@ class TaskEngine:
             return {"error": f"Invalid priority: {fields['priority']}", "valid": list(VALID_PRIORITIES)}
         if "assignee" in fields and fields["assignee"] and fields["assignee"] not in VALID_ASSIGNEES:
             return {"error": f"Invalid assignee: {fields['assignee']}", "valid": sorted(VALID_ASSIGNEES - {""})}
+        if "owner" in fields and fields["owner"] and fields["owner"] not in VALID_OWNERS:
+            return {"error": f"Invalid owner: {fields['owner']}", "valid": sorted(VALID_OWNERS - {""})}
+        if "depends_on" in fields:
+            deps = fields["depends_on"]
+            if not isinstance(deps, list):
+                return {"error": "depends_on must be a list of story IDs"}
+            for dep_id in deps:
+                if not isinstance(dep_id, str) or not dep_id.startswith("story-"):
+                    return {"error": f"Invalid depends_on ID: {dep_id} (must start with 'story-')"}
 
         return self._update_story(item_id, fields)
 
@@ -306,8 +328,12 @@ class TaskEngine:
                     story.setdefault("log", []).append(f"{today}: Status → {value}")
                 if key == "assignee" and old_val != value:
                     story.setdefault("log", []).append(f"{today}: Assigned → {value or 'unassigned'}")
+                if key == "owner" and old_val != value:
+                    story.setdefault("log", []).append(f"{today}: Owner → {value or 'unset'}")
                 if key == "job_id" and old_val != value:
                     story.setdefault("log", []).append(f"{today}: Linked to pool job {value}")
+                if key == "depends_on" and old_val != value:
+                    story.setdefault("log", []).append(f"{today}: Dependencies → {value or []}")
 
             story["updated"] = today
             self._set_stories(fm, stories)
@@ -336,6 +362,7 @@ class TaskEngine:
         domain: str | None = None,
         status: str | None = None,
         priority: str | None = None,
+        owner: str | None = None,
     ) -> list[dict]:
         """List stories with optional filters."""
         results = []
@@ -357,6 +384,8 @@ class TaskEngine:
                     continue
                 if priority and story.get("priority") != priority:
                     continue
+                if owner is not None and story.get("owner", "") != owner:
+                    continue
 
                 results.append({
                     "id": story["id"],
@@ -365,6 +394,8 @@ class TaskEngine:
                     "priority": story.get("priority", "medium"),
                     "estimate_days": story.get("estimate_days", 0),
                     "assignee": story.get("assignee", ""),
+                    "owner": story.get("owner", ""),
+                    "depends_on": story.get("depends_on", []),
                     "job_id": story.get("job_id"),
                     "project": proj_id,
                     "domain": proj_domain,

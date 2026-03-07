@@ -12,10 +12,16 @@ import yaml
 
 from core.daemon.context import (
     ContextBuilder,
+    KNOWN_SKILL_TAGS,
     MAX_CHARS,
+    MAX_SKILL_CHARS,
     MAX_SOURCE_FILES,
     SOURCE_SNIPPET_LINES,
     _extract_section,
+    _is_execution_story,
+    _SKILL_CARDS,
+    _SKILL_CARD_SOURCES,
+    suggest_tags,
 )
 
 
@@ -491,6 +497,171 @@ class TestAssembly:
         assert "B" not in result
 
 
+# ── Execution detection tests ────────────────────────────────────
+
+
+class TestExecutionDetection:
+    """Test _is_execution_story detection logic."""
+
+    @pytest.mark.parametrize("tags", [
+        ["experiment"],
+        ["run"],
+        ["execute"],
+        ["benchmark"],
+        ["validate"],
+        ["experiment", "dft"],
+    ])
+    def test_detected_by_tag(self, tags):
+        assert _is_execution_story(_story_data(tags=tags))
+
+    def test_not_detected_by_unrelated_tags(self):
+        assert not _is_execution_story(_story_data(tags=["feature", "refactor"]))
+
+    @pytest.mark.parametrize("title", [
+        "Run the benchmark script",
+        "Execute the validation pipeline",
+        "Run experiment for milestone 4",
+        "Capture the output of analysis.py",
+        "Report the results of SEC test",
+    ])
+    def test_detected_by_title_keyword(self, title):
+        assert _is_execution_story(_story_data(title=title, tags=["feature"]))
+
+    @pytest.mark.parametrize("desc", [
+        "We need to run the script and check output",
+        "Execute the experiment in foundational/",
+        "Capture the results from the simulation",
+    ])
+    def test_detected_by_description_keyword(self, desc):
+        assert _is_execution_story(_story_data(description=desc, tags=["feature"]))
+
+    def test_not_detected_for_pure_code(self):
+        assert not _is_execution_story(_story_data(
+            title="Add error handling to parser",
+            description="Refactor the parser to handle edge cases.",
+            tags=["feature"],
+        ))
+
+    def test_empty_story(self):
+        assert not _is_execution_story({})
+
+    def test_none_tags(self):
+        assert not _is_execution_story(_story_data(tags=None))
+
+
+# ── Execution instructions tests ────────────────────────────────
+
+
+class TestExecutionInstructions:
+    """Test _resolve_execution_instructions section."""
+
+    def test_returns_protocol_for_experiment_tag(self, builder):
+        result = builder._resolve_execution_instructions(
+            _story_data(tags=["experiment", "dft"])
+        )
+        assert "Execution Protocol" in result
+        assert "python" in result
+        assert "Capture" in result
+
+    def test_returns_empty_for_code_only(self, builder):
+        result = builder._resolve_execution_instructions(
+            _story_data(tags=["feature"])
+        )
+        assert result == ""
+
+    def test_includes_acceptance_criteria(self, builder):
+        result = builder._resolve_execution_instructions(
+            _story_data(
+                tags=["experiment"],
+                acceptance_criteria=["SEC converges to 1e-6", "Runtime < 30s"],
+            )
+        )
+        assert "SEC converges" in result
+        assert "Runtime < 30s" in result
+
+    def test_keyword_detection_in_title(self, builder):
+        result = builder._resolve_execution_instructions(
+            _story_data(title="Run the SEC benchmark", tags=["dft"])
+        )
+        assert "Execution Protocol" in result
+
+    def test_no_ac_still_produces_protocol(self, builder):
+        result = builder._resolve_execution_instructions(
+            _story_data(tags=["run"], acceptance_criteria=[])
+        )
+        assert "Execution Protocol" in result
+        assert "Run" in result
+
+
+# ── Skill card tests ────────────────────────────────────────────
+
+
+class TestSkillCards:
+    """Test _resolve_skill_cards domain knowledge injection."""
+
+    def test_experiment_tag_injects_card(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["experiment"]))
+        assert "Domain Knowledge" in result
+        assert "meta.yaml" in result
+        assert "exp_NN" in result
+
+    def test_physics_tag_injects_card(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["physics"]))
+        assert "Domain Knowledge" in result
+        assert "PAC" in result
+        assert "SEC" in result
+
+    def test_dft_tag_injects_card(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["dft"]))
+        assert "Dawn Field Theory" in result
+
+    def test_dft_and_physics_are_same_card(self, builder):
+        """Alias tags should not duplicate content."""
+        result = builder._resolve_skill_cards(_story_data(tags=["dft", "physics"]))
+        # Should only appear once — aliases resolved by id()
+        assert result.count("Dawn Field Theory") == 1
+
+    def test_multiple_tags_multiple_cards(self, builder):
+        result = builder._resolve_skill_cards(
+            _story_data(tags=["experiment", "changelog"])
+        )
+        assert "Experiment Schema" in result
+        assert "Changelog Convention" in result
+
+    def test_unknown_tags_return_empty(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["unrelated-tag"]))
+        assert result == ""
+
+    def test_empty_tags_return_empty(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=[]))
+        assert result == ""
+
+    def test_budget_cap_respected(self, builder):
+        """Cards should not exceed MAX_SKILL_CHARS."""
+        # Use all known tags to maximize content
+        all_tags = ["experiment", "dft", "spec", "changelog", "vault-sync", "library"]
+        result = builder._resolve_skill_cards(_story_data(tags=all_tags))
+        # The domain knowledge section (without header) should be capped
+        assert len(result) <= MAX_SKILL_CHARS + len("## Domain Knowledge\n\n") + 200
+
+    def test_vault_alias(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["vault"]))
+        assert "Vault Sync" in result
+
+    def test_library_card(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["library"]))
+        assert "Library Conventions" in result
+
+    def test_module_alias(self, builder):
+        """module tag should inject library card."""
+        result = builder._resolve_skill_cards(_story_data(tags=["module"]))
+        assert "Library Conventions" in result
+
+    def test_spec_card(self, builder):
+        result = builder._resolve_skill_cards(_story_data(tags=["spec"]))
+        assert "Spec-Driven" in result
+
+
 # ── Full build tests ─────────────────────────────────────────────
 
 
@@ -569,3 +740,143 @@ class TestFullBuild:
         _make_project(vault, "proj-test")
         result = builder.build(_story_data(assignee="plan"), "proj-test")
         assert "designing the implementation" in result
+
+    def test_execution_section_for_experiment_story(self, vault, builder):
+        """Build includes execution protocol for experiment stories."""
+        _make_project(vault, "proj-test")
+        result = builder.build(
+            _story_data(tags=["experiment", "dft"]),
+            "proj-test",
+        )
+        assert "Execution Protocol" in result
+        assert "python" in result
+
+    def test_no_execution_section_for_code_story(self, vault, builder):
+        """Build omits execution protocol for pure code stories."""
+        _make_project(vault, "proj-test")
+        result = builder.build(
+            _story_data(tags=["feature"]),
+            "proj-test",
+        )
+        assert "Execution Protocol" not in result
+
+    def test_skill_cards_in_full_build(self, vault, builder):
+        """Build includes domain knowledge for tagged stories."""
+        _make_project(vault, "proj-test")
+        result = builder.build(
+            _story_data(tags=["experiment", "changelog"]),
+            "proj-test",
+        )
+        assert "Domain Knowledge" in result
+        assert "Experiment Schema" in result
+        assert "Changelog Convention" in result
+
+    def test_no_skill_cards_for_untagged(self, vault, builder):
+        """Build omits domain knowledge for stories without matching tags."""
+        _make_project(vault, "proj-test")
+        result = builder.build(
+            _story_data(tags=["feature"]),
+            "proj-test",
+        )
+        assert "Domain Knowledge" not in result
+
+
+# ── Skill Card Freshness Tests ────────────────────────────────────
+
+
+class TestSkillCardFreshness:
+    """Lightweight freshness checks — verify skill cards mention key terms from source files."""
+
+    # Key terms each card must contain (case-insensitive).
+    _EXPECTED_TERMS: dict[str, list[str]] = {
+        "experiment": ["meta.yaml", "scripts/", "results/", "exp_NN"],
+        "dft": ["PAC", "SEC", "RBF", "MED"],
+        "spec": [".spec/", "spec"],
+        "changelog": [".changelog/", "YYYYMMDD"],
+        "vault-sync": ["source_paths", "FDO"],
+        "library": ["__init__.py", "tests/", "type hints"],
+    }
+
+    def test_all_non_alias_cards_have_sources(self):
+        """Every real (non-alias) card must have a source file mapping."""
+        for name, card in _SKILL_CARDS.items():
+            # Skip aliases (value is same object as another card)
+            is_alias = _SKILL_CARD_SOURCES.get(name) is None
+            if is_alias:
+                continue
+            assert name in _SKILL_CARD_SOURCES, f"Card '{name}' has no source mapping"
+            assert _SKILL_CARD_SOURCES[name] is not None
+
+    @pytest.mark.parametrize("card_name,terms", list(_EXPECTED_TERMS.items()))
+    def test_card_contains_key_terms(self, card_name, terms):
+        """Each skill card should mention key terms from its source."""
+        card = _SKILL_CARDS.get(card_name)
+        assert card is not None, f"Card '{card_name}' not found"
+        for term in terms:
+            assert term.lower() in card.lower(), (
+                f"Skill card '{card_name}' is missing key term '{term}'. "
+                f"Has the source instruction file changed?"
+            )
+
+    def test_source_files_exist(self):
+        """All source paths in _SKILL_CARD_SOURCES should exist on disk."""
+        ws_root = Path(__file__).resolve().parent.parent.parent  # core_workspace
+        for name, rel_path in _SKILL_CARD_SOURCES.items():
+            if rel_path is None:
+                continue
+            full = ws_root / rel_path
+            assert full.exists(), (
+                f"Source file for card '{name}' not found: {rel_path}. "
+                f"Has the instruction file been moved or deleted?"
+            )
+
+    def test_sources_dict_covers_all_cards(self):
+        """Every key in _SKILL_CARDS must appear in _SKILL_CARD_SOURCES."""
+        for name in _SKILL_CARDS:
+            assert name in _SKILL_CARD_SOURCES, (
+                f"Card '{name}' exists in _SKILL_CARDS but not in _SKILL_CARD_SOURCES"
+            )
+
+
+# ── Tag Suggestion Tests ──────────────────────────────────────────
+
+
+class TestSuggestTags:
+    """Test the suggest_tags() helper for tag discipline."""
+
+    def test_experiment_keywords(self):
+        result = suggest_tags("Run experiment for milestone 4")
+        assert "experiment" in result
+
+    def test_dft_keywords(self):
+        result = suggest_tags("Validate PAC conservation in SEC domain")
+        assert "dft" in result
+
+    def test_library_keywords(self):
+        result = suggest_tags("Refactor fracton public API")
+        assert "library" in result
+
+    def test_spec_keywords(self):
+        result = suggest_tags("Update specification for auth module")
+        assert "spec" in result
+
+    def test_no_matches(self):
+        result = suggest_tags("Fix typo in README")
+        assert result == []
+
+    def test_multiple_matches(self):
+        result = suggest_tags("Run experiment and update vault FDOs")
+        assert "experiment" in result
+        assert "vault" in result
+
+    def test_known_skill_tags_exported(self):
+        assert "experiment" in KNOWN_SKILL_TAGS
+        assert "dft" in KNOWN_SKILL_TAGS
+        assert "library" in KNOWN_SKILL_TAGS
+        # Aliases should be included (they have non-None values after resolution)
+        assert "physics" in KNOWN_SKILL_TAGS
+        assert "module" in KNOWN_SKILL_TAGS
+
+    def test_returns_sorted(self):
+        result = suggest_tags("vault experiment changelog")
+        assert result == sorted(result)

@@ -48,8 +48,7 @@ services:
       - "8080:8080"   # LAN accessible (all interfaces)
     volumes:
       - ${WORKSPACE_PATH:-/home/peter/repos/core_workspace}:/workspace
-      - grim-sessions:/app/local/sessions
-      - grim-evolution:/app/local/evolution
+      - ./local:/app/local
     deploy:
       resources:
         limits:

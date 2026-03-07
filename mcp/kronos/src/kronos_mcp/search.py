@@ -234,6 +234,8 @@ class SemanticIndex:
     DEFAULT_MODEL = "all-mpnet-base-v2"
     CACHE_FILE = ".kronos_cache/embeddings.json"
 
+    QUERY_CACHE_SIZE = 128  # LRU cache for query embeddings
+
     def __init__(self, vault_path: str, model_name: str | None = None):
         self._vault_path = Path(vault_path)
         self._model_name = model_name or os.getenv("KRONOS_EMBED_MODEL", self.DEFAULT_MODEL)
@@ -242,6 +244,9 @@ class SemanticIndex:
         self._content_hashes: dict[str, str] = {}  # fdo_id → hash of content that was embedded
         self._dim: int = 0
         self._available: bool | None = None  # None = not checked yet
+        self._query_cache: dict[str, object] = {}  # query → numpy vector
+        self._query_cache_order: list[str] = []  # LRU eviction order
+        self._matrix_cache: tuple[list[str], object] | None = None  # (ids, np.array)
         self._load_cache()
 
     @property
@@ -366,6 +371,7 @@ class SemanticIndex:
         embedding = self._model.encode(text, show_progress_bar=False, normalize_embeddings=True)
         self._embeddings[fdo_id] = embedding.tolist()
         self._content_hashes[fdo_id] = content_hash
+        self._matrix_cache = None  # Invalidate
         return True
 
     def update_batch(self, items: dict[str, str]):
@@ -399,12 +405,35 @@ class SemanticIndex:
             self._embeddings[fdo_id] = embeddings[i].tolist()
 
         logger.info(f"Embedded {len(texts)} FDOs in {time.time() - t0:.1f}s")
+        self._matrix_cache = None  # Invalidate
         self._save_cache()
 
     def remove(self, fdo_id: str):
         """Remove an FDO from the index."""
         self._embeddings.pop(fdo_id, None)
         self._content_hashes.pop(fdo_id, None)
+        self._matrix_cache = None  # Invalidate
+
+    def _encode_query(self, query: str):
+        """Encode a query with LRU cache. Returns numpy vector."""
+        if query in self._query_cache:
+            # Move to end of LRU order
+            self._query_cache_order.remove(query)
+            self._query_cache_order.append(query)
+            return self._query_cache[query]
+
+        vec = self._model.encode(
+            query, show_progress_bar=False, normalize_embeddings=True
+        )
+
+        # LRU eviction
+        if len(self._query_cache) >= self.QUERY_CACHE_SIZE:
+            evict = self._query_cache_order.pop(0)
+            del self._query_cache[evict]
+
+        self._query_cache[query] = vec
+        self._query_cache_order.append(query)
+        return vec
 
     def search(self, query: str, max_results: int = 20) -> list[SearchResult]:
         """Cosine similarity search against all stored embeddings."""
@@ -417,14 +446,16 @@ class SemanticIndex:
 
         import numpy as np
 
-        # Encode query
-        query_vec = self._model.encode(
-            query, show_progress_bar=False, normalize_embeddings=True
-        )
+        # Encode query (cached — repeat queries are instant)
+        query_vec = self._encode_query(query)
 
         # Vectorized cosine similarity (normalized → dot product)
-        ids = list(self._embeddings.keys())
-        matrix = np.array([self._embeddings[fid] for fid in ids], dtype=np.float32)
+        # Use cached matrix to avoid rebuilding every search
+        if self._matrix_cache is None or len(self._matrix_cache[0]) != len(self._embeddings):
+            ids = list(self._embeddings.keys())
+            matrix = np.array([self._embeddings[fid] for fid in ids], dtype=np.float32)
+            self._matrix_cache = (ids, matrix)
+        ids, matrix = self._matrix_cache
         sims = matrix @ query_vec.astype(np.float32)
 
         # Sort descending

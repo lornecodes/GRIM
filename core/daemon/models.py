@@ -33,6 +33,7 @@ VALID_TRANSITIONS: dict[PipelineStatus, frozenset[PipelineStatus]] = {
     PipelineStatus.READY: frozenset({PipelineStatus.DISPATCHED}),
     PipelineStatus.DISPATCHED: frozenset({
         PipelineStatus.REVIEW,
+        PipelineStatus.MERGED,       # auto-approve (PLAN goals with small plans)
         PipelineStatus.FAILED,
         PipelineStatus.BLOCKED,
     }),
@@ -83,6 +84,13 @@ class PipelineItem(BaseModel):
     priority: int = 2                           # 0=critical..3=low
     assignee: str = ""                          # code/research/audit/plan
 
+    # Phase 5A: Ownership
+    owner: str = ""                             # "grim" / "human" / "" (default)
+
+    # Phase 5B: Dependencies
+    depends_on: str = ""                        # JSON array of story IDs (stored as TEXT in SQLite)
+    blocked_by: str = ""                        # JSON array of unsatisfied dep story IDs
+
     # Timestamps
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
@@ -91,6 +99,9 @@ class PipelineItem(BaseModel):
     error: Optional[str] = None
     attempts: int = 0
     daemon_retries: int = 0              # Phase 3: daemon-level retry count
+
+    # Phase 5D: Research results
+    result_summary: str = ""                    # Truncated result text for research context
 
     # Phase 4: PR lifecycle
     pr_number: Optional[int] = None

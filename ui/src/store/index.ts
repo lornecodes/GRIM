@@ -13,6 +13,7 @@ interface ChatSlice {
   wsStatus: ConnectionStatus;
   sessions: Session[];
   activeSessionId: string;
+  queuedCount: number;
   // Actions
   setMessages: (msgs: ChatMessage[]) => void;
   appendMessage: (msg: ChatMessage) => void;
@@ -24,6 +25,7 @@ interface ChatSlice {
   setActiveSessionId: (id: string) => void;
   upsertSession: (id: string, title: string) => void;
   deleteSessionById: (id: string) => void;
+  setQueuedCount: (n: number) => void;
 }
 
 // ── UI slice ──
@@ -83,6 +85,7 @@ export const useGrimStore = create<GrimStore>()(
       wsStatus: "disconnected" as ConnectionStatus,
       sessions: [],
       activeSessionId: "",
+      queuedCount: 0,
 
       setMessages: (messages) => set({ messages }),
       appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
@@ -116,6 +119,7 @@ export const useGrimStore = create<GrimStore>()(
         set((s) => ({
           sessions: s.sessions.filter((x) => x.id !== id),
         })),
+      setQueuedCount: (queuedCount) => set({ queuedCount }),
 
       // ── UI state ──
       chatPanelOpen: true,

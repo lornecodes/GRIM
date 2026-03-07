@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 # ── Section budgets (chars) ──────────────────────────────────────
 
-MAX_CHARS = 8000
+MAX_CHARS = 12000
 MAX_ADR_CHARS = 2000
 MAX_SOURCE_CHARS = 2000
 MAX_ORIENTATION_CHARS = 1000
+MAX_SKILL_CHARS = 2500
+MAX_RESEARCH_CONTEXT_CHARS = 2000
 SOURCE_SNIPPET_LINES = 30
 MAX_SOURCE_FILES = 5
 
@@ -60,6 +62,148 @@ _RESEARCH_PROMPTS: dict[str, str] = {
 }
 
 
+# ── Execution detection ──────────────────────────────────────────
+
+_EXECUTION_TAGS = frozenset({"experiment", "run", "execute", "benchmark", "validate"})
+
+_EXECUTION_KEYWORDS = re.compile(
+    r"\b(run\s+(the\s+)?(\w+\s+)?(script|experiment|benchmark|simulation|test suite|pipeline))"
+    r"|\b(execute\s+(the\s+)?(\w+\s+)?(script|experiment|benchmark|simulation|pipeline))"
+    r"|\b(capture\s+(the\s+)?(output|results|metrics))"
+    r"|\b(report\s+(the\s+)?(results|output|metrics))",
+    re.IGNORECASE,
+)
+
+
+def _is_execution_story(story_data: dict) -> bool:
+    """Detect whether a story requires script/experiment execution.
+
+    Checks story tags (exact match against known execution tags) and
+    title + description (keyword pattern match).
+    """
+    tags = set(story_data.get("tags") or [])
+    if tags & _EXECUTION_TAGS:
+        return True
+    text = f"{story_data.get('title', '')} {story_data.get('description', '')}"
+    return bool(_EXECUTION_KEYWORDS.search(text))
+
+
+# ── Domain skill cards ───────────────────────────────────────────
+# Compressed distillations of .claude/instructions/ files.
+# Keyed by tag name — multiple tags can match, cards concatenated.
+# See _SKILL_CARD_SOURCES for which instruction file each card derives from.
+# When updating instruction files, check the corresponding card here.
+
+_SKILL_CARD_SOURCES: dict[str, str | None] = {
+    "experiment": ".claude/instructions/experiment-schema.instructions.md",
+    "dft": ".claude/instructions/dawn-field-theory.instructions.md",
+    "physics": None,  # alias for dft
+    "spec": ".claude/instructions/spec-driven-development.instructions.md",
+    "changelog": ".claude/instructions/changelog.instructions.md",
+    "vault-sync": ".claude/instructions/main.instructions.md",
+    "vault": None,  # alias for vault-sync
+    "library": ".claude/instructions/library.instructions.md",
+    "module": None,  # alias for library
+}
+
+_SKILL_CARDS: dict[str, str] = {
+    "experiment": (
+        "### Experiment Schema\n"
+        "Folder: `meta.yaml` + `README.md` + `scripts/` + `results/` + `journals/`\n"
+        "Scripts: `exp_NN_name.py` naming. Results: `exp_NN_name_YYYYMMDD_HHMMSS.json`\n"
+        "Every directory needs `meta.yaml` (schema v2.0, description, semantic_scope, files).\n"
+        "Journals: `YYYY-MM-DD_slug.md` with Summary, Timeline, Key Findings, Next Steps.\n"
+        "Include falsification tests — they're often more valuable than successes.\n"
+        "POCs: hypothesis in README, success criteria quantified, status tracked in POC_REGISTRY.md."
+    ),
+    "dft": (
+        "### Dawn Field Theory Context\n"
+        "Exploratory physics: information gradients as generative foundations of reality.\n"
+        "Four pillars: PAC (f(Parent)=Sum f(Children)), SEC (dS/dt=a*grad(I)-b*grad(H)), "
+        "RBF (self-regulation), MED (depth<=2, nodes<=3).\n"
+        "Key constants: phi (1.618), Xi (~1.057), 1/phi (0.618) — should emerge independently.\n"
+        "Epistemic stance: use 'suggests', 'might', 'appears to' — not certainty.\n"
+        "Navigation: Read meta.yaml first, then SYNTHESIS.md, then exp_*falsification*.py."
+    ),
+    "physics": None,  # alias for dft, resolved below
+    "spec": (
+        "### Spec-Driven Development\n"
+        "Before implementation: read `.spec/*.spec.md`, understand constraints.\n"
+        "If spec missing for major feature: propose spec FIRST and wait for approval.\n"
+        "If changes deviate from spec: propose spec update before implementing.\n"
+        "Check `challenges.md` for open questions. Failed POCs are valuable documentation."
+    ),
+    "changelog": (
+        "### Changelog Convention\n"
+        "Folder: `.changelog/YYYYMMDD_HHMMSS_brief_slug.md` — one file per session.\n"
+        "NEVER create summary .md files at repo roots.\n"
+        "Type tags: engineering | research | documentation | refactor | bugfix | release.\n"
+        "Sections: Summary, Changes (Added/Changed/Fixed/Removed), Details, Related.\n"
+        "Include commit hash, reasoning for decisions, links to artifacts."
+    ),
+    "vault-sync": (
+        "### Vault Sync (Mandatory)\n"
+        "After ANY task that modifies code, experiments, or project structure:\n"
+        "1. Identify affected FDOs (`kronos_search` by tags, source_paths, project)\n"
+        "2. Update: source_paths when files move, counts/status when things change\n"
+        "3. Add log entries to project FDOs\n"
+        "Vault drift is the #1 documentation failure mode. This is NOT optional."
+    ),
+    "vault": None,  # alias for vault-sync, resolved below
+    "library": (
+        "### Library Conventions\n"
+        "Module structure: public API in __init__.py, sub-packages for domains.\n"
+        "Tests: mirror source structure in tests/ folder, pytest with descriptive names.\n"
+        "Type hints on all public functions. Docstrings on public API (Google style).\n"
+        "Keep diffs small and focused. Preserve existing interfaces.\n"
+        "Protected files: .env*, *.key, CI/CD configs, lock files."
+    ),
+    "module": None,  # alias for library, resolved below
+}
+
+# Resolve aliases
+_SKILL_CARDS["physics"] = _SKILL_CARDS["dft"]
+_SKILL_CARDS["vault"] = _SKILL_CARDS["vault-sync"]
+_SKILL_CARDS["module"] = _SKILL_CARDS["library"]
+
+# Tags that trigger skill card injection — exported for task creation.
+KNOWN_SKILL_TAGS: frozenset[str] = frozenset(
+    name for name, card in _SKILL_CARDS.items() if card is not None
+)
+
+# Keyword patterns for tag suggestion (tag → trigger words).
+_TAG_KEYWORDS: dict[str, set[str]] = {
+    "experiment": {"experiment", "exp_", "hypothesis", "falsification", "milestone"},
+    "dft": {"dawn field", "pac", "sec ", "rbf", "med ", "entropy", "information gradient"},
+    "physics": {"physics", "quantum", "field theory", "pillar"},
+    "spec": {"spec", "specification", "design doc"},
+    "changelog": {"changelog", "release note"},
+    "vault-sync": {"vault sync", "update fdo", "source_paths"},
+    "vault": {"vault", "fdo", "knowledge graph"},
+    "library": {"library", "module", "package", "public api", "fracton"},
+    "run": {"run script", "execute script", "benchmark", "pipeline"},
+    "validate": {"validate", "verification", "check results"},
+}
+
+
+def suggest_tags(title: str, description: str = "") -> list[str]:
+    """Suggest skill-relevant tags based on title/description keywords.
+
+    Simple case-insensitive substring matching. Returns sorted unique
+    suggestions. Intended as advisory, not enforcement.
+    """
+    text = f"{title} {description}".lower()
+    suggestions: list[str] = []
+
+    for tag, keywords in _TAG_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text:
+                suggestions.append(tag)
+                break
+
+    return sorted(set(suggestions))
+
+
 def _extract_section(body: str, heading: str, level: int = 2) -> str:
     """Extract a markdown section's content by heading name.
 
@@ -92,10 +236,11 @@ class ContextBuilder:
         instructions = builder.build(story_data, project_id)
     """
 
-    def __init__(self, vault_path: Path, workspace_root: Path) -> None:
+    def __init__(self, vault_path: Path, workspace_root: Path, pipeline_store=None) -> None:
         self._vault_path = vault_path
         self._workspace_root = workspace_root
         self._vault = None  # lazy init
+        self._pipeline_store = pipeline_store  # PipelineStore for research context
 
     @property
     def vault(self):
@@ -117,30 +262,42 @@ class ContextBuilder:
         # 1. Mandatory: story header
         header = self._resolve_story_header(story_data)
 
-        # 2. Find related ADRs
+        # 2. Prior research context (from completed research dependencies)
+        prior_research = self._resolve_research_context(story_data)
+
+        # 3. Find related ADRs
         adrs = self._resolve_adrs(project_id)
 
-        # 3. Decision boundaries from ADRs
+        # 4. Decision boundaries from ADRs
         boundaries = self._resolve_decision_boundaries(adrs)
 
-        # 4. Research prompt (tells agent about available tools)
+        # 5. Research prompt (tells agent about available tools)
         research = _RESEARCH_PROMPTS.get(assignee, _RESEARCH_PROMPT_BASE)
 
-        # 5. ADR context (Decision section)
+        # 6. Execution protocol (only for run/experiment stories)
+        execution = self._resolve_execution_instructions(story_data)
+
+        # 7. Domain skill cards (based on story tags)
+        skills = self._resolve_skill_cards(story_data)
+
+        # 8. ADR context (Decision section)
         adr_context = self._resolve_adr_context(adrs)
 
-        # 6. Codebase orientation (meta.yaml)
+        # 9. Codebase orientation (meta.yaml)
         source_paths = self._collect_source_paths(project_id, adrs)
         orientation = self._resolve_orientation(source_paths)
 
-        # 7. Source snippets
+        # 10. Source snippets
         snippets = self._resolve_source_snippets(source_paths)
 
         # Assemble with budget management
         sections = [
             ("header", header, 600),
+            ("prior_research", prior_research, MAX_RESEARCH_CONTEXT_CHARS),
             ("boundaries", boundaries, 800),
             ("research", research, 850),
+            ("execution", execution, 600),
+            ("skills", skills, MAX_SKILL_CHARS),
             ("adr_context", adr_context, MAX_ADR_CHARS),
             ("orientation", orientation, MAX_ORIENTATION_CHARS),
             ("snippets", snippets, MAX_SOURCE_CHARS),
@@ -149,6 +306,143 @@ class ContextBuilder:
         return self._assemble(sections)
 
     # ── Resolvers ────────────────────────────────────────────────
+
+    def _resolve_execution_instructions(self, story_data: dict) -> str:
+        """Build execution protocol when the story requires running scripts.
+
+        Returns empty string for pure code-writing stories.
+        """
+        if not _is_execution_story(story_data):
+            return ""
+
+        ac = story_data.get("acceptance_criteria") or []
+        ac_block = ""
+        if ac:
+            ac_lines = "\n".join(f"  - {c}" for c in ac)
+            ac_block = f"\n- Validate results against acceptance criteria:\n{ac_lines}"
+
+        return (
+            "## Execution Protocol\n\n"
+            "This story requires running code, not just writing it.\n\n"
+            "1. **Run** the target script/experiment with `python <script>.py`\n"
+            "2. **Capture** the full stdout/stderr output\n"
+            "3. **Report** key metrics, return codes, and pass/fail status\n"
+            "4. **Diagnose** failures — fix the issue and re-run, don't just report errors"
+            f"{ac_block}\n\n"
+            "Do NOT just write the code and stop. The deliverable is working, "
+            "validated results."
+        )
+
+    def _resolve_research_context(self, story_data: dict) -> str:
+        """Inject prior research results when story depends on completed research.
+
+        Queries the pipeline store for completed research stories that this
+        story depends on, and includes their result_summary as context.
+        Returns empty string if no pipeline store, no dependencies, or no
+        research results found.
+        """
+        if self._pipeline_store is None:
+            return ""
+
+        depends_on_raw = story_data.get("depends_on") or ""
+        if not depends_on_raw:
+            return ""
+
+        # Parse dependency IDs (stored as JSON array string or plain list)
+        import json as _json
+        if isinstance(depends_on_raw, str):
+            try:
+                dep_ids = _json.loads(depends_on_raw)
+            except (ValueError, _json.JSONDecodeError):
+                dep_ids = [d.strip() for d in depends_on_raw.split(",") if d.strip()]
+        elif isinstance(depends_on_raw, list):
+            dep_ids = depends_on_raw
+        else:
+            return ""
+
+        if not dep_ids:
+            return ""
+
+        # Look up each dependency in the pipeline for research results
+        parts: list[str] = []
+        total = 0
+
+        for dep_id in dep_ids:
+            try:
+                item = self._get_pipeline_item_sync(dep_id)
+                if item is None:
+                    continue
+                # Only include research results (assignee=research with a result_summary)
+                if getattr(item, "assignee", "") != "research":
+                    continue
+                summary = getattr(item, "result_summary", "")
+                if not summary:
+                    continue
+                entry = f"### Research: {dep_id}\n{summary}"
+                if total + len(entry) > MAX_RESEARCH_CONTEXT_CHARS - 50:
+                    break
+                parts.append(entry)
+                total += len(entry)
+            except Exception:
+                logger.debug("Could not fetch research context for dep %s", dep_id)
+                continue
+
+        if not parts:
+            return ""
+
+        return "## Prior Research\n\n" + "\n\n".join(parts)
+
+    def _get_pipeline_item_sync(self, story_id: str):
+        """Synchronously fetch a pipeline item by story ID.
+
+        Runs the async get_by_story() in a new event loop if needed.
+        Returns PipelineItem or None.
+        """
+        import asyncio
+
+        coro = self._pipeline_store.get_by_story(story_id)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # We're inside an async context — can't nest event loops.
+            # Use a thread to run the coroutine.
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result(timeout=5)
+        else:
+            return asyncio.run(coro)
+
+    def _resolve_skill_cards(self, story_data: dict) -> str:
+        """Inject domain knowledge based on story tags.
+
+        Looks up compressed skill cards by tag and concatenates them,
+        respecting the MAX_SKILL_CHARS budget.
+        """
+        tags = story_data.get("tags") or []
+        seen_cards: set[int] = set()  # track by id() to skip aliases
+        parts: list[str] = []
+        total = 0
+
+        for tag in tags:
+            card = _SKILL_CARDS.get(tag)
+            if card is None or id(card) in seen_cards:
+                continue
+            seen_cards.add(id(card))
+            if total + len(card) > MAX_SKILL_CHARS:
+                logger.debug("Skill card budget exceeded at tag '%s'", tag)
+                break
+            logger.debug("Injecting skill card for tag '%s'", tag)
+            parts.append(card)
+            total += len(card)
+
+        if not parts:
+            return ""
+
+        return "## Domain Knowledge\n\n" + "\n\n".join(parts)
 
     def _resolve_story_header(self, story_data: dict) -> str:
         """Format story metadata as the instruction header."""

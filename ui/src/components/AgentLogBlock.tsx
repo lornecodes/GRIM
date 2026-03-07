@@ -75,7 +75,7 @@ export function AgentLogBlock({ content, traces, streaming, node }: AgentLogBloc
   const totalMs = extractTotalMs(traces);
   const summary = summarizeTools(toolCalls, streaming);
 
-  const accentColor = node === "dispatch" ? "#34d399" : "#3e5c72";
+  const accentColor = node === "dispatch" ? "#34d399" : node === "pool_job" ? "#f97316" : "#3e5c72";
 
   return (
     <div className="animate-fade-in self-start pl-[42px] max-w-[85%]">

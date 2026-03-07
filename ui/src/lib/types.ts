@@ -1,6 +1,6 @@
 // ── WebSocket protocol types (matches server/app.py) ──
 
-export type TraceCategory = "node" | "llm" | "tool" | "graph";
+export type TraceCategory = "node" | "llm" | "tool" | "graph" | "sdk";
 
 export interface TraceEvent {
   type: "trace";
@@ -9,7 +9,7 @@ export interface TraceEvent {
   ms: number;
   node?: string;
   tool?: string;
-  action?: "start" | "end";
+  action?: "start" | "end" | "call";
   duration_ms?: number;
   detail?: Record<string, unknown>;
   input?: unknown;
@@ -30,6 +30,7 @@ export interface ResponseMeta {
   skills: string[];
   fdo_ids: string[];
   total_ms: number;
+  stop_reason?: string;  // set when response was stopped (cancel, timeout, loop)
 }
 
 export interface ResponseEvent {
@@ -58,6 +59,18 @@ export interface MemoryNotificationEvent {
   duration_ms?: number;
 }
 
+// ── Queue / Cancel events ──
+
+export interface QueuedEvent {
+  type: "queued";
+  content: string;
+  position: number;
+}
+
+export interface CancelledEvent {
+  type: "cancelled";
+}
+
 // ── UI command types (future GRIM UI control) ──
 
 export type UICommandType =
@@ -72,7 +85,7 @@ export interface UICommand {
   payload?: Record<string, unknown>;
 }
 
-export type ServerEvent = TraceEvent | StreamEvent | StreamClearEvent | ResponseEvent | ErrorEvent | MemoryNotificationEvent | UICommand;
+export type ServerEvent = TraceEvent | StreamEvent | StreamClearEvent | ResponseEvent | ErrorEvent | MemoryNotificationEvent | QueuedEvent | CancelledEvent | UICommand;
 
 // ── Chat state types ──
 
@@ -87,6 +100,12 @@ export interface ChatMessage {
   traces: TraceEvent[];
   streaming?: boolean;
   error?: boolean;
+  cancelled?: boolean;
+  queued?: boolean;
+  /** Attached files (displayed as pills on user messages) */
+  files?: { name: string; type: string; size: number }[];
+  /** Pool job ID — when this bubble is following a dispatched pool job */
+  poolJobId?: string;
 }
 
 export interface Session {

@@ -18,7 +18,7 @@ export function ChatPanel() {
 
   const { sessions, activeId, newSession, switchSession, deleteSession } =
     useSessions();
-  const { send } = useGrimSocket(activeSessionId);
+  const { send, cancel } = useGrimSocket(activeSessionId);
 
   const [panelView, setPanelView] = useState<"chat" | "knowledge">("chat");
   const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
@@ -84,7 +84,7 @@ export function ChatPanel() {
             onViewChange={setPanelView}
           />
           {panelView === "chat" ? (
-            <ChatArea onSend={send} />
+            <ChatArea onSend={send} onCancel={cancel} />
           ) : (
             <SessionKnowledgePanel
               sessionId={activeSessionId}

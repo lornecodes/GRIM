@@ -46,6 +46,16 @@ class PoolEventType(str, Enum):
     DAEMON_APPROVED = "daemon_approved"            # reviewer approved → MERGED
     DAEMON_REJECTED = "daemon_rejected"            # reviewer rejected → FAILED
 
+    # Daemon project manager events (Project Mewtwo Phase 5)
+    DAEMON_NUDGE = "daemon_nudge"                  # human story idle too long
+    DAEMON_DEPENDENCY_SATISFIED = "daemon_dependency_satisfied"  # deps met, promoting
+    DAEMON_DEPENDENCY_BLOCKED = "daemon_dependency_blocked"      # can't promote, deps pending
+    DAEMON_PLAN_PROPOSED = "daemon_plan_proposed"                # PLAN agent finished, awaiting approval
+    DAEMON_GOAL_COMPLETE = "daemon_goal_complete"                # all child stories done
+    DAEMON_RESEARCH_COMPLETE = "daemon_research_complete"          # research job done, dependents unblocked
+    DAEMON_STUCK_WARNING = "daemon_stuck_warning"                    # item dispatched > N hours
+    DAEMON_DAILY_SUMMARY = "daemon_daily_summary"                    # daily pipeline summary
+
     # Streaming events — emitted per-message during agent execution
     AGENT_OUTPUT = "agent_output"
     AGENT_TOOL_RESULT = "agent_tool_result"

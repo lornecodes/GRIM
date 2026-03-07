@@ -105,6 +105,15 @@ class GrimConfig:
     daemon_auto_pr: bool = True              # create PRs on REVIEW for CODE jobs
     daemon_github_repo: str = ""             # default repo for gh CLI
     daemon_pr_poll_interval: int = 300       # seconds between PR comment polls
+    # Phase 5A: Ownership & Notifications
+    daemon_default_owner: str = "grim"       # default owner for stories without explicit owner
+    daemon_nudge_after_days: int = 3         # nudge human owners after N idle days
+    daemon_discord_channel_id: int = 0       # dedicated daemon channel for notifications
+    # Phase 5C: Goal Decomposition
+    daemon_auto_approve_threshold: int = 3   # auto-approve plans with ≤N stories (0 = always require approval)
+    # Phase 5E: Proactive Notifications
+    daemon_daily_summary_hour: int = 14      # UTC hour to emit daily summary (14 = 10 AM ET)
+    daemon_stuck_threshold_hours: int = 2    # emit stuck warning after N hours dispatched
 
     # Redis (optional — for reasoning cache)
     redis_url: str = ""
@@ -334,6 +343,21 @@ def _apply_yaml(cfg: GrimConfig, raw: dict, root: Path) -> None:
         cfg.daemon_github_repo = daemon["github_repo"]
     if "pr_poll_interval" in daemon:
         cfg.daemon_pr_poll_interval = daemon["pr_poll_interval"]
+    # Phase 5A: Ownership & Notifications
+    if "default_owner" in daemon:
+        cfg.daemon_default_owner = daemon["default_owner"]
+    if "nudge_after_days" in daemon:
+        cfg.daemon_nudge_after_days = daemon["nudge_after_days"]
+    if "discord_channel_id" in daemon:
+        cfg.daemon_discord_channel_id = daemon["discord_channel_id"]
+    # Phase 5C: Goal Decomposition
+    if "auto_approve_threshold" in daemon:
+        cfg.daemon_auto_approve_threshold = daemon["auto_approve_threshold"]
+    # Phase 5E: Proactive Notifications
+    if "daily_summary_hour" in daemon:
+        cfg.daemon_daily_summary_hour = daemon["daily_summary_hour"]
+    if "stuck_threshold_hours" in daemon:
+        cfg.daemon_stuck_threshold_hours = daemon["stuck_threshold_hours"]
 
 
 def save_config_updates(updates: dict, grim_root: Path | None = None) -> GrimConfig:

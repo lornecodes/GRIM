@@ -58,10 +58,16 @@ _agent_metadata: list[dict] | None = None  # dynamic agent roster (populated at 
 _execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
 _daemon_engine: Any = None  # ManagementEngine instance (Project Mewtwo)
 _session_manager: Any = None  # SessionManager for SDK sessions
+_conversation_store: Any = None  # ConversationStore for durable chat history
 _ws_connections: set = set()  # active WebSocket connections for chat + pool events
 # Pool WebSocket connections: maps WebSocket → set of subscribed job IDs.
 # Empty set = lifecycle events only. Subscription enables streaming events.
 _pool_ws_subs: dict = {}  # WebSocket → set[str]  (job_id subscriptions)
+# Chat WS connections that follow pool jobs inline (auto-registered on pool_submit)
+_ws_follow_jobs: dict = {}  # WebSocket → set[str]  (job_ids to stream inline in chat)
+# Streaming event buffer: job_id → list of event dicts (replayed on subscribe)
+_pool_event_buffer: dict[str, list[dict]] = {}
+_POOL_EVENT_BUFFER_MAX = 500  # Max events per job to buffer
 
 
 def _grim_root() -> Path:
@@ -236,7 +242,7 @@ async def lifespan(app: FastAPI):
         logger.info("Management daemon disabled (daemon.enabled: false)")
 
     # Boot ConversationStore + SessionManager for SDK sessions
-    global _session_manager
+    global _session_manager, _conversation_store
     _conversation_store = None
     try:
         from server.conversation_store import ConversationStore
@@ -286,6 +292,7 @@ async def lifespan(app: FastAPI):
     if _execution_pool:
         try:
             await _execution_pool.stop()
+            await _execution_pool.queue.close()
         except Exception:
             pass
 
@@ -996,6 +1003,7 @@ class TaskCreateRequest(BaseModel):
     acceptance_criteria: list[str] | None = None
     tags: list[str] | None = None
     assignee: str | None = None
+    owner: str | None = None
 
 
 @app.post("/api/tasks")
@@ -1014,7 +1022,10 @@ class TaskUpdateRequest(BaseModel):
     estimate_days: float | None = None
     description: str | None = None
     assignee: str | None = None
+    owner: str | None = None
     job_id: str | None = None
+    acceptance_criteria: list[str] | None = None
+    tags: list[str] | None = None
 
 
 @app.put("/api/tasks/{item_id}")
@@ -1312,17 +1323,328 @@ async def chat_rest(req: ChatRequest):
 # WebSocket — real-time chat (GrimClient SDK)
 # ---------------------------------------------------------------------------
 
+
+def _looks_incomplete(text: str) -> bool:
+    """Detect if a response ended mid-thought (SDK hit max_turns).
+
+    Returns True if the text looks like the model was still working and got
+    cut off — e.g. ends with a colon, trailing ellipsis, or is just narration
+    announcing what it's about to do without an actual answer.
+    """
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+
+    # Ends with colon — was about to list/continue
+    if stripped.endswith(":"):
+        return True
+
+    # Ends with ellipsis
+    if stripped.endswith("...") or stripped.endswith("…"):
+        return True
+
+    # Ends mid-sentence (no terminal punctuation and last line is short)
+    last_line = stripped.split("\n")[-1].strip()
+    if last_line and last_line[-1] not in ".!?)>|`\"'*_~":
+        # Last line doesn't end with terminal punctuation — likely cut off
+        # But only flag if the line is substantial (not just a code fence etc.)
+        if len(last_line) > 20:
+            return True
+
+    # Only narration, no substance — "Let me read...", "Now I'll look at..."
+    # Check if the last paragraph is just announcing next steps
+    last_para = stripped.split("\n\n")[-1].strip()
+    narration_starts = (
+        "let me", "now let me", "now i'll", "i'll now", "i need to",
+        "let's", "next i'll", "next, i'll", "i'm going to",
+        "right. let me", "right, let me", "okay, let me",
+    )
+    if last_para.lower().startswith(narration_starts) and len(last_para) < 200:
+        return True
+
+    return False
+
+
+async def _handle_streaming_turn(
+    ws: WebSocket,
+    session_id: str,
+    client: Any,
+    message: str,
+    caller_id: str,
+    cancel: asyncio.Event,
+) -> None:
+    """Run one streaming turn with inactivity timeout + loop detection.
+
+    Extracted from websocket_chat so the main WS loop can receive
+    cancel/queue messages concurrently via asyncio.create_task().
+    """
+    import time as _time
+    from core.tools.context import tool_context
+
+    # --- Register inline job following for this chat WS ---
+    tool_context.follow_job_callback = lambda job_id: _ws_follow_jobs.setdefault(ws, set()).add(job_id)
+
+    # --- Guard limits ---
+    IDLE_TIMEOUT = 120      # No event for 120s = stuck (MCP tools can take 60s+)
+    MAX_WALL_CLOCK = 600    # 10 min absolute safety net
+    MAX_TOOL_CALLS = 50     # Brute-force tool cap
+
+    _t0 = _time.monotonic()
+    last_event_at = _t0
+    tool_call_count = 0
+    recent_calls: list[tuple[str, str]] = []  # (name, input_hash) for loop detection
+    stop_reason: str | None = None
+
+    await ws.send_json({
+        "type": "trace", "cat": "sdk", "text": "Processing...", "ms": 0,
+    })
+
+    full_response = ""
+    tool_trace: list[str] = []
+    tool_inputs: list[dict] = []
+
+    try:
+        async for event in client.send_streaming(message):
+            now = _time.monotonic()
+
+            # --- Cancel check ---
+            if cancel.is_set():
+                cancel.clear()
+                stop_reason = "Cancelled"
+                break
+
+            # --- Inactivity check ---
+            if (now - last_event_at) > IDLE_TIMEOUT:
+                stop_reason = f"No response for {IDLE_TIMEOUT}s"
+                logger.warning("SDK idle for %ds — aborting (%s)",
+                               IDLE_TIMEOUT, session_id)
+                break
+
+            # --- Wall clock check ---
+            if (now - _t0) > MAX_WALL_CLOCK:
+                stop_reason = f"Exceeded {MAX_WALL_CLOCK // 60}min limit"
+                logger.warning("SDK hit max wall clock %ds (%s)",
+                               MAX_WALL_CLOCK, session_id)
+                break
+
+            last_event_at = now
+            elapsed = round((now - _t0) * 1000)
+
+            if event.type == "text":
+                token = event.data.get("text", "")
+                if token:
+                    full_response += token
+                    await ws.send_json({
+                        "type": "stream", "token": token, "node": "sdk",
+                    })
+
+            elif event.type == "tool_use":
+                tool_name = event.data.get("name", "unknown")
+                tool_input = event.data.get("input", {})
+                tool_trace.append(tool_name)
+                tool_inputs.append({"name": tool_name, "input": tool_input})
+
+                tool_call_count += 1
+
+                # --- Tool call cap ---
+                if tool_call_count > MAX_TOOL_CALLS:
+                    stop_reason = f"Exceeded {MAX_TOOL_CALLS} tool calls"
+                    logger.warning("SDK hit max tool calls %d (%s)",
+                                   MAX_TOOL_CALLS, session_id)
+                    break
+
+                # --- Reasoning loop detection ---
+                call_sig = (tool_name, json.dumps(tool_input, sort_keys=True))
+                recent_calls.append(call_sig)
+                if len(recent_calls) >= 4:
+                    window = recent_calls[-4:]
+                    unique = set(window)
+                    if len(unique) <= 2:
+                        stop_reason = "Reasoning loop detected"
+                        logger.warning("Reasoning loop: %s (%s)",
+                                       [s[0] for s in unique], session_id)
+                        break
+
+                await ws.send_json({
+                    "type": "trace",
+                    "cat": "tool",
+                    "text": f"⚡ {tool_name}",
+                    "tool": tool_name,
+                    "action": "call",
+                    "ms": elapsed,
+                    "input": _safe_truncate(tool_input),
+                })
+
+            elif event.type == "result":
+                total_ms = round((_time.monotonic() - _t0) * 1000)
+                await ws.send_json({
+                    "type": "trace", "cat": "sdk",
+                    "text": f"Complete ({total_ms}ms)", "ms": total_ms,
+                })
+
+    except asyncio.CancelledError:
+        stop_reason = "Cancelled"
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("Streaming error: %s\n%s", exc, tb)
+        await ws.send_json({
+            "type": "error",
+            "content": f"Error ({type(exc).__name__}): {exc}",
+        })
+        return
+
+    # --- Auto-continue if response ended mid-thought ---
+    # The SDK has a max_turns limit. If the model was still working (last text
+    # ends with ":" or the response is just narration with no real answer),
+    # automatically send a continuation to let it finish.
+    MAX_CONTINUATIONS = 2
+    continuations = 0
+    while (
+        not stop_reason
+        and not cancel.is_set()
+        and continuations < MAX_CONTINUATIONS
+        and full_response.rstrip()
+        and _looks_incomplete(full_response)
+        and tool_call_count > 0  # Only auto-continue if tools were used
+    ):
+        continuations += 1
+        logger.info("Auto-continuing incomplete response (%d/%d) for %s",
+                     continuations, MAX_CONTINUATIONS, session_id)
+        await ws.send_json({
+            "type": "trace", "cat": "sdk",
+            "text": f"Continuing response ({continuations}/{MAX_CONTINUATIONS})...",
+            "ms": round((_time.monotonic() - _t0) * 1000),
+        })
+
+        try:
+            async for event in client.send_streaming("Continue. Provide your summary/answer now — do not make more tool calls unless absolutely necessary."):
+                now = _time.monotonic()
+                if cancel.is_set():
+                    stop_reason = "Cancelled"
+                    break
+                if (now - last_event_at) > IDLE_TIMEOUT:
+                    stop_reason = f"No response for {IDLE_TIMEOUT}s"
+                    break
+                if (now - _t0) > MAX_WALL_CLOCK:
+                    stop_reason = f"Exceeded {MAX_WALL_CLOCK // 60}min limit"
+                    break
+                last_event_at = now
+                elapsed = round((now - _t0) * 1000)
+
+                if event.type == "text":
+                    token = event.data.get("text", "")
+                    if token:
+                        full_response += token
+                        await ws.send_json({
+                            "type": "stream", "token": token, "node": "sdk",
+                        })
+                elif event.type == "tool_use":
+                    tool_name = event.data.get("name", "unknown")
+                    tool_input = event.data.get("input", {})
+                    tool_trace.append(tool_name)
+                    tool_inputs.append({"name": tool_name, "input": tool_input})
+                    tool_call_count += 1
+                    await ws.send_json({
+                        "type": "trace", "cat": "tool",
+                        "text": f"⚡ {tool_name}", "tool": tool_name,
+                        "action": "call", "ms": elapsed,
+                        "input": _safe_truncate(tool_input),
+                    })
+                elif event.type == "result":
+                    pass  # Check completeness in next loop iteration
+        except asyncio.CancelledError:
+            stop_reason = "Cancelled"
+            break
+        except Exception:
+            break  # Don't fail the whole turn on continuation error
+
+    # --- Finalize ---
+    if stop_reason:
+        await ws.send_json({
+            "type": "stream",
+            "token": f"\n\n*(Response stopped: {stop_reason})*",
+            "node": "sdk",
+        })
+        full_response += f"\n\n*(Response stopped: {stop_reason})*"
+
+    _session_manager.touch(session_id)
+    total_ms = round((_time.monotonic() - _t0) * 1000)
+
+    if not full_response:
+        full_response = "I processed your message but have no response to show."
+
+    session_info = client.session_info
+    turn_cost = session_info.get("total_cost_usd", 0)
+
+    await ws.send_json({
+        "type": "response",
+        "content": full_response,
+        "meta": {
+            "mode": "sdk",
+            "tools": tool_trace,
+            "total_ms": total_ms,
+            "cost_usd": turn_cost,
+            "turn_count": session_info.get("turn_count", 0),
+            "stop_reason": stop_reason,
+        },
+    })
+
+    # Persist conversation turn
+    await _session_manager.save_turn(
+        session_id,
+        user_message=message,
+        assistant_message=full_response,
+        cost_usd=turn_cost,
+        tools_used=tool_trace or None,
+    )
+
+    # Extract FDO references from Kronos tool calls
+    if _conversation_store and tool_inputs:
+        turn_num = session_info.get("turn_count", 0)
+        for ti in tool_inputs:
+            name = ti["name"]
+            inp = ti.get("input") or {}
+            fdo_id = None
+            query_str = None
+            if "kronos_get" in name or "kronos_graph" in name:
+                fdo_id = inp.get("id")
+            elif "kronos_search" in name:
+                query_str = inp.get("query", "")
+            elif "kronos_deep_dive" in name:
+                query_str = inp.get("query", "")
+            if fdo_id:
+                try:
+                    await _conversation_store.upsert_knowledge(
+                        session_id, fdo_id,
+                        turn=turn_num, query=query_str,
+                    )
+                except Exception:
+                    pass
+
+    # Clear follow callback so it doesn't leak to other turns
+    tool_context.follow_job_callback = None
+
+    logger.info("WS turn: %s — %d chars, %d tools, %dms%s",
+                session_id, len(full_response), len(tool_trace), total_ms,
+                f" ({stop_reason})" if stop_reason else "")
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(ws: WebSocket, session_id: str):
     """WebSocket chat endpoint — GrimClient SDK sessions.
 
     Protocol:
-      Client sends: {"message": "...", "caller_id": "..."}
+      Client sends:
+        {"message": "...", "caller_id": "..."}  — chat message
+        {"cancel": true}                         — cancel current response
       Server sends:
-        {"type": "trace", "cat": "...", "text": "..."}       — trace events
-        {"type": "stream", "token": "..."}                    — text tokens
-        {"type": "response", "content": "...", "meta": {...}} — final response
-        {"type": "error", "content": "..."}                   — error
+        {"type": "trace", ...}    — trace events
+        {"type": "stream", ...}   — text tokens
+        {"type": "response", ...} — final response
+        {"type": "error", ...}    — error
+        {"type": "queued", ...}   — message queued (GRIM busy)
+        {"type": "cancelled"}     — response was cancelled
     """
     if _session_manager is None:
         await ws.accept()
@@ -1332,131 +1654,110 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
     await ws.accept()
     _ws_connections.add(ws)
+    _ws_follow_jobs[ws] = set()
     logger.info("WS connected: %s", session_id)
+
+    cancel = asyncio.Event()
+    stream_task: asyncio.Task | None = None
+    pending_messages: list[tuple[str, str]] = []  # (message, caller_id)
+
+    async def _drain_queue() -> None:
+        """Process queued messages after current turn finishes."""
+        nonlocal stream_task
+        while pending_messages:
+            msg, cid = pending_messages.pop(0)
+            client = await _session_manager.get_or_create(
+                session_id, caller_id=cid,
+            )
+            cancel.clear()
+            await _handle_streaming_turn(ws, session_id, client, msg, cid, cancel)
+        stream_task = None
 
     try:
         while True:
             data = await ws.receive_text()
             try:
                 payload = json.loads(data)
-                message = payload.get("message", data)
-                caller_id = payload.get("caller_id", "peter")
             except json.JSONDecodeError:
-                message = data
-                caller_id = "peter"
+                payload = {"message": data}
 
+            # --- Cancel signal ---
+            if payload.get("cancel"):
+                if stream_task and not stream_task.done():
+                    cancel.set()
+                    await ws.send_json({"type": "cancelled"})
+                    # Clear pending queue too
+                    if pending_messages:
+                        pending_messages.clear()
+                        await ws.send_json({
+                            "type": "trace", "cat": "sdk",
+                            "text": "Queue cleared", "ms": 0,
+                        })
+                continue
+
+            message = payload.get("message", "")
+            caller_id = payload.get("caller_id", "peter")
             if not message:
                 continue
 
-            try:
-                import time as _time
-                _t0 = _time.monotonic()
+            # --- File attachments → inject into message ---
+            files = payload.get("files")
+            if files and isinstance(files, list):
+                import base64
+                file_parts: list[str] = []
+                for f in files[:5]:  # max 5 files
+                    try:
+                        raw = base64.b64decode(f.get("content", ""))
+                        text = raw.decode("utf-8", errors="replace")
+                        name = f.get("name", "file")
+                        file_parts.append(f"### {name}\n```\n{text[:10000]}\n```")
+                    except Exception:
+                        continue
+                if file_parts:
+                    message = message + "\n\n--- Attached Files ---\n" + "\n\n".join(file_parts)
 
-                # Get or create the GrimClient for this session
+            # --- Queue if busy ---
+            if stream_task and not stream_task.done():
+                pending_messages.append((message, caller_id))
+                await ws.send_json({
+                    "type": "queued",
+                    "content": message,
+                    "position": len(pending_messages),
+                })
+                continue
+
+            # --- Process message ---
+            try:
                 client = await _session_manager.get_or_create(
                     session_id, caller_id=caller_id,
                 )
-
-                await ws.send_json({
-                    "type": "trace", "cat": "sdk", "text": "Processing...",
-                    "ms": 0,
-                })
-
-                full_response = ""
-                tool_trace: list[str] = []
-
-                # Timeout: 120s max for the entire streaming response
-                SDK_TIMEOUT = 120
-
-                async for event in client.send_streaming(message):
-                    elapsed = round((_time.monotonic() - _t0) * 1000)
-                    if elapsed > SDK_TIMEOUT * 1000:
-                        logger.warning("SDK response timed out after %ds", SDK_TIMEOUT)
-                        break
-
-                    if event.type == "text":
-                        token = event.data.get("text", "")
-                        if token:
-                            full_response += token
-                            await ws.send_json({
-                                "type": "stream",
-                                "token": token,
-                                "node": "sdk",
-                            })
-
-                    elif event.type == "tool_use":
-                        tool_name = event.data.get("name", "unknown")
-                        tool_input = event.data.get("input", {})
-                        tool_trace.append(tool_name)
-                        await ws.send_json({
-                            "type": "trace",
-                            "cat": "tool",
-                            "text": f"⚡ {tool_name}",
-                            "tool": tool_name,
-                            "action": "call",
-                            "ms": elapsed,
-                            "input": _safe_truncate(tool_input),
-                        })
-
-                    elif event.type == "result":
-                        total_ms = round((_time.monotonic() - _t0) * 1000)
-                        await ws.send_json({
-                            "type": "trace",
-                            "cat": "sdk",
-                            "text": f"Complete ({total_ms}ms)",
-                            "ms": total_ms,
-                        })
-
-                # Mark session active
-                _session_manager.touch(session_id)
-
-                total_ms = round((_time.monotonic() - _t0) * 1000)
-
-                if not full_response:
-                    full_response = "I processed your message but have no response to show."
-
-                # Get cost/turn data from session
-                session_info = client.session_info
-                turn_cost = session_info.get("total_cost_usd", 0)
-
-                await ws.send_json({
-                    "type": "response",
-                    "content": full_response,
-                    "meta": {
-                        "mode": "sdk",
-                        "tools": tool_trace,
-                        "total_ms": total_ms,
-                        "cost_usd": turn_cost,
-                        "turn_count": session_info.get("turn_count", 0),
-                    },
-                })
-
-                # Persist conversation turn
-                await _session_manager.save_turn(
-                    session_id,
-                    user_message=message,
-                    assistant_message=full_response,
-                    cost_usd=turn_cost,
-                    tools_used=tool_trace or None,
-                )
-
-                logger.info("WS turn: %s — %d chars, %d tools, %dms",
-                            session_id, len(full_response), len(tool_trace), total_ms)
-
             except Exception as exc:
-                import traceback
-                tb = traceback.format_exc()
-                logger.error("WS error: %s\n%s", exc, tb)
-                exc_type = type(exc).__name__
                 await ws.send_json({
                     "type": "error",
-                    "content": f"Error ({exc_type}): {exc}",
+                    "content": f"Session error: {exc}",
                 })
+                continue
+
+            cancel.clear()
+
+            async def _run_turn(cl: Any, msg: str, cid: str) -> None:
+                await _handle_streaming_turn(ws, session_id, cl, msg, cid, cancel)
+                await _drain_queue()
+
+            stream_task = asyncio.create_task(_run_turn(client, message, caller_id))
 
     except WebSocketDisconnect:
         logger.info("WS disconnected: %s", session_id)
     finally:
+        if stream_task and not stream_task.done():
+            cancel.set()
+            stream_task.cancel()
+            try:
+                await stream_task
+            except (asyncio.CancelledError, Exception):
+                pass
         _ws_connections.discard(ws)
+        _ws_follow_jobs.pop(ws, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1475,6 +1776,20 @@ async def _broadcast_pool_event(event) -> None:
     msg = {**event.to_dict(), "type": "pool_event"}  # type MUST come last — to_dict() data may contain "type" from SDK blocks
     is_stream = is_streaming_event(event)
 
+    # Buffer streaming events for replay when clients subscribe late
+    job_id = event.job_id
+    if is_stream and job_id:
+        buf = _pool_event_buffer.setdefault(job_id, [])
+        if len(buf) < _POOL_EVENT_BUFFER_MAX:
+            buf.append(msg)
+    # Clean up buffer on terminal events (delayed so late subscribers can still replay)
+    terminal_events = {"job_complete", "job_failed", "job_cancelled"}
+    if event.type.value in terminal_events and job_id:
+        async def _cleanup_buffer(jid: str):
+            await asyncio.sleep(60)  # Keep buffer 60s for late subscribers
+            _pool_event_buffer.pop(jid, None)
+        asyncio.create_task(_cleanup_buffer(job_id))
+
     all_pool_ws = set(_pool_ws_subs.keys())
     all_ws = _ws_connections | all_pool_ws
     if not all_ws:
@@ -1484,12 +1799,29 @@ async def _broadcast_pool_event(event) -> None:
     dead_pool = set()
 
     # Chat WebSocket connections get lifecycle events only
+    # PLUS: followed jobs get streaming + terminal events as "pool_follow"
     if not is_stream:
         for ws in _ws_connections:
             try:
                 await ws.send_json(msg)
             except Exception:
                 dead_chat.add(ws)
+
+    # Forward events for followed jobs to chat WS as pool_follow
+    job_id = event.job_id
+    follow_msg = {**event.to_dict(), "type": "pool_follow"}
+    terminal_events = {"job_complete", "job_failed", "job_cancelled"}
+    for ws in list(_ws_connections):
+        follow_set = _ws_follow_jobs.get(ws)
+        if not follow_set or job_id not in follow_set:
+            continue
+        try:
+            await ws.send_json(follow_msg)
+        except Exception:
+            dead_chat.add(ws)
+        # Clean up on terminal events
+        if event.type.value in terminal_events:
+            follow_set.discard(job_id)
 
     # Pool WebSocket connections: lifecycle → all, streaming → subscribed only
     for ws in all_pool_ws:
@@ -1626,14 +1958,25 @@ async def graph_sessions():
 
 @app.get("/api/session/knowledge")
 async def api_session_knowledge(session_id: str | None = None):
-    """Session knowledge entries (stub — reimplemented in Phase 9)."""
-    return JSONResponse({"entries": [], "count": 0})
+    """Session knowledge entries — FDOs referenced via Kronos tools."""
+    if not _conversation_store or not session_id:
+        return JSONResponse({"entries": [], "count": 0})
+    try:
+        entries = await _conversation_store.get_knowledge(session_id)
+        return JSONResponse({"entries": entries, "count": len(entries)})
+    except Exception:
+        return JSONResponse({"entries": [], "count": 0})
 
 
 @app.get("/api/session/knowledge/graph")
 async def api_session_knowledge_graph(session_id: str | None = None):
-    """Session knowledge graph (stub — reimplemented in Phase 9)."""
-    return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
+    """Session knowledge graph — nodes from FDOs, edges from co-occurrence."""
+    if not _conversation_store or not session_id:
+        return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
+    try:
+        return JSONResponse(await _conversation_store.get_knowledge_graph(session_id))
+    except Exception:
+        return JSONResponse({"nodes": [], "edges": [], "node_count": 0, "edge_count": 0})
 
 
 @app.get("/api/memory/graph")
@@ -2231,7 +2574,14 @@ async def websocket_pool(ws: WebSocket):
                 job_id = msg.get("job_id", "")
                 if action == "subscribe" and job_id:
                     _pool_ws_subs[ws].add(job_id)
-                    logger.info("Pool WS subscribed to %s", job_id)
+                    # Replay buffered events so late subscribers see history
+                    buffered = _pool_event_buffer.get(job_id, [])
+                    for evt in buffered:
+                        try:
+                            await ws.send_json(evt)
+                        except Exception:
+                            break
+                    logger.info("Pool WS subscribed to %s (replayed %d events)", job_id, len(buffered))
                 elif action == "unsubscribe" and job_id:
                     _pool_ws_subs[ws].discard(job_id)
                 elif action == "subscribe_all":
@@ -2346,6 +2696,112 @@ async def api_pool_clarify(request: Request, job_id: str):
 
     await _execution_pool.queue.provide_clarification(job_id, answer)
     return JSONResponse({"ok": True, "job_id": job_id})
+
+
+@app.post("/api/pool/jobs/{job_id}/approve")
+async def api_pool_approve(request: Request, job_id: str):
+    """Approve or deny a pending FDO change for a blocked pool job.
+
+    When a pool agent tries to write to a protected Kronos domain,
+    the change is proposed via the clarification mechanism. This endpoint
+    applies the change with owner permissions (on approve) or unblocks
+    the agent with a denial message.
+    """
+    if _execution_pool is None:
+        return JSONResponse({"error": "Pool not enabled"}, status_code=503)
+
+    body = await request.json()
+    action = body.get("action", "approve")
+    proposed = body.get("proposed")
+
+    if action == "approve" and proposed:
+        # Apply the FDO change with owner permissions
+        try:
+            result = _apply_fdo_change(proposed)
+            await _execution_pool.queue.provide_clarification(
+                job_id, f"Approved — change applied. {result}"
+            )
+        except Exception as e:
+            logger.exception("Failed to apply FDO change for job %s", job_id)
+            await _execution_pool.queue.provide_clarification(
+                job_id, f"Approval failed: {e}"
+            )
+            return JSONResponse({"error": str(e)}, status_code=500)
+    else:
+        reason = body.get("reason", "Owner declined the change")
+        await _execution_pool.queue.provide_clarification(
+            job_id, f"Denied: {reason}"
+        )
+
+    return JSONResponse({"ok": True, "job_id": job_id, "action": action})
+
+
+def _apply_fdo_change(proposed: dict) -> str:
+    """Apply a proposed FDO change with owner permissions.
+
+    Called after human approval — bypasses caller permission checks.
+    Uses the same vault instance as the Kronos MCP server.
+    """
+    import sys
+    from pathlib import Path as _Path
+    from datetime import date
+
+    # Import vault from the kronos_mcp package
+    kronos_pkg = _Path(__file__).resolve().parent.parent / "mcp" / "kronos" / "src"
+    if str(kronos_pkg) not in sys.path:
+        sys.path.insert(0, str(kronos_pkg))
+    from kronos_mcp.vault import Vault, FDO, VALID_DOMAINS
+
+    vault_path = os.environ.get("KRONOS_VAULT_PATH", "")
+    if not vault_path:
+        raise RuntimeError("KRONOS_VAULT_PATH not set")
+
+    vault = Vault(vault_path)
+    vault._ensure_index()
+
+    action = proposed.get("action")
+    if action == "update":
+        fdo_id = proposed["id"]
+        fdo = vault.get(fdo_id)
+        if not fdo:
+            raise ValueError(f"FDO not found: {fdo_id}")
+        fields = proposed.get("fields", {})
+        for field_name, value in fields.items():
+            if hasattr(fdo, field_name) and field_name not in ("id", "created", "file_path"):
+                setattr(fdo, field_name, value)
+            elif field_name not in ("id", "created", "file_path"):
+                fdo.extra[field_name] = value
+        fdo.updated = str(date.today())
+        vault.write_fdo(fdo)
+        return f"Updated FDO '{fdo_id}' in domain '{fdo.domain}'"
+
+    elif action == "create":
+        fdo_id = proposed["id"]
+        domain = proposed["domain"]
+        today = str(date.today())
+        fdo = FDO(
+            id=fdo_id,
+            title=proposed["title"],
+            domain=domain,
+            created=today,
+            updated=today,
+            status=proposed.get("status", "seed"),
+            confidence=float(proposed.get("confidence", 0.3)),
+            related=proposed.get("related", []),
+            source_repos=proposed.get("source_repos", []),
+            tags=proposed.get("tags", []),
+            body=proposed["body"],
+            file_path="",
+            pac_parent=proposed.get("pac_parent"),
+            confidence_basis=proposed.get("confidence_basis"),
+            source_paths=proposed.get("source_paths", []),
+        )
+        vault.write_fdo(fdo)
+        return f"Created FDO '{fdo_id}' in domain '{domain}'"
+
+    else:
+        raise ValueError(f"Unknown action: {action}")
+
 
 
 @app.get("/api/pool/events/info")
@@ -2695,13 +3151,19 @@ async def get_daemon_status():
 
 
 @app.get("/api/daemon/pipeline")
-async def get_daemon_pipeline(status: str | None = None, project: str | None = None):
+async def get_daemon_pipeline(
+    status: str | None = None,
+    project: str | None = None,
+    owner: str | None = None,
+):
     """List pipeline items with optional filters."""
     if _daemon_engine is None:
         return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
     from core.daemon.models import PipelineStatus
     sf = PipelineStatus(status) if status else None
-    items = await _daemon_engine.store.list_items(status_filter=sf, project_filter=project)
+    items = await _daemon_engine.store.list_items(
+        status_filter=sf, project_filter=project, owner_filter=owner,
+    )
     return JSONResponse([item.model_dump(mode="json") for item in items])
 
 
@@ -2773,6 +3235,90 @@ async def reject_pipeline_item(item_id: str):
         return JSONResponse({"error": str(e)}, status_code=404)
 
 
+@app.patch("/api/daemon/pipeline/{item_id}/owner")
+async def set_pipeline_owner(item_id: str, request: Request):
+    """Set the owner of a pipeline item (grim or human)."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+    body = await request.json()
+    owner = body.get("owner", "")
+    if owner not in ("grim", "human", ""):
+        return JSONResponse({"error": "owner must be 'grim', 'human', or ''"}, status_code=400)
+    try:
+        item = await _daemon_engine.store.update_fields(item_id, owner=owner)
+        return JSONResponse(item.model_dump(mode="json"))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+@app.get("/api/daemon/pipeline/{story_id}/dependencies")
+async def get_pipeline_dependencies(story_id: str):
+    """Show dependency tree for a pipeline item (by story_id)."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not enabled"}, status_code=404)
+
+    import json as _json_mod
+
+    # Find pipeline item by story_id
+    item = await _daemon_engine.store.get_by_story(story_id)
+    if item is None:
+        return JSONResponse({"error": f"Story {story_id} not found in pipeline"}, status_code=404)
+
+    # Parse depends_on
+    dep_ids: list[str] = []
+    if item.depends_on:
+        try:
+            dep_ids = _json_mod.loads(item.depends_on)
+        except (_json_mod.JSONDecodeError, TypeError):
+            pass
+
+    # Resolve statuses of dependencies
+    deps_info = []
+    if dep_ids and _daemon_engine._task_engine:
+        batch = _daemon_engine._task_engine.get_items_batch(dep_ids)
+        for dep_id in dep_ids:
+            data = batch.get(dep_id, {})
+            dep_status = data.get("status", "unknown")
+            deps_info.append({
+                "story_id": dep_id,
+                "status": dep_status,
+                "satisfied": dep_status in ("resolved", "closed"),
+                "title": data.get("title", ""),
+            })
+    elif dep_ids:
+        # No task engine — return IDs without status
+        for dep_id in dep_ids:
+            deps_info.append({"story_id": dep_id, "status": "unknown", "satisfied": False})
+
+    # Parse blocked_by
+    blocked_by: list[str] = []
+    if item.blocked_by:
+        try:
+            blocked_by = _json_mod.loads(item.blocked_by)
+        except (_json_mod.JSONDecodeError, TypeError):
+            pass
+
+    # Find dependents — other pipeline items that depend on this story
+    all_items = await _daemon_engine.store.list_items()
+    dependents = []
+    for other in all_items:
+        if other.depends_on:
+            try:
+                other_deps = _json_mod.loads(other.depends_on)
+                if story_id in other_deps:
+                    dependents.append(other.story_id)
+            except (_json_mod.JSONDecodeError, TypeError):
+                pass
+
+    return JSONResponse({
+        "story_id": story_id,
+        "depends_on": deps_info,
+        "blocked_by": blocked_by,
+        "dependents": dependents,
+        "all_satisfied": all(d["satisfied"] for d in deps_info) if deps_info else True,
+    })
+
+
 @app.get("/api/daemon/escalations")
 async def get_daemon_escalations():
     """List pipeline items needing human attention (BLOCKED or FAILED)."""
@@ -2820,6 +3366,112 @@ async def resolve_daemon_escalation(item_id: str, request: Request):
         return JSONResponse(updated.model_dump(mode="json"))
     except InvalidTransition as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# Daemon Goals (Project Mewtwo Phase 5C)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/daemon/goals")
+async def create_daemon_goal(request: Request):
+    """Create a goal story (assignee: plan, tag: goal)."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not running"}, status_code=404)
+
+    body = await request.json()
+    proj_id = body.get("proj_id", "")
+    description = body.get("description", "")
+
+    if not proj_id or not description:
+        return JSONResponse({"error": "proj_id and description required"}, status_code=400)
+
+    # Create a goal story via the task engine
+    if _daemon_engine._task_engine is None:
+        return JSONResponse({"error": "TaskEngine unavailable"}, status_code=500)
+
+    result = _daemon_engine._task_engine.create_story(
+        proj_id=proj_id,
+        title=description,
+        assignee="plan",
+        tags=["goal"],
+        created_by="human",
+        owner="grim",
+        priority="medium",
+    )
+
+    if "error" in result:
+        return JSONResponse({"error": result["error"]}, status_code=400)
+
+    return JSONResponse({"story_id": result["created"], "proj_id": proj_id})
+
+
+@app.get("/api/daemon/goals/{story_id}/plan")
+async def get_daemon_goal_plan(story_id: str):
+    """Show generated sub-stories for a goal."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not running"}, status_code=404)
+
+    if _daemon_engine._task_engine is None:
+        return JSONResponse({"error": "TaskEngine unavailable"}, status_code=500)
+
+    # Find children by tag
+    all_items = _daemon_engine._task_engine.list_items()
+    children = [
+        s for s in all_items
+        if f"goal:{story_id}" in (s.get("tags") or [])
+    ]
+
+    if not children:
+        return JSONResponse({"error": f"No sub-stories found for {story_id}"}, status_code=404)
+
+    return JSONResponse({
+        "goal_story_id": story_id,
+        "children": [
+            {
+                "id": c.get("id", ""),
+                "title": c.get("title", ""),
+                "assignee": c.get("assignee", ""),
+                "status": c.get("status", ""),
+                "priority": c.get("priority", ""),
+                "depends_on": c.get("depends_on", []),
+            }
+            for c in children
+        ],
+    })
+
+
+@app.post("/api/daemon/goals/{story_id}/approve")
+async def approve_daemon_goal(story_id: str):
+    """Approve and activate a proposed plan."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not running"}, status_code=404)
+
+    result = await _daemon_engine.approve_goal(story_id)
+    if "error" in result:
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@app.post("/api/daemon/goals/{story_id}/reject")
+async def reject_daemon_goal(story_id: str):
+    """Reject a proposed plan."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not running"}, status_code=404)
+
+    result = await _daemon_engine.reject_goal(story_id)
+    if "error" in result:
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@app.get("/api/daemon/daily")
+async def daemon_daily_summary():
+    """On-demand daily summary."""
+    if _daemon_engine is None:
+        return JSONResponse({"error": "Daemon not running"}, status_code=404)
+
+    result = await _daemon_engine.daily_summary()
+    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

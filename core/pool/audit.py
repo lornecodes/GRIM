@@ -54,6 +54,7 @@ SAFE_BASH_PATTERNS: list[re.Pattern] = [
     re.compile(r"^\s*date\b", re.IGNORECASE),
     re.compile(r"^\s*python\s+-m\s+pytest\b", re.IGNORECASE),
     re.compile(r"^\s*python\s+-c\b", re.IGNORECASE),
+    re.compile(r"^\s*python\s+\S+\.py\b", re.IGNORECASE),
     re.compile(r"^\s*npm\s+(test|run\s+test|run\s+lint)", re.IGNORECASE),
     re.compile(r"^\s*tree\b", re.IGNORECASE),
     re.compile(r"^\s*env\b", re.IGNORECASE),

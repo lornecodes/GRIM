@@ -44,7 +44,7 @@ class TestPoolEvent:
         assert "timestamp" in d
 
     def test_event_types(self):
-        assert len(PoolEventType) == 9  # 7 lifecycle + 2 streaming
+        assert len(PoolEventType) == 19  # lifecycle + daemon + streaming
         assert PoolEventType.JOB_SUBMITTED.value == "job_submitted"
         assert PoolEventType.JOB_STARTED.value == "job_started"
         assert PoolEventType.JOB_COMPLETE.value == "job_complete"

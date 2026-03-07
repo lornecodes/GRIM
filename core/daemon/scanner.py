@@ -1,6 +1,7 @@
 """Project scanner — reads stories from vault and syncs into the pipeline."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,8 @@ class ScannedStory:
     """A story discovered in the vault, eligible for pipeline tracking."""
 
     __slots__ = ("id", "project_id", "title", "status", "priority", "assignee",
-                 "description", "acceptance_criteria", "job_id", "estimate_days", "tags")
+                 "owner", "depends_on", "description", "acceptance_criteria",
+                 "job_id", "estimate_days", "tags")
 
     def __init__(self, data: dict, project_id: str):
         self.id: str = data.get("id", "")
@@ -27,6 +29,8 @@ class ScannedStory:
         self.status: str = data.get("status", "new")
         self.priority: str = data.get("priority", "medium")
         self.assignee: str = data.get("assignee", "")
+        self.owner: str = data.get("owner", "")
+        self.depends_on: list[str] = data.get("depends_on", []) or []
         self.description: str = data.get("description", "")
         self.acceptance_criteria: list[str] = data.get("acceptance_criteria", [])
         self.job_id: str | None = data.get("job_id")
@@ -40,7 +44,13 @@ class ScannedStory:
 
     @property
     def is_eligible(self) -> bool:
-        """Whether this story qualifies for daemon management."""
+        """Whether this story qualifies for daemon pipeline tracking.
+
+        All active/in_progress stories with an assignee are eligible for
+        tracking. Ownership filtering (grim vs human) happens at the
+        promote stage, not here — human stories enter the pipeline for
+        visibility but are never auto-promoted.
+        """
         return self.status in ELIGIBLE_STATUSES and bool(self.assignee)
 
 
@@ -111,11 +121,14 @@ class ProjectScanner:
         # Add new stories not yet in pipeline
         for story_id, story in eligible_by_id.items():
             if story_id not in tracked_by_story:
+                deps_json = json.dumps(story.depends_on) if story.depends_on else ""
                 await store.add(
                     story_id=story_id,
                     project_id=story.project_id,
                     priority=story.priority_int,
                     assignee=story.assignee,
+                    owner=story.owner,
+                    depends_on=deps_json,
                 )
                 added += 1
 
@@ -127,14 +140,17 @@ class ProjectScanner:
                     await store.remove(item.id)
                     removed += 1
 
-        # Update priority/assignee on existing BACKLOG/READY items
+        # Update priority/assignee/owner/depends_on on existing BACKLOG/READY items
         for story_id, story in eligible_by_id.items():
             if story_id in tracked_by_story:
                 item = tracked_by_story[story_id]
                 if item.status in (PipelineStatus.BACKLOG, PipelineStatus.READY):
+                    new_deps_json = json.dumps(story.depends_on) if story.depends_on else ""
                     needs_update = (
                         item.priority != story.priority_int
                         or item.assignee != story.assignee
+                        or item.owner != story.owner
+                        or item.depends_on != new_deps_json
                     )
                     if needs_update:
                         # Direct SQL update for non-status fields
@@ -142,6 +158,8 @@ class ProjectScanner:
                             store, item.id,
                             priority=story.priority_int,
                             assignee=story.assignee,
+                            owner=story.owner,
+                            depends_on=new_deps_json,
                         )
                         updated += 1
 
@@ -161,7 +179,7 @@ async def _update_item_fields(store: PipelineStore, item_id: str, **fields: Any)
     params: list[Any] = [now]
 
     for key, value in fields.items():
-        if key in ("priority", "assignee"):
+        if key in ("priority", "assignee", "owner", "depends_on"):
             sets.append(f"{key} = ?")
             params.append(value)
 
@@ -171,3 +189,85 @@ async def _update_item_fields(store: PipelineStore, item_id: str, **fields: Any)
     async with aiosqlite.connect(str(store._db_path)) as db:
         await db.execute(sql, params)
         await db.commit()
+
+
+# ── Dependency Checking ──────────────────────────────────────────────────────
+
+# Vault statuses that satisfy a dependency
+_SATISFIED_STATUSES = {"resolved", "closed"}
+
+
+def check_dependencies(
+    depends_on_json: str,
+    story_statuses: dict[str, str],
+) -> tuple[bool, list[str]]:
+    """Check whether all dependencies are satisfied.
+
+    Args:
+        depends_on_json: JSON string of dependency story IDs (from pipeline column).
+        story_statuses: {story_id: vault_status} map for all relevant stories.
+
+    Returns:
+        (all_satisfied, blocking_ids) — True if all deps met, plus list of blockers.
+    """
+    if not depends_on_json:
+        return True, []
+
+    try:
+        dep_ids = json.loads(depends_on_json)
+    except (json.JSONDecodeError, TypeError):
+        return True, []  # malformed → treat as no deps
+
+    if not dep_ids:
+        return True, []
+
+    blocking: list[str] = []
+    for dep_id in dep_ids:
+        status = story_statuses.get(dep_id, "")
+        if status not in _SATISFIED_STATUSES:
+            blocking.append(dep_id)
+
+    return len(blocking) == 0, blocking
+
+
+def detect_dependency_cycle(
+    stories: list[ScannedStory],
+) -> list[list[str]]:
+    """Detect cycles in story dependency graph via DFS.
+
+    Returns list of cycles found (each cycle is a list of story IDs).
+    Empty list means no cycles.
+    """
+    deps_map: dict[str, list[str]] = {}
+    for s in stories:
+        if s.depends_on:
+            deps_map[s.id] = s.depends_on
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {s.id: WHITE for s in stories}
+    cycles: list[list[str]] = []
+    path: list[str] = []
+
+    def dfs(node: str) -> None:
+        if node not in color:
+            return  # dependency references unknown story
+        if color[node] == GRAY:
+            # Found a cycle — extract it from path
+            idx = path.index(node)
+            cycles.append(path[idx:] + [node])
+            return
+        if color[node] == BLACK:
+            return
+
+        color[node] = GRAY
+        path.append(node)
+        for dep in deps_map.get(node, []):
+            dfs(dep)
+        path.pop()
+        color[node] = BLACK
+
+    for s in stories:
+        if color.get(s.id) == WHITE:
+            dfs(s.id)
+
+    return cycles

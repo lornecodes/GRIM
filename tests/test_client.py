@@ -161,9 +161,9 @@ class TestToolLists:
             assert t.startswith("mcp__kronos__"), f"Bad prefix: {t}"
 
     def test_pool_tools(self):
-        assert len(POOL_TOOLS) == 3
+        assert len(POOL_TOOLS) == 4
         names = {t.split("__")[-1] for t in POOL_TOOLS}
-        assert names == {"pool_submit", "pool_status", "pool_list_jobs"}
+        assert names == {"pool_submit", "pool_status", "pool_list_jobs", "pool_get_job"}
 
 
 # ── GrimClient construction ─────────────────────────────────────

@@ -24,6 +24,7 @@ const NODE_COLORS: Record<string, string> = {
   skill_match: "#ec4899",
   evolve: "#06b6d4",
   memory_update: "#22c55e",
+  pool_job: "#f97316",
 };
 
 /** Nodes whose step bubbles are collapsed by default (background system work). */
@@ -106,12 +107,24 @@ function CollapsibleStep({
 export function Message({ message }: MessageProps) {
   const isUser = message.role === "user";
   const isStreaming = message.streaming;
-  const isEmpty = !message.content;
+  const isEmpty = !message.content || !message.content.trim();
   const isStep = message.isStep;
+
+  // Empty GRIM bubble → just show the typing sprite (streaming) or hide entirely (done).
+  if (!isUser && isEmpty && !isStep && !message.meta) {
+    if (!isStreaming) return null;  // Fully empty finalized bubble — hide it
+    return (
+      <div className="animate-fade-in self-start flex gap-2 max-w-[85%]">
+        <div className="shrink-0 mt-1">
+          <GrimTypingSprite size="xs" />
+        </div>
+      </div>
+    );
+  }
   const accentColor = isStep && message.node ? NODE_COLORS[message.node] || "#3e5c72" : undefined;
 
   // Agent log block for dispatch/integrate — terminal-style output
-  if (isStep && (message.node === "dispatch" || message.node === "integrate")) {
+  if (isStep && (message.node === "dispatch" || message.node === "integrate" || message.node === "pool_job")) {
     return (
       <AgentLogBlock
         content={message.content}
@@ -156,10 +169,10 @@ export function Message({ message }: MessageProps) {
     <div
       className={`animate-fade-in ${isUser ? "self-end" : "self-start flex gap-2"} max-w-[85%]`}
     >
-      {/* GRIM avatar */}
+      {/* GRIM avatar — switches to typing sprite while streaming */}
       {!isUser && (
         <div className="shrink-0 mt-1">
-          <GrimSprite size="sm" />
+          {isStreaming ? <GrimTypingSprite size="xs" /> : <GrimSprite size="sm" />}
         </div>
       )}
       <div className="min-w-0 flex-1">
@@ -174,11 +187,28 @@ export function Message({ message }: MessageProps) {
           }`}
         >
           {isUser ? (
-            <div className="whitespace-pre-wrap">{message.content}</div>
-          ) : isEmpty && isStreaming && message.thinkingText ? (
-            <ThinkingIndicator label="gathering knowledge" />
-          ) : isEmpty && isStreaming ? (
-            <ThinkingIndicator />
+            <>
+              <div className="whitespace-pre-wrap">{message.content}</div>
+              {message.files && message.files.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {message.files.map((f) => (
+                    <span
+                      key={f.name}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-grim-accent/15 border border-grim-accent/30 text-grim-accent"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="shrink-0">
+                        <path d="M4 1h5.586L13 4.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.5" />
+                        <path d="M9 1v4h4" stroke="currentColor" strokeWidth="1.5" />
+                      </svg>
+                      {f.name}
+                      <span className="text-grim-text-dim">
+                        {f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(0)}KB`}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <div className="grim-prose">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>

@@ -72,8 +72,13 @@ class WorkspaceManager:
     ) -> Workspace:
         """Create an isolated git worktree for a job.
 
-        Creates a new branch `grim/{workspace_id}` from base_ref and
-        a worktree at `{base_dir}/{workspace_id}/`.
+        Creates a new branch ``grim/{workspace_id}`` from *base_ref* and
+        a worktree at ``{base_dir}/{workspace_id}/``.
+
+        Uses ``--no-checkout`` to avoid materializing the entire repo tree
+        (critical on Docker bind mounts where 10K file writes take 2+ min).
+        The agent reads from the original repo via ``add_dirs`` and writes
+        create files in the worktree on demand.
         """
         suffix = job_id.replace("job-", "")[:8]
         ws_id = f"workspace-{suffix}"
@@ -83,19 +88,21 @@ class WorkspaceManager:
         # Ensure base dir exists
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create branch + worktree atomically
+        # Create worktree WITHOUT checking out files (near-instant on bind mounts).
+        # The agent reads from the original repo root (add_dirs) and edits create
+        # files in the worktree. Commits capture only the changed files.
         try:
             await _run_git(
                 repo_path,
-                "worktree", "add", "-b", branch_name,
+                "worktree", "add", "--no-checkout",
+                "-b", branch_name,
                 str(worktree_path), base_ref,
             )
         except RuntimeError as e:
-            # If branch already exists, try without -b
             if "already exists" in str(e):
                 await _run_git(
                     repo_path,
-                    "worktree", "add",
+                    "worktree", "add", "--no-checkout",
                     str(worktree_path), branch_name,
                 )
             else:
@@ -111,6 +118,37 @@ class WorkspaceManager:
         self._workspaces[ws_id] = ws
         logger.info("Workspace created: %s → %s", ws_id, worktree_path)
         return ws
+
+    async def prune_stale(self, repo_paths: list[Path] | None = None) -> int:
+        """Clean up worktrees from previous runs that are no longer tracked.
+
+        Runs ``git worktree prune`` on each repo and removes orphaned
+        directories under the base dir.  Returns the number cleaned up.
+        """
+        cleaned = 0
+
+        # Prune git's internal worktree bookkeeping
+        if repo_paths:
+            for rp in repo_paths:
+                try:
+                    await _run_git(rp, "worktree", "prune")
+                except RuntimeError:
+                    pass
+
+        # Remove orphaned workspace directories not tracked by this manager
+        if self._base_dir.exists():
+            for entry in self._base_dir.iterdir():
+                if entry.is_dir() and entry.name.startswith("workspace-"):
+                    if entry.name not in self._workspaces:
+                        try:
+                            shutil.rmtree(entry, ignore_errors=True)
+                            cleaned += 1
+                        except Exception:
+                            pass
+
+        if cleaned:
+            logger.info("Pruned %d stale worktrees from %s", cleaned, self._base_dir)
+        return cleaned
 
     async def destroy(self, workspace_id: str) -> bool:
         """Remove a worktree and delete the branch.

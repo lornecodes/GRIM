@@ -38,9 +38,12 @@ COPY pyproject.toml ./
 COPY mcp/kronos/pyproject.toml mcp/kronos/README.md mcp/kronos/
 COPY mcp/kronos/src/ mcp/kronos/src/
 
-# Install GRIM + kronos-mcp + server deps + test deps
+# Install GRIM + kronos-mcp + server deps + semantic search + test deps
+# PyTorch CPU-only via --extra-index-url (falls back to PyPI if CPU wheel unavailable)
 RUN pip install --no-cache-dir ".[server,cache,pool,dev]" && \
-    pip install --no-cache-dir "./mcp/kronos[cache]"
+    pip install --no-cache-dir --retries 10 --timeout 300 \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    "./mcp/kronos[cache,semantic]"
 
 # ── Application ─────────────────────────────────────────────
 COPY core/ core/

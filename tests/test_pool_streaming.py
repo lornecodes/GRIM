@@ -200,9 +200,8 @@ class TestPoolOnAgentMessage:
         assert len(emitted) == 1
         assert emitted[0].type == PoolEventType.AGENT_OUTPUT
         assert emitted[0].job_id == "job-123"
-        assert emitted[0].data["type"] == "text"
-        assert emitted[0].data["text"] == "hello"
         assert emitted[0].data["block_type"] == "text"
+        assert emitted[0].data["text"] == "hello"
 
     @pytest.mark.asyncio
     async def test_emits_agent_output_for_tool_use(self):
@@ -223,9 +222,8 @@ class TestPoolOnAgentMessage:
         })
 
         assert len(emitted) == 1
-        assert emitted[0].data["type"] == "tool_use"
-        assert emitted[0].data["name"] == "Read"
         assert emitted[0].data["block_type"] == "tool_use"
+        assert emitted[0].data["name"] == "Read"
 
     @pytest.mark.asyncio
     async def test_emits_tool_result_for_result_role(self):

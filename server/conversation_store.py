@@ -44,6 +44,23 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session
     ON messages(session_id, turn_number);
+
+CREATE TABLE IF NOT EXISTS session_knowledge (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          TEXT NOT NULL,
+    fdo_id              TEXT NOT NULL,
+    fdo_title           TEXT,
+    fdo_domain          TEXT,
+    fetched_turn        INTEGER,
+    query               TEXT,
+    hit_count           INTEGER NOT NULL DEFAULT 1,
+    last_referenced_turn INTEGER,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(session_id, fdo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_session
+    ON session_knowledge(session_id);
 """
 
 
@@ -241,5 +258,88 @@ class ConversationStore:
         await self._db.execute(
             "DELETE FROM messages WHERE session_id = ?", (session_id,),
         )
+        await self._db.execute(
+            "DELETE FROM session_knowledge WHERE session_id = ?", (session_id,),
+        )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    # ── Session Knowledge ──────────────────────────────────────────
+
+    async def upsert_knowledge(
+        self,
+        session_id: str,
+        fdo_id: str,
+        *,
+        title: str | None = None,
+        domain: str | None = None,
+        turn: int | None = None,
+        query: str | None = None,
+    ) -> None:
+        """Insert or update a session knowledge entry. Bumps hit_count on conflict."""
+        assert self._db
+        await self._db.execute(
+            """
+            INSERT INTO session_knowledge
+                (session_id, fdo_id, fdo_title, fdo_domain, fetched_turn,
+                 query, last_referenced_turn, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, fdo_id) DO UPDATE SET
+                hit_count = hit_count + 1,
+                last_referenced_turn = excluded.last_referenced_turn,
+                fdo_title = COALESCE(excluded.fdo_title, fdo_title),
+                fdo_domain = COALESCE(excluded.fdo_domain, fdo_domain)
+            """,
+            (session_id, fdo_id, title, domain, turn, query, turn, _utc_now()),
+        )
+        await self._db.commit()
+
+    async def get_knowledge(self, session_id: str) -> list[dict[str, Any]]:
+        """Get all knowledge entries for a session, ordered by hit_count desc."""
+        assert self._db
+        cursor = await self._db.execute(
+            """
+            SELECT * FROM session_knowledge
+            WHERE session_id = ?
+            ORDER BY hit_count DESC, last_referenced_turn DESC
+            """,
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "fdo_id": r["fdo_id"],
+                "fdo_title": r["fdo_title"],
+                "fdo_domain": r["fdo_domain"],
+                "fetched_turn": r["fetched_turn"],
+                "query": r["query"],
+                "hit_count": r["hit_count"],
+                "last_referenced_turn": r["last_referenced_turn"],
+            }
+            for r in rows
+        ]
+
+    async def get_knowledge_graph(self, session_id: str) -> dict[str, Any]:
+        """Build a simple graph from session knowledge entries."""
+        entries = await self.get_knowledge(session_id)
+        nodes = [
+            {
+                "id": e["fdo_id"],
+                "title": e["fdo_title"] or e["fdo_id"],
+                "domain": e["fdo_domain"] or "unknown",
+                "hit_count": e["hit_count"],
+            }
+            for e in entries
+        ]
+        # Edges: co-occurrence within the same session (all nodes connected)
+        edges = []
+        ids = [n["id"] for n in nodes]
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                edges.append({"source": a, "target": b, "type": "co_session"})
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        }

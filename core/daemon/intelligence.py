@@ -243,6 +243,7 @@ class OutputValidator:
         result_text: str,
         diff_stat: str = "",
         changed_files: list[str] | None = None,
+        is_execution_story: bool = False,
     ) -> Verdict:
         """Validate agent output against acceptance criteria.
 
@@ -251,6 +252,7 @@ class OutputValidator:
             result_text: The agent's result summary
             diff_stat: Git diff --stat output
             changed_files: List of modified file paths
+            is_execution_story: Whether the story required running scripts
 
         Returns:
             Verdict with pass/fail/partial outcome
@@ -261,6 +263,7 @@ class OutputValidator:
         try:
             return await self._llm_validate(
                 acceptance_criteria, result_text, diff_stat, changed_files or [],
+                is_execution_story=is_execution_story,
             )
         except Exception:
             logger.warning("LLM output validation failed, passing by default")
@@ -272,6 +275,7 @@ class OutputValidator:
         result_text: str,
         diff_stat: str,
         changed_files: list[str],
+        is_execution_story: bool = False,
     ) -> Verdict:
         """Use Opus to judge whether output satisfies criteria."""
         if _anthropic is None:
@@ -280,11 +284,22 @@ class OutputValidator:
         criteria_text = "\n".join(f"- {c}" for c in acceptance_criteria)
         files_text = "\n".join(f"- {f}" for f in changed_files) if changed_files else "None"
 
+        execution_clause = ""
+        if is_execution_story:
+            execution_clause = (
+                "IMPORTANT: This story required running scripts or experiments. "
+                "The agent's result MUST include execution output, metrics, or "
+                "pass/fail status from actually running the code. If the agent "
+                "only wrote or modified code without running it, this should FAIL "
+                "with reasoning noting the missing execution evidence.\n\n"
+            )
+
         client = _anthropic.AsyncAnthropic()
         response = await client.messages.create(
             model=self._model,
             max_tokens=800,
             system=(
+                f"{execution_clause}"
                 "You are validating whether an agent's completed work satisfies "
                 "the given acceptance criteria.\n\n"
                 "Evaluate each criterion against the agent's result and the files changed.\n\n"
@@ -308,6 +323,76 @@ class OutputValidator:
         if text is None:
             raise ValueError("Unexpected API response structure")
         return self._parse_verdict(text, acceptance_criteria)
+
+    def validate_research(self, result_text: str) -> Verdict:
+        """Validate research output for actionable content.
+
+        Heuristic check — no LLM call. Checks that the result contains
+        structured findings (bullet points, numbered items, headings)
+        rather than vague "needs more investigation" non-answers.
+
+        Returns Verdict with pass/fail outcome.
+        """
+        if not result_text or not result_text.strip():
+            return Verdict(
+                outcome="fail",
+                reasoning="Research produced no output",
+            )
+
+        text = result_text.strip()
+
+        # Check for actionable structure indicators
+        has_bullets = bool(re.search(r"^[\s]*[-*+]\s+\S", text, re.MULTILINE))
+        has_numbered = bool(re.search(r"^[\s]*\d+[.)]\s+\S", text, re.MULTILINE))
+        has_headings = bool(re.search(r"^#{1,4}\s+\S", text, re.MULTILINE))
+        has_code = "```" in text
+
+        structure_signals = sum([has_bullets, has_numbered, has_headings, has_code])
+
+        # Check for non-answer patterns
+        non_answer_patterns = [
+            r"\bneed(?:s)?\s+(?:more|further)\s+investigation\b",
+            r"\bcould\s+not\s+(?:find|determine|identify)\b",
+            r"\bno\s+(?:clear|definitive)\s+(?:answer|conclusion|finding)\b",
+            r"\bunable\s+to\s+(?:determine|find|conclude)\b",
+            r"\binconclusive\b",
+        ]
+        non_answer_count = sum(
+            1 for p in non_answer_patterns if re.search(p, text, re.IGNORECASE)
+        )
+
+        # Minimum content threshold (at least 100 chars of substance)
+        if len(text) < 100:
+            return Verdict(
+                outcome="fail",
+                reasoning="Research output too short to be actionable",
+            )
+
+        # Fail if dominated by non-answers with no structure
+        if non_answer_count >= 2 and structure_signals == 0:
+            return Verdict(
+                outcome="fail",
+                reasoning="Research output lacks actionable findings",
+            )
+
+        # Pass if has any structural indicators
+        if structure_signals >= 1:
+            return Verdict(
+                outcome="pass",
+                reasoning=f"Research contains structured findings ({structure_signals} structural indicators)",
+            )
+
+        # Marginal: enough text but no structure — pass with note
+        if len(text) >= 200:
+            return Verdict(
+                outcome="pass",
+                reasoning="Research has sufficient content but lacks structured formatting",
+            )
+
+        return Verdict(
+            outcome="fail",
+            reasoning="Research output lacks structure and actionable content",
+        )
 
     @staticmethod
     def _parse_verdict(text: str, acceptance_criteria: list[str]) -> Verdict:
@@ -348,6 +433,7 @@ class OutputValidator:
 
 
 # ── RetryEnricher ─────────────────────────────────────────────
+
 
 class RetryEnricher:
     """Enrich job instructions with feedback from previous attempts.

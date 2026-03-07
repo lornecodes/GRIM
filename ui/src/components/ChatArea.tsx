@@ -4,17 +4,20 @@ import { useRef, useEffect } from "react";
 import { useGrimStore } from "@/store";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
+import type { FileAttachment } from "./ChatInput";
 import { GrimSprite } from "./GrimSprite";
 
 interface ChatAreaProps {
-  onSend: (text: string) => void;
+  onSend: (text: string, files?: FileAttachment[]) => void;
+  onCancel: () => void;
 }
 
-export function ChatArea({ onSend }: ChatAreaProps) {
+export function ChatArea({ onSend, onCancel }: ChatAreaProps) {
   const messages = useGrimStore((s) => s.messages);
   const isStreaming = useGrimStore((s) => s.isStreaming);
   const wsStatus = useGrimStore((s) => s.wsStatus);
   const chatPanelOpen = useGrimStore((s) => s.chatPanelOpen);
+  const queuedCount = useGrimStore((s) => s.queuedCount);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const connected = wsStatus === "connected";
@@ -46,15 +49,18 @@ export function ChatArea({ onSend }: ChatAreaProps) {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — always enabled when connected (messages queue while streaming) */}
       <ChatInput
         onSend={onSend}
-        disabled={isStreaming || !connected}
+        onCancel={onCancel}
+        isStreaming={isStreaming}
+        queuedCount={queuedCount}
+        disabled={!connected}
         placeholder={
           !connected
             ? "Connecting..."
             : isStreaming
-              ? "GRIM is thinking..."
+              ? "Queue a message..."
               : "Talk to GRIM..."
         }
       />

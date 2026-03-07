@@ -42,6 +42,9 @@ class TestSafeBash:
         "date",
         "python -m pytest tests/",
         "python -c 'print(1)'",
+        "python script.py",
+        "python experiments/run_sec.py --verbose",
+        "  python run.py",
         "npm test",
         "npm run test",
         "npm run lint",
@@ -71,7 +74,6 @@ class TestSafeBash:
         "pip install requests",
         "npm install",
         "docker run hello-world",
-        "python script.py",
         "mkdir new_dir",
     ])
     def test_non_safe_non_dangerous(self, cmd):

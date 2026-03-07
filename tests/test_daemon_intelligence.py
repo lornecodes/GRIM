@@ -381,6 +381,77 @@ class TestOutputValidator:
             assert call_kwargs["model"] == "claude-sonnet-4-6"
 
 
+class TestExecutionEvidenceValidation:
+    """Test execution evidence checking in OutputValidator."""
+
+    @pytest.mark.asyncio
+    async def test_validate_passes_execution_flag(self):
+        """The is_execution_story flag should reach _llm_validate."""
+        validator = OutputValidator()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(
+            text="VERDICT: pass\nREASONING: Good\nMISSING: none"
+        )]
+        with patch("core.daemon.intelligence._anthropic") as mock_anthropic:
+            mock_client = AsyncMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+
+            await validator.validate(
+                ["Tests pass"], "All done", is_execution_story=True,
+            )
+            call_kwargs = mock_client.messages.create.call_args.kwargs
+            assert "execution output" in call_kwargs["system"].lower()
+
+    @pytest.mark.asyncio
+    async def test_validate_default_not_execution(self):
+        """Default should be is_execution_story=False (no execution clause)."""
+        validator = OutputValidator()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(
+            text="VERDICT: pass\nREASONING: Good\nMISSING: none"
+        )]
+        with patch("core.daemon.intelligence._anthropic") as mock_anthropic:
+            mock_client = AsyncMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+
+            await validator.validate(["Tests pass"], "All done")
+            call_kwargs = mock_client.messages.create.call_args.kwargs
+            assert "execution output" not in call_kwargs["system"].lower()
+
+    @pytest.mark.asyncio
+    async def test_execution_clause_mentions_fail(self):
+        """Execution clause should instruct FAIL for missing evidence."""
+        validator = OutputValidator()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(
+            text="VERDICT: pass\nREASONING: Good\nMISSING: none"
+        )]
+        with patch("core.daemon.intelligence._anthropic") as mock_anthropic:
+            mock_client = AsyncMock()
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+            mock_anthropic.AsyncAnthropic.return_value = mock_client
+
+            await validator.validate(
+                ["Run experiment"], "Output here", is_execution_story=True,
+            )
+            call_kwargs = mock_client.messages.create.call_args.kwargs
+            system = call_kwargs["system"]
+            assert "FAIL" in system
+            assert "running" in system.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_criteria_skips_execution_check(self):
+        """No acceptance criteria → auto-pass regardless of execution flag."""
+        validator = OutputValidator()
+        verdict = await validator.validate(
+            [], "Some result", is_execution_story=True,
+        )
+        assert verdict.outcome == "pass"
+        assert "No acceptance criteria" in verdict.reasoning
+
+
 class TestParseVerdict:
 
     def test_all_fields(self):

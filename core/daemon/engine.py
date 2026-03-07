@@ -77,7 +77,7 @@ class ManagementEngine:
 
         # Context builder for rich agent instructions
         workspace_root = getattr(config, "workspace_root", _vault_path.parent)
-        self._context_builder = self._make_context_builder(_vault_path, workspace_root)
+        self._context_builder = self._make_context_builder(_vault_path, workspace_root, self._store)
 
         # Config values
         self._poll_interval = getattr(config, "daemon_poll_interval", 30.0)
@@ -88,6 +88,21 @@ class ManagementEngine:
         self._auto_resolve = config.daemon_auto_resolve
         self._validate_output = config.daemon_validate_output
         self._max_daemon_retries = config.daemon_max_daemon_retries
+
+        # Phase 5A: Ownership config
+        self._default_owner = getattr(config, "daemon_default_owner", "grim")
+        self._nudge_after_days = getattr(config, "daemon_nudge_after_days", 3)
+        self._last_nudge_check: float = 0.0  # monotonic time of last nudge cycle
+
+        # Phase 5C: Goal Decomposition
+        self._auto_approve_threshold = getattr(config, "daemon_auto_approve_threshold", 3)
+
+        # Phase 5E: Proactive Notifications
+        self._daily_summary_hour = getattr(config, "daemon_daily_summary_hour", 14)
+        self._stuck_threshold_hours = getattr(config, "daemon_stuck_threshold_hours", 2)
+        self._notifier = self._make_notifier()
+        self._last_notification_check: float = 0.0  # monotonic time
+        self._last_daily_summary_date: str = ""  # ISO date of last daily summary
 
         # Phase 3: Intelligence module (optional — degrades gracefully)
         self._intelligence = self._make_intelligence(config)
@@ -113,6 +128,25 @@ class ManagementEngine:
     def health(self) -> HealthMonitor:
         """Access the health monitor (for endpoints)."""
         return self._health
+
+    def _ensure_task_engine(self) -> bool:
+        """Lazy-init the TaskEngine. Returns True if available."""
+        if self._task_engine is not None:
+            return True
+        try:
+            from kronos_mcp.tasks import TaskEngine
+            self._task_engine = TaskEngine(str(self._scanner._vault_path))
+            return True
+        except ImportError:
+            return False
+
+    def _make_notifier(self):
+        """Create a DaemonNotifier, or None if imports fail."""
+        try:
+            from core.daemon.notifier import DaemonNotifier
+            return DaemonNotifier(stuck_threshold_hours=self._stuck_threshold_hours)
+        except ImportError:
+            return None
 
     async def start(self) -> None:
         """Initialize store and start the main loop."""
@@ -178,6 +212,24 @@ class ManagementEngine:
         # Step 3: Dispatch READY → pool
         await self._dispatch_cycle()
 
+        # Step 4: Nudge idle human-owned stories (rate-limited to once/hour)
+        try:
+            await self._nudge_cycle()
+        except Exception:
+            logger.exception("Nudge cycle error")
+
+        # Step 5: Check goal completion (Phase 5C)
+        try:
+            await self._goal_tracking_cycle()
+        except Exception:
+            logger.exception("Goal tracking cycle error")
+
+        # Step 6: Proactive notifications (rate-limited, Phase 5E)
+        try:
+            await self._notification_cycle()
+        except Exception:
+            logger.exception("Notification cycle error")
+
         self._health.record_scan()
 
     async def _scan_cycle(self) -> None:
@@ -191,9 +243,75 @@ class ManagementEngine:
             self._health.record_error("Scan failed")
 
     async def _promote_cycle(self) -> None:
-        """Advance BACKLOG items to READY."""
+        """Advance BACKLOG items to READY.
+
+        Human-owned stories stay in BACKLOG — visible but never auto-promoted.
+        Stories with unsatisfied dependencies stay in BACKLOG.
+        """
+        from core.daemon.scanner import check_dependencies
+
         backlog = await self._store.list_items(status_filter=PipelineStatus.BACKLOG)
+
+        # Batch-resolve dependency statuses for all stories that have deps
+        dep_story_ids: set[str] = set()
         for item in backlog:
+            if item.depends_on:
+                try:
+                    import json
+                    dep_ids = json.loads(item.depends_on)
+                    dep_story_ids.update(dep_ids)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        story_statuses: dict[str, str] = {}
+        if dep_story_ids:
+            story_statuses = self._batch_get_story_statuses(list(dep_story_ids))
+
+        for item in backlog:
+            # Phase 5A: skip human-owned stories
+            effective_owner = self._resolve_owner(item)
+            if effective_owner == "human":
+                continue
+
+            # Phase 5C: skip already-decomposed goal stories
+            # If a plan/goal story already has children, it was decomposed
+            # externally (or in a previous run). Auto-resolve it instead of
+            # re-dispatching to the PLAN agent.
+            if item.assignee == "plan" and self._is_decomposed_goal(item):
+                try:
+                    await self._store.advance(item.id, PipelineStatus.READY)
+                    await self._store.advance(item.id, PipelineStatus.DISPATCHED, job_id="pre-decomposed")
+                    await self._store.advance(item.id, PipelineStatus.REVIEW)
+                    await self._store.advance(item.id, PipelineStatus.MERGED)
+                    logger.info("Goal %s already decomposed — auto-merged", item.story_id)
+                except Exception:
+                    logger.exception("Failed to auto-merge decomposed goal %s", item.story_id)
+                continue
+
+            # Phase 5B: check dependencies
+            if item.depends_on:
+                satisfied, blocking = check_dependencies(item.depends_on, story_statuses)
+                if not satisfied:
+                    # Update blocked_by field
+                    import json
+                    blocked_json = json.dumps(blocking)
+                    if item.blocked_by != blocked_json:
+                        await self._store.update_fields(item.id, blocked_by=blocked_json)
+                    continue
+
+                # Dependencies just became satisfied — clear blocked_by and emit event
+                if item.blocked_by:
+                    await self._store.update_fields(item.id, blocked_by="")
+                    from core.pool.events import PoolEvent, PoolEventType
+                    await self._pool_events.emit(PoolEvent(
+                        type=PoolEventType.DAEMON_DEPENDENCY_SATISFIED,
+                        job_id="",
+                        data={
+                            "story_id": item.story_id,
+                            "project_id": item.project_id,
+                        },
+                    ))
+
             try:
                 await self._store.advance(item.id, PipelineStatus.READY)
                 logger.info("Promoted %s (%s) to READY", item.id, item.story_id)
@@ -229,6 +347,203 @@ class ManagementEngine:
             except Exception:
                 logger.exception("Failed to dispatch %s", item.story_id)
                 self._health.record_error(f"Dispatch failed: {item.story_id}")
+
+    def _is_decomposed_goal(self, item: Any) -> bool:
+        """Check if a plan/goal story already has children in the vault.
+
+        Returns True if the story has the 'goal' tag and at least one other
+        story in the same project references it (via goal:{id} tag or
+        depends_on chain pointing to sibling stories).
+        """
+        story_data = self._get_story_details(item.story_id)
+        if not story_data:
+            return False
+
+        tags = story_data.get("tags", [])
+        if "goal" not in tags:
+            return False
+
+        # Check if any sibling stories reference this goal
+        if not self._ensure_task_engine():
+            return False
+
+        try:
+            all_stories = self._task_engine.list_items(project_id=item.project_id)
+            for s in all_stories:
+                s_tags = s.get("tags", []) or []
+                if f"goal:{item.story_id}" in s_tags:
+                    return True
+                # Also check if story has created_by: agent:planning and
+                # description mentions this goal
+                s_desc = s.get("description", "") or ""
+                if item.story_id in s_desc and s.get("id") != item.story_id:
+                    return True
+        except Exception:
+            logger.debug("Could not check goal children for %s", item.story_id)
+
+        return False
+
+    def _resolve_owner(self, item: Any) -> str:
+        """Resolve the effective owner of a pipeline item.
+
+        Empty owner resolves to default: 'grim' if assignee is set, 'human' otherwise.
+        """
+        owner = getattr(item, "owner", "") or ""
+        if owner:
+            return owner
+        # Default: grim if assignee set, human otherwise
+        if getattr(item, "assignee", ""):
+            return self._default_owner
+        return "human"
+
+    def _batch_get_story_statuses(self, story_ids: list[str]) -> dict[str, str]:
+        """Get vault statuses for a batch of story IDs.
+
+        Returns {story_id: status} for all found stories.
+        """
+        if not story_ids:
+            return {}
+
+        if not self._ensure_task_engine():
+            return {}
+
+        try:
+            batch = self._task_engine.get_items_batch(story_ids)
+            return {sid: data.get("status", "") for sid, data in batch.items()}
+        except Exception:
+            logger.warning("Failed to batch-get story statuses for dependency check")
+            return {}
+
+    async def _nudge_cycle(self) -> None:
+        """Check for human-owned stories idle too long and emit nudge events.
+
+        Runs at most once per hour to avoid spam.
+        """
+        import time
+        now_mono = time.monotonic()
+        if now_mono - self._last_nudge_check < 3600:  # once per hour
+            return
+        self._last_nudge_check = now_mono
+
+        if self._nudge_after_days <= 0:
+            return
+
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self._nudge_after_days)
+
+        backlog = await self._store.list_items(status_filter=PipelineStatus.BACKLOG)
+        for item in backlog:
+            effective_owner = self._resolve_owner(item)
+            if effective_owner != "human":
+                continue
+            if item.updated_at < cutoff:
+                from core.pool.events import PoolEvent, PoolEventType
+                await self._pool_events.emit(PoolEvent(
+                    type=PoolEventType.DAEMON_NUDGE,
+                    job_id="",
+                    data={
+                        "story_id": item.story_id,
+                        "project_id": item.project_id,
+                        "idle_days": (datetime.now(timezone.utc) - item.updated_at).days,
+                        "title": item.story_id,  # pipeline doesn't store title
+                    },
+                ))
+                logger.info("Nudging human owner for idle story %s (%d days)",
+                           item.story_id, (datetime.now(timezone.utc) - item.updated_at).days)
+
+    async def _notification_cycle(self) -> None:
+        """Run proactive notifications — stuck detection + daily summary.
+
+        Rate-limited to once per hour. Daily summary emits at the configured hour.
+        """
+        if self._notifier is None:
+            return
+
+        import time
+        now_mono = time.monotonic()
+        if now_mono - self._last_notification_check < 3600:  # once per hour
+            return
+        self._last_notification_check = now_mono
+
+        # Stuck detection
+        stuck_items = await self._notifier.detect_stuck(self._store)
+        from core.pool.events import PoolEvent, PoolEventType
+        for stuck in stuck_items:
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_STUCK_WARNING,
+                job_id=stuck.job_id or "",
+                data={
+                    "story_id": stuck.story_id,
+                    "project_id": stuck.project_id,
+                    "hours_dispatched": round(stuck.hours_dispatched, 1),
+                },
+            ))
+            logger.warning("Stuck warning: %s dispatched for %.1f hours",
+                          stuck.story_id, stuck.hours_dispatched)
+
+        # Daily summary — emit once per calendar day at the configured hour
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        today = now.strftime("%Y-%m-%d")
+
+        if today != self._last_daily_summary_date and now.hour >= self._daily_summary_hour:
+            self._last_daily_summary_date = today
+            summary = await self._notifier.daily_summary(self._store)
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_DAILY_SUMMARY,
+                job_id="",
+                data={
+                    "counts": summary.counts_by_status,
+                    "completed_today": summary.completed_today,
+                    "stuck_count": len(summary.stuck_items),
+                    "stuck_items": summary.stuck_items[:5],
+                    "human_idle_count": len(summary.human_idle),
+                    "human_idle": summary.human_idle[:5],
+                    "total_items": summary.total_items,
+                    "formatted": self._notifier.format_daily_summary(summary),
+                },
+            ))
+            logger.info("Daily summary emitted: %d total, %d completed today, %d stuck",
+                       summary.total_items, summary.completed_today, len(summary.stuck_items))
+
+            # Prune old data (once per day alongside daily summary)
+            await self._prune_old_data()
+
+    async def _prune_old_data(self) -> None:
+        """Delete stale pipeline items and pool jobs older than 30 days."""
+        try:
+            pruned_pipeline = await self._store.prune_merged(days=30)
+            if pruned_pipeline:
+                logger.info("Pruned %d old merged pipeline items", pruned_pipeline)
+        except Exception:
+            logger.warning("Pipeline prune failed", exc_info=True)
+
+        try:
+            pruned_jobs = await self._pool_queue.prune_completed(days=30)
+            if pruned_jobs:
+                logger.info("Pruned %d old completed pool jobs", pruned_jobs)
+        except Exception:
+            logger.warning("Pool job prune failed", exc_info=True)
+
+    async def daily_summary(self) -> dict:
+        """Generate a daily summary on demand (for REST/Discord).
+
+        Returns dict with summary data + formatted text.
+        """
+        if self._notifier is None:
+            return {"error": "Notifier not available"}
+
+        summary = await self._notifier.daily_summary(self._store)
+        return {
+            "counts": summary.counts_by_status,
+            "completed_today": summary.completed_today,
+            "stuck_count": len(summary.stuck_items),
+            "stuck_items": summary.stuck_items,
+            "human_idle_count": len(summary.human_idle),
+            "human_idle": summary.human_idle,
+            "total_items": summary.total_items,
+            "formatted": self._notifier.format_daily_summary(summary),
+        }
 
     async def _submit_to_pool(self, item: Any) -> str:
         """Build a Job from the pipeline item and submit to the pool queue."""
@@ -300,22 +615,18 @@ class ManagementEngine:
         return "\n".join(parts)
 
     @staticmethod
-    def _make_context_builder(vault_path: Path, workspace_root: Path):
+    def _make_context_builder(vault_path: Path, workspace_root: Path, pipeline_store=None):
         """Create a ContextBuilder, or None if imports fail."""
         try:
             from core.daemon.context import ContextBuilder
-            return ContextBuilder(vault_path, workspace_root)
+            return ContextBuilder(vault_path, workspace_root, pipeline_store=pipeline_store)
         except ImportError:
             return None
 
     def _get_story_details(self, story_id: str) -> dict | None:
         """Fetch story details from vault via TaskEngine."""
-        if self._task_engine is None:
-            try:
-                from kronos_mcp.tasks import TaskEngine
-                self._task_engine = TaskEngine(str(self._scanner._vault_path))
-            except ImportError:
-                return None
+        if not self._ensure_task_engine():
+            return None
 
         try:
             batch = self._task_engine.get_items_batch([story_id])
@@ -326,12 +637,8 @@ class ManagementEngine:
 
     async def _update_vault_story(self, story_id: str, job_id: str) -> None:
         """Write job_id back to the vault story."""
-        if self._task_engine is None:
-            try:
-                from kronos_mcp.tasks import TaskEngine
-                self._task_engine = TaskEngine(str(self._scanner._vault_path))
-            except ImportError:
-                return
+        if not self._ensure_task_engine():
+            return
 
         try:
             self._task_engine.update_item(story_id, {"job_id": job_id})
@@ -480,12 +787,8 @@ class ManagementEngine:
 
     def _update_vault_story_status(self, story_id: str, status: str) -> None:
         """Update story status in vault (best-effort)."""
-        if self._task_engine is None:
-            try:
-                from kronos_mcp.tasks import TaskEngine
-                self._task_engine = TaskEngine(str(self._scanner._vault_path))
-            except ImportError:
-                return
+        if not self._ensure_task_engine():
+            return
         try:
             self._task_engine.update_item(story_id, {"status": status})
         except Exception:
@@ -658,6 +961,185 @@ class ManagementEngine:
             except Exception:
                 logger.warning("Failed to poll PR comments for %s", item.story_id)
 
+    # ── Goal Decomposition (Phase 5C) ───────────────────────────
+
+    async def _handle_plan_complete(self, item: Any, job_id: str, event_data: dict) -> None:
+        """Handle a completed PLAN job — parse output, create draft stories."""
+        from core.pool.events import PoolEvent, PoolEventType
+
+        # Get job result text
+        result_text = ""
+        try:
+            job = await self._pool_queue.get(job_id)
+            if job:
+                result_text = getattr(job, "result", "") or ""
+        except Exception:
+            logger.warning("Could not fetch PLAN job result for %s", job_id)
+
+        if not result_text:
+            await self._store.advance(item.id, PipelineStatus.FAILED, error="PLAN job returned no output")
+            return
+
+        # Parse the plan
+        from core.daemon.planner import PlanParser, PlanExecutor
+        parser = PlanParser()
+        parsed = parser.parse(result_text)
+
+        if not parsed.valid:
+            error_msg = "; ".join(parsed.errors[:3])
+            await self._store.advance(item.id, PipelineStatus.FAILED, error=f"Plan parse failed: {error_msg}")
+            logger.warning("PLAN parse failed for %s: %s", item.story_id, error_msg)
+            return
+
+        # Ensure task engine is available
+        if not self._ensure_task_engine():
+            await self._store.advance(item.id, PipelineStatus.FAILED, error="TaskEngine unavailable")
+            return
+
+        # Execute plan — create draft stories
+        executor = PlanExecutor(self._task_engine)
+        executed = executor.execute(parsed, item.project_id, item.story_id)
+
+        if not executed.created_ids:
+            await self._store.advance(item.id, PipelineStatus.FAILED, error="Plan execution created no stories")
+            return
+
+        # Store plan metadata on the goal story
+        self._task_engine.update_item(item.story_id, {
+            "tags": list(set((self._get_story_details(item.story_id) or {}).get("tags", []) + ["goal"])),
+        })
+
+        # Auto-approve gate
+        if (self._auto_approve_threshold > 0
+                and len(executed.created_ids) <= self._auto_approve_threshold):
+            # Auto-approve: activate all draft stories
+            activated = executor.activate_plan(executed)
+            await self._store.advance(item.id, PipelineStatus.MERGED)
+            self._update_vault_story_status(item.story_id, "active")
+            logger.info("PLAN %s auto-approved: %d stories activated", item.story_id, activated)
+        else:
+            # Require human approval — advance to REVIEW (manual)
+            await self._store.advance(item.id, PipelineStatus.REVIEW)
+            await self._pool_events.emit(PoolEvent(
+                type=PoolEventType.DAEMON_PLAN_PROPOSED,
+                job_id=job_id,
+                data={
+                    "story_id": item.story_id,
+                    "project_id": item.project_id,
+                    "story_count": len(executed.created_ids),
+                    "created_ids": executed.created_ids,
+                },
+            ))
+            logger.info("PLAN %s proposed: %d stories awaiting approval",
+                        item.story_id, len(executed.created_ids))
+
+    async def approve_goal(self, goal_story_id: str) -> dict:
+        """Approve a proposed plan — activate all draft children."""
+        if not self._ensure_task_engine():
+            return {"error": "TaskEngine unavailable"}
+
+        # Find the pipeline item for this goal
+        item = await self._store.get_by_story(goal_story_id)
+        if item is None:
+            return {"error": f"Goal {goal_story_id} not found in pipeline"}
+
+        if item.status != PipelineStatus.REVIEW:
+            return {"error": f"Goal is not pending approval (status: {item.status.value})"}
+
+        # Find draft children
+        all_items = self._task_engine.list_items()
+        children = [
+            s for s in all_items
+            if f"goal:{goal_story_id}" in (s.get("tags") or [])
+            and s.get("status") == "draft"
+        ]
+
+        if not children:
+            return {"error": "No draft children found for this goal"}
+
+        from core.daemon.planner import ExecutedPlan, PlanExecutor
+        executor = PlanExecutor(self._task_engine)
+        child_ids = [c["id"] for c in children]
+        executed = ExecutedPlan(
+            goal_story_id=goal_story_id,
+            created_ids=child_ids,
+            dependency_map={},
+        )
+        activated = executor.activate_plan(executed)
+
+        # Advance goal to MERGED
+        await self._store.advance(item.id, PipelineStatus.MERGED)
+        self._update_vault_story_status(goal_story_id, "active")
+
+        logger.info("Goal %s approved: %d stories activated", goal_story_id, activated)
+        return {"approved": goal_story_id, "activated": activated, "story_ids": child_ids}
+
+    async def reject_goal(self, goal_story_id: str) -> dict:
+        """Reject a proposed plan — close draft children, fail the goal."""
+        if not self._ensure_task_engine():
+            return {"error": "TaskEngine unavailable"}
+
+        item = await self._store.get_by_story(goal_story_id)
+        if item is None:
+            return {"error": f"Goal {goal_story_id} not found in pipeline"}
+
+        if item.status != PipelineStatus.REVIEW:
+            return {"error": f"Goal is not pending approval (status: {item.status.value})"}
+
+        # Find and close draft children
+        all_items = self._task_engine.list_items()
+        children = [
+            s for s in all_items
+            if f"goal:{goal_story_id}" in (s.get("tags") or [])
+            and s.get("status") == "draft"
+        ]
+
+        from core.daemon.planner import PlanExecutor
+        executor = PlanExecutor(self._task_engine)
+        closed = executor.reject_plan([c["id"] for c in children])
+
+        # Fail the goal
+        await self._store.advance(item.id, PipelineStatus.FAILED, error="Plan rejected by reviewer")
+
+        logger.info("Goal %s rejected: %d draft stories closed", goal_story_id, closed)
+        return {"rejected": goal_story_id, "closed": closed}
+
+    async def _goal_tracking_cycle(self) -> None:
+        """Check active goals for completion — auto-resolve when all children done."""
+        if not self._ensure_task_engine():
+            return
+
+        from core.daemon.planner import GoalTracker
+
+        # Find MERGED goal stories (these have activated children running)
+        merged = await self._store.list_items(status_filter=PipelineStatus.MERGED)
+        tracker = GoalTracker(self._task_engine)
+
+        for item in merged:
+            # Check if this is a goal (has goal tag in vault)
+            story_data = self._get_story_details(item.story_id)
+            if not story_data:
+                continue
+            tags = story_data.get("tags", [])
+            if "goal" not in tags:
+                continue
+
+            complete, stats = tracker.check_goal_complete(item.story_id)
+            if complete and stats["total"] > 0:
+                tracker.auto_resolve_goal(item.story_id)
+                from core.pool.events import PoolEvent, PoolEventType
+                await self._pool_events.emit(PoolEvent(
+                    type=PoolEventType.DAEMON_GOAL_COMPLETE,
+                    job_id="",
+                    data={
+                        "story_id": item.story_id,
+                        "project_id": item.project_id,
+                        "children_count": stats["total"],
+                    },
+                ))
+                logger.info("Goal %s auto-resolved: %d children complete",
+                           item.story_id, stats["total"])
+
     # ── Pool Event Handler ────────────────────────────────────────
 
     async def _handle_pool_event(self, event: PoolEvent) -> None:
@@ -768,8 +1250,36 @@ class ManagementEngine:
                         job_id, item.story_id)
 
     async def _handle_complete(self, item: Any, job_id: str, event_data: dict) -> None:
-        """Validate completed work and advance or retry."""
+        """Validate completed work and advance or retry.
+
+        PLAN jobs are routed through the planner pipeline instead of normal review.
+        """
+        # Phase 5C: PLAN jobs → goal decomposition
+        if item.assignee == "plan":
+            await self._handle_plan_complete(item, job_id, event_data)
+            return
+
         workspace_id = event_data.get("workspace_id")
+
+        # Phase 5D: Fetch result and store summary early (before any early returns)
+        result_text = ""
+        try:
+            job = await self._pool_queue.get(job_id)
+            if job:
+                result_text = getattr(job, "result", "") or ""
+        except Exception:
+            logger.warning("Could not fetch job result for %s", job_id)
+
+        if result_text:
+            truncated_summary = result_text[:2000]
+            try:
+                await self._store.update_fields(item.id, result_summary=truncated_summary)
+            except Exception:
+                logger.warning("Could not store result_summary for %s", item.story_id)
+
+        # Phase 5D: Research-specific handling
+        if item.assignee == "research":
+            await self._handle_research_complete(item, job_id, result_text)
 
         if not self._intelligence or not self._validate_output:
             # No validation — advance directly to REVIEW
@@ -795,20 +1305,23 @@ class ManagementEngine:
             await self._handle_review(item, workspace_id)
             return
 
-        # Get job result from pool
-        result_text = ""
-        try:
-            job = await self._pool_queue.get(job_id)
-            if job:
-                result_text = getattr(job, "result", "") or ""
-        except Exception:
-            logger.warning("Could not fetch job result for %s", job_id)
-
         diff_stat = event_data.get("diff_stat", "")
         changed_files = event_data.get("changed_files", [])
 
+        # Determine if this is an execution story (needs run evidence)
+        is_exec = False
+        if story_data:
+            try:
+                from core.daemon.context import _is_execution_story
+                is_exec = _is_execution_story(story_data)
+            except ImportError:
+                pass
+
         validator = self._intelligence["validator"]
-        verdict = await validator.validate(ac, result_text, diff_stat, changed_files)
+        verdict = await validator.validate(
+            ac, result_text, diff_stat, changed_files,
+            is_execution_story=is_exec,
+        )
 
         if verdict.outcome == "pass":
             await self._store.advance(
@@ -852,6 +1365,34 @@ class ManagementEngine:
             logger.info("Job %s validated PARTIAL → REVIEW (%s): %s",
                         job_id, item.story_id, verdict.reasoning)
             await self._handle_review(item, workspace_id)
+
+    async def _handle_research_complete(self, item: Any, job_id: str, result_text: str) -> None:
+        """Handle research job completion — validate and emit event.
+
+        Research stories get heuristic validation (no LLM) and emit
+        DAEMON_RESEARCH_COMPLETE so dependent code stories know they're unblocked.
+        """
+        # Validate research output if intelligence is available
+        if self._intelligence and self._validate_output:
+            validator = self._intelligence["validator"]
+            verdict = validator.validate_research(result_text)
+            if verdict.outcome == "fail":
+                logger.warning("Research validation failed for %s: %s",
+                              item.story_id, verdict.reasoning)
+                # Don't block the pipeline — just log the warning
+
+        # Emit research complete event
+        from core.pool.events import PoolEvent, PoolEventType
+        await self._pool_events.emit(PoolEvent(
+            type=PoolEventType.DAEMON_RESEARCH_COMPLETE,
+            job_id=job_id,
+            data={
+                "story_id": item.story_id,
+                "project_id": item.project_id,
+                "has_result": bool(result_text),
+            },
+        ))
+        logger.info("Research complete: %s (job=%s)", item.story_id, job_id)
 
     async def _handle_failed(self, item: Any, job_id: str, error: str) -> None:
         """Handle failed job — retry with feedback or escalate."""

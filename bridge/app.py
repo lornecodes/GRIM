@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from tracker import TokenTracker
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 UPSTREAM_URL = os.getenv("UPSTREAM_URL", "http://cliproxyapi:8317")
@@ -140,8 +141,9 @@ def _hoist_system_to_messages(payload: dict, original_body: bytes) -> bytes:
         messages.insert(0, {"role": "user", "content": system_text})
         payload["messages"] = messages
 
-    # Remove the system field so CLIProxyAPI's injection (+ filter) is the only thing there
-    payload.pop("system", None)
+    # Keep the system field so CLIProxyAPI can identify the request as a Claude
+    # Code client. CLIProxyAPI will replace it with its own instructions, but
+    # GRIM's actual system prompt survives via the user message injection above.
 
     return json.dumps(payload).encode()
 
@@ -162,6 +164,9 @@ async def proxy(request: Request, path: str):
     # Remove hop-by-hop headers that shouldn't be forwarded
     for h in ("host", "transfer-encoding"):
         headers.pop(h, None)
+    # Strip x-api-key — the SDK subprocess embeds its own API key, but
+    # CLIProxyAPI should use its OAuth auth entry instead.
+    headers.pop("x-api-key", None)
 
     body = await request.body()
 
@@ -172,6 +177,9 @@ async def proxy(request: Request, path: str):
         try:
             payload = json.loads(body)
             is_streaming = payload.get("stream", False)
+            logger.debug("MSG model=%s stream=%s msgs=%d body=%d",
+                         payload.get("model"), is_streaming,
+                         len(payload.get("messages", [])), len(body))
             # Move system prompt into messages before CLIProxyAPI can replace it.
             # CLIProxyAPI's checkSystemInstructions() overwrites the system field
             # with "You are Claude Code..." — so we inject our system content as
@@ -193,11 +201,17 @@ async def proxy(request: Request, path: str):
         return JSONResponse({"error": "upstream unavailable"}, status_code=502)
     except httpx.TimeoutException:
         return JSONResponse({"error": "upstream timeout"}, status_code=504)
+    except Exception:
+        logger.exception("Proxy error for %s %s", request.method, path)
+        return JSONResponse({"error": "internal proxy error"}, status_code=500)
 
 
 async def _handle_non_streaming(url: str, headers: dict, body: bytes, caller_id: str) -> Response:
     """Forward non-streaming /v1/messages and extract usage."""
     resp = await _client.request("POST", url, headers=headers, content=body)
+
+    if resp.status_code >= 400:
+        logger.warning("Upstream %d: %s", resp.status_code, resp.text[:500])
 
     # Extract usage from response body
     try:
@@ -239,6 +253,11 @@ async def _handle_streaming(url: str, headers: dict, body: bytes, caller_id: str
         """Stream chunks through while capturing usage events."""
         try:
             async with _client.stream("POST", url, headers=headers, content=body) as resp:
+                if resp.status_code >= 400:
+                    error_body = await resp.aread()
+                    logger.warning("Stream upstream %d: %s", resp.status_code, error_body[:500])
+                    yield f"data: {json.dumps({'type': 'error', 'error': {'type': 'upstream_error', 'message': error_body.decode()[:200]}})}\n\n"
+                    return
                 async for line in resp.aiter_lines():
                     # Forward every line immediately
                     yield line + "\n"

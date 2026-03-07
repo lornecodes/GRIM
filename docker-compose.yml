@@ -119,8 +119,7 @@ services:
     command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
     volumes:
       - ${WORKSPACE_PATH:-..}:/workspace
-      - grim-sessions:/app/local/sessions
-      - grim-evolution:/app/local/evolution
+      - ./local:/app/local
     networks:
       - grim-net
     restart: unless-stopped
@@ -156,6 +155,7 @@ services:
       - GRIM_DISCORD_OWNER_ID=${GRIM_DISCORD_OWNER_ID:-}
       - GRIM_DISCORD_GUILDS=${GRIM_DISCORD_GUILDS:-}
       - GRIM_DISCORD_CHANNELS=${GRIM_DISCORD_CHANNELS:-}
+      - GRIM_DAEMON_CHANNEL_ID=${GRIM_DAEMON_CHANNEL_ID:-}
       - GRIM_ENV=${GRIM_ENV:-production}
       - GRIM_SERVER_URL=http://grim:8080
       - GRIM_VAULT_PATH=/workspace/kronos-vault
@@ -190,9 +190,5 @@ volumes:
     name: cliproxyapi-auths
   bridge-data:
     name: bridge-data
-  grim-sessions:
-    name: grim-sessions
-  grim-evolution:
-    name: grim-evolution
   grim-discord-sessions:
     name: grim-discord-sessions

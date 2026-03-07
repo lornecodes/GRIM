@@ -109,7 +109,9 @@ _SYSTEM_PROMPTS: dict[JobType, str] = {
         "Use Kronos to check project conventions before coding. "
         "Always write tests for new functions. "
         "After creating or modifying files, call kronos_update on the relevant FDO "
-        "to add new files to source_paths (repo, path, type fields)."
+        "to add new files to source_paths (repo, path, type fields). "
+        "When your task involves running scripts or experiments, execute them "
+        "and report the output, key metrics, and pass/fail status."
     ),
     JobType.RESEARCH: (
         "You are a research agent for the Dawn Field Institute. "
@@ -190,7 +192,7 @@ class AgentSlot:
         elif self.kronos_mcp_command:
             mcp_servers["kronos"] = {
                 "command": self.kronos_mcp_command,
-                "env": self.kronos_mcp_env,
+                "env": {**self.kronos_mcp_env, "KRONOS_CALLER_ID": "pool"},
             }
         return mcp_servers
 
@@ -317,7 +319,7 @@ class AgentSlot:
             # Track current job type for dynamic permission callback
             self._client_job_type = job.job_type
 
-            prompt = _build_prompt(job)
+            prompt = _build_prompt(job, cwd=self.cwd)
             # Use unique session_id per job so conversations don't bleed
             session_id = f"{self.slot_id}-{job.id}"
 
@@ -435,9 +437,16 @@ def _make_dynamic_permission_callback(slot: AgentSlot):
     return _dynamic_permission_handler
 
 
-def _build_system_prompt(job: Job, base_prompt: str) -> str:
+def _build_system_prompt(job: Job, base_prompt: str, *, cwd: str | None = None) -> str:
     """Build full system prompt with Kronos context."""
     parts = [base_prompt]
+
+    if cwd:
+        parts.append(
+            f"\nYour current working directory is: {cwd}"
+            "\nAll file paths should be relative to this directory. "
+            "Do NOT guess paths like /home/ or /root/ — use the cwd above."
+        )
 
     if job.kronos_domains:
         parts.append(f"\nRelevant Kronos domains: {', '.join(job.kronos_domains)}")
@@ -455,7 +464,7 @@ def _build_system_prompt(job: Job, base_prompt: str) -> str:
     return "\n".join(parts)
 
 
-def _build_prompt(job: Job) -> str:
+def _build_prompt(job: Job, *, cwd: str | None = None) -> str:
     """Build the user-facing prompt from job instructions + context.
 
     Includes role-specific instructions since the subprocess is type-agnostic
@@ -467,6 +476,15 @@ def _build_prompt(job: Job) -> str:
     role_prompt = _SYSTEM_PROMPTS.get(job.job_type)
     if role_prompt:
         parts.append(f"## Role\n{role_prompt}\n")
+
+    # Tell the agent where it is — prevents wasted turns guessing paths
+    if cwd:
+        parts.append(
+            f"## Working Directory\n"
+            f"Your current working directory is: `{cwd}`\n"
+            f"All file paths are relative to this directory. "
+            f"Do NOT guess paths like /home/ or /root/ — use relative paths or the cwd above.\n"
+        )
 
     parts.append(job.instructions)
 

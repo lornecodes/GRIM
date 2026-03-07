@@ -92,10 +92,32 @@ class ExecutionPool:
     async def start(self) -> None:
         """Initialize queue, refresh caches, warm Kronos, and start dispatch loop."""
         import time as _time
+        t_start = _time.time()
 
         await self._queue.initialize()
 
+        # Clean up stale worktrees from previous runs in the BACKGROUND.
+        # Bind-mount I/O on Docker Desktop is very slow for large repos
+        # (10K files → 2+ min to delete), so this must not block startup.
+        if self._workspace_mgr and self._workspace_root:
+            async def _bg_cleanup() -> None:
+                try:
+                    repo_dirs = [
+                        p for p in self._workspace_root.iterdir()
+                        if p.is_dir() and (p / ".git").exists()
+                    ]
+                    pruned = await self._workspace_mgr.prune_stale(repo_dirs)
+                    if pruned:
+                        logger.info("Cleaned up %d stale worktrees (background)", pruned)
+                except Exception as e:
+                    logger.warning("Worktree cleanup failed: %s", e)
+            asyncio.create_task(_bg_cleanup(), name="pool-worktree-cleanup")
+
         warm_on_start = getattr(self._config, "pool_warm_on_start", True)
+        logger.info(
+            "Pool startup: warm_on_start=%s, kronos_url=%r, kronos_cmd=%r",
+            warm_on_start, self._kronos_mcp_url, self._kronos_mcp_command,
+        )
 
         # Auto-start a local Kronos SSE server if no external URL is configured.
         # This is the single biggest perf win: all slots share one warm Kronos
@@ -103,7 +125,18 @@ class ExecutionPool:
         if warm_on_start and not self._kronos_mcp_url and self._kronos_mcp_command:
             t0 = _time.time()
             await self._start_kronos_sse()
-            logger.info("Kronos SSE auto-started in %.1fs", _time.time() - t0)
+            if self._kronos_mcp_url:
+                logger.info(
+                    "Kronos SSE auto-started in %.1fs → %s",
+                    _time.time() - t0, self._kronos_mcp_url,
+                )
+            else:
+                logger.warning(
+                    "Kronos SSE auto-start FAILED after %.1fs — falling back to stdio",
+                    _time.time() - t0,
+                )
+        elif not self._kronos_mcp_command:
+            logger.warning("No kronos_mcp_command configured — pool agents have no vault tools")
 
         # Run codebase refresh + Kronos health check concurrently (both independent)
         startup_tasks: list[asyncio.Task] = []
@@ -137,6 +170,10 @@ class ExecutionPool:
             )
             for i in range(num_slots)
         ]
+        logger.info(
+            "Created %d slots with kronos_mcp_url=%r",
+            num_slots, self._kronos_mcp_url,
+        )
 
         # Pre-warm ALL slot subprocesses in parallel so first job is instant
         if warm_on_start:
@@ -147,7 +184,10 @@ class ExecutionPool:
         self._running = True
         self._loop_task = asyncio.create_task(self._main_loop())
         kronos_mode = "SSE" if self._kronos_mcp_url else "stdio"
-        logger.info("ExecutionPool started: %d slots, Kronos=%s", num_slots, kronos_mode)
+        logger.info(
+            "ExecutionPool READY: %d slots, Kronos=%s, total startup=%.1fs",
+            num_slots, kronos_mode, _time.time() - t_start,
+        )
 
     async def stop(self) -> None:
         """Gracefully shut down the pool."""
@@ -415,8 +455,11 @@ class ExecutionPool:
             if task.exception():
                 logger.error("Slot %s task crashed: %s", sid, task.exception())
 
-        # Find idle slots
-        idle_slots = [s for s in self._slots if not s.busy]
+        # Find idle slots (check both busy flag AND active task tracker)
+        idle_slots = [
+            s for s in self._slots
+            if not s.busy and s.slot_id not in self._tasks
+        ]
         if not idle_slots:
             return
 
@@ -488,14 +531,6 @@ class ExecutionPool:
         # Fallback: no target_repo or non-CODE → workspace root as cwd
         if not slot.cwd and self._workspace_root:
             slot.cwd = str(self._workspace_root)
-
-        # Warm the agent subprocess before starting the job timeout clock.
-        # SDK init (subprocess spawn + MCP connect) can take 10-30s and
-        # shouldn't eat into the job's execution budget.
-        try:
-            await slot.warm(job.job_type)
-        except Exception as e:
-            logger.warning("Slot %s warm failed (will retry in execute): %s", slot.slot_id, e)
 
         try:
             result = await asyncio.wait_for(

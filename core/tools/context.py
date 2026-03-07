@@ -24,6 +24,7 @@ class ToolContext:
     mcp_session: Any = None
     workspace_root: Path | None = None
     execution_pool: Any = None  # ExecutionPool instance (Project Charizard)
+    follow_job_callback: Any = None  # Callable[[str], None] — registers a pool job for inline chat following
 
     def configure(self, **kwargs) -> None:
         """Set multiple fields at once. Only sets non-None values."""

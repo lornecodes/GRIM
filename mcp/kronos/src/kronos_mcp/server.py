@@ -115,6 +115,7 @@ logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
 
 vault_path = os.getenv("KRONOS_VAULT_PATH", "")
 skills_path = os.getenv("KRONOS_SKILLS_PATH", "")
+_caller_id = os.getenv("KRONOS_CALLER_ID", "peter")  # Caller identity for permission checks
 
 if not vault_path:
     raise ValueError(
@@ -684,6 +685,16 @@ TOOLS: list[Tool] = [
                     "enum": ["draft", "new"],
                     "description": "Initial status — 'draft' for AI-created items pending approval, 'new' for human-created (default: new)",
                 },
+                "owner": {
+                    "type": "string",
+                    "enum": ["grim", "human"],
+                    "description": "Who owns this story — 'grim' for daemon-managed, 'human' for Peter's backlog",
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Story IDs this story depends on (must be resolved/closed before this can start)",
+                },
             },
             "required": ["title"],
         },
@@ -705,7 +716,7 @@ TOOLS: list[Tool] = [
                     "type": "object",
                     "description": (
                         "Fields to update: title, status, priority, estimate_days, "
-                        "description, acceptance_criteria, assignee, job_id, tags."
+                        "description, acceptance_criteria, assignee, job_id, tags, owner, depends_on."
                     ),
                 },
             },
@@ -755,6 +766,11 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "enum": ["critical", "high", "medium", "low"],
                     "description": "Filter by priority",
+                },
+                "owner": {
+                    "type": "string",
+                    "enum": ["grim", "human"],
+                    "description": "Filter by owner — 'grim' for daemon-managed, 'human' for Peter's backlog",
                 },
             },
         },
@@ -1934,6 +1950,8 @@ def handle_validate(args: dict) -> str:
 
 
 def handle_create(args: dict) -> str:
+    from kronos_mcp.permissions import can_write
+
     # Read-only check: only need vault dict to verify ID doesn't exist.
     vault._ensure_index()
 
@@ -1944,6 +1962,16 @@ def handle_create(args: dict) -> str:
     domain = args["domain"]
     if domain not in VALID_DOMAINS:
         return _json({"error": f"Invalid domain: {domain}", "valid": list(VALID_DOMAINS)})
+
+    # Domain write guard — protected domains need owner approval
+    if not can_write(_caller_id, domain):
+        return _json({
+            "approval_required": True,
+            "caller": _caller_id,
+            "domain": domain,
+            "proposed": {"action": "create", **args},
+            "hint": f"Domain '{domain}' is protected. Include this JSON in your clarification question to request owner approval.",
+        })
 
     today = str(date.today())
     fdo = FDO(
@@ -1971,6 +1999,8 @@ def handle_create(args: dict) -> str:
 
 
 def handle_update(args: dict) -> str:
+    from kronos_mcp.permissions import can_write
+
     # Read-only check: only need vault dict to fetch the FDO.
     vault._ensure_index()
 
@@ -1978,6 +2008,16 @@ def handle_update(args: dict) -> str:
     fdo = vault.get(fdo_id)
     if not fdo:
         return _json({"error": f"FDO not found: {fdo_id}"})
+
+    # Domain write guard — protected domains need owner approval
+    if not can_write(_caller_id, fdo.domain):
+        return _json({
+            "approval_required": True,
+            "caller": _caller_id,
+            "domain": fdo.domain,
+            "proposed": {"action": "update", "id": fdo_id, "fields": args.get("fields", {})},
+            "hint": f"Domain '{fdo.domain}' is protected. Include this JSON in your clarification question to request owner approval.",
+        })
 
     fields = args.get("fields", {})
     for field_name, value in fields.items():
@@ -2452,9 +2492,24 @@ def handle_task_create(args: dict) -> str:
         tags=args.get("tags"),
         created_by=args.get("created_by") or "human",
         status=args.get("status") or "new",
+        owner=args.get("owner") or "",
+        depends_on=args.get("depends_on"),
     )
     if warnings and not result.get("error"):
         result["warnings"] = warnings
+
+    # Suggest skill-relevant tags based on title/description
+    if not result.get("error"):
+        try:
+            from core.daemon.context import suggest_tags
+            story_tags = set(args.get("tags") or [])
+            suggested = suggest_tags(title, args.get("description") or "")
+            missing = [t for t in suggested if t not in story_tags]
+            if missing:
+                result["suggested_tags"] = missing
+        except ImportError:
+            pass  # context module not available in this environment
+
     return _json(result)
 
 
@@ -2484,6 +2539,7 @@ def handle_task_list(args: dict) -> str:
         domain=args.get("domain"),
         status=args.get("status"),
         priority=args.get("priority"),
+        owner=args.get("owner"),
     )
     return _json({"stories": items, "count": len(items)})
 

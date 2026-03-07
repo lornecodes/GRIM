@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS pipeline (
     status TEXT NOT NULL DEFAULT 'backlog',
     priority INTEGER NOT NULL DEFAULT 2,
     assignee TEXT NOT NULL DEFAULT '',
+    owner TEXT NOT NULL DEFAULT '',
     job_id TEXT,
     workspace_id TEXT,
     error TEXT,
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS pipeline (
     pr_number INTEGER,
     pr_url TEXT,
     pr_comment_count INTEGER NOT NULL DEFAULT 0,
+    depends_on TEXT NOT NULL DEFAULT '',
+    blocked_by TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -74,10 +77,15 @@ class PipelineStore:
             await db.execute(_CREATE_INDEX)
             await db.execute(_CREATE_STORY_INDEX)
             # Phase 4 migration: add PR columns to existing DBs
+            # Phase 5A migration: add owner column
             for col, defn in [
                 ("pr_number", "INTEGER"),
                 ("pr_url", "TEXT"),
                 ("pr_comment_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("owner", "TEXT NOT NULL DEFAULT ''"),
+                ("depends_on", "TEXT NOT NULL DEFAULT ''"),
+                ("blocked_by", "TEXT NOT NULL DEFAULT ''"),
+                ("result_summary", "TEXT NOT NULL DEFAULT ''"),
             ]:
                 try:
                     await db.execute(f"ALTER TABLE pipeline ADD COLUMN {col} {defn}")
@@ -92,6 +100,8 @@ class PipelineStore:
         project_id: str,
         priority: int = 2,
         assignee: str = "",
+        owner: str = "",
+        depends_on: str = "",
     ) -> PipelineItem:
         """Add a new story to the pipeline as BACKLOG. Returns the created item."""
         item = PipelineItem(
@@ -99,15 +109,18 @@ class PipelineStore:
             project_id=project_id,
             priority=priority,
             assignee=assignee,
+            owner=owner,
+            depends_on=depends_on,
         )
         async with aiosqlite.connect(str(self._db_path)) as db:
             await db.execute(
                 """INSERT INTO pipeline
-                   (id, story_id, project_id, status, priority, assignee,
+                   (id, story_id, project_id, status, priority, assignee, owner,
                     job_id, workspace_id, error, attempts, daemon_retries,
                     pr_number, pr_url, pr_comment_count,
+                    depends_on, blocked_by,
                     created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     item.id,
                     item.story_id,
@@ -115,6 +128,7 @@ class PipelineStore:
                     item.status.value,
                     item.priority,
                     item.assignee,
+                    item.owner,
                     item.job_id,
                     item.workspace_id,
                     item.error,
@@ -123,12 +137,15 @@ class PipelineStore:
                     item.pr_number,
                     item.pr_url,
                     item.pr_comment_count,
+                    item.depends_on,
+                    item.blocked_by,
                     item.created_at.isoformat(),
                     item.updated_at.isoformat(),
                 ),
             )
             await db.commit()
-        logger.info("Pipeline item added: %s → %s (project=%s)", item.id, story_id, project_id)
+        logger.info("Pipeline item added: %s → %s (project=%s, owner=%s, deps=%s)",
+                     item.id, story_id, project_id, owner, depends_on or "none")
         return item
 
     async def advance(
@@ -168,6 +185,7 @@ class PipelineStore:
                 "job_id", "workspace_id", "error",
                 "attempts", "daemon_retries",
                 "pr_number", "pr_url", "pr_comment_count",
+                "owner", "depends_on", "blocked_by", "result_summary",
             }
             for key, value in fields.items():
                 if key in _ALLOWED_FIELDS:
@@ -234,6 +252,7 @@ class PipelineStore:
         self,
         status_filter: PipelineStatus | None = None,
         project_filter: str | None = None,
+        owner_filter: str | None = None,
         limit: int = 100,
     ) -> list[PipelineItem]:
         """List pipeline items with optional filters."""
@@ -246,6 +265,9 @@ class PipelineStore:
         if project_filter:
             conditions.append("project_id = ?")
             params.append(project_filter)
+        if owner_filter is not None:
+            conditions.append("owner = ?")
+            params.append(owner_filter)
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         sql = f"SELECT * FROM pipeline{where} ORDER BY priority ASC, created_at ASC LIMIT ?"
@@ -258,7 +280,7 @@ class PipelineStore:
 
         return [_row_to_item(r) for r in rows]
 
-    async def prune_merged(self, days: int = 7) -> int:
+    async def prune_merged(self, days: int = 30) -> int:
         """Delete MERGED items older than `days`. Returns count deleted."""
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -280,12 +302,13 @@ class PipelineStore:
 
         Raises ValueError if item_id not found.
         Supported fields: job_id, workspace_id, error, attempts, daemon_retries,
-                          pr_number, pr_url, pr_comment_count.
+                          pr_number, pr_url, pr_comment_count, owner.
         """
         _ALLOWED = {
             "job_id", "workspace_id", "error",
             "attempts", "daemon_retries",
             "pr_number", "pr_url", "pr_comment_count",
+            "owner", "depends_on", "blocked_by", "result_summary",
         }
         now = datetime.now(timezone.utc).isoformat()
         sets = ["updated_at = ?"]
@@ -340,6 +363,13 @@ class PipelineStore:
 
 def _row_to_item(row: aiosqlite.Row) -> PipelineItem:
     """Convert a SQLite row to a PipelineItem model."""
+    # Columns may not exist in legacy DBs before migration runs
+    def _safe(col: str, default: str = "") -> str:
+        try:
+            return row[col]
+        except (IndexError, KeyError):
+            return default
+
     return PipelineItem(
         id=row["id"],
         story_id=row["story_id"],
@@ -347,6 +377,10 @@ def _row_to_item(row: aiosqlite.Row) -> PipelineItem:
         status=row["status"],
         priority=row["priority"],
         assignee=row["assignee"],
+        owner=_safe("owner"),
+        depends_on=_safe("depends_on"),
+        blocked_by=_safe("blocked_by"),
+        result_summary=_safe("result_summary"),
         job_id=row["job_id"],
         workspace_id=row["workspace_id"],
         error=row["error"],

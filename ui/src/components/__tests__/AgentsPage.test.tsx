@@ -232,12 +232,11 @@ describe("AgentTeam — studio tab", () => {
     expect(screen.getByTestId("live-transcript")).toBeInTheDocument();
   });
 
-  it("has studio sub-tabs (Transcript, Diff, Workspace, Audit)", () => {
+  it("has studio sub-tabs (Transcript, Diff, Audit)", () => {
     useGrimStore.setState({ agentsTab: "studio", selectedJobId: "job-abc" });
     render(<AgentTeam />);
     expect(screen.getByText("Transcript")).toBeInTheDocument();
     expect(screen.getByText("Diff")).toBeInTheDocument();
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("Audit")).toBeInTheDocument();
   });
 });

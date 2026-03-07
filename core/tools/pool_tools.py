@@ -84,6 +84,15 @@ async def pool_submit(
         )
 
         job_id = await pool.submit(job)
+
+        # Register for inline chat following if a callback is set
+        cb = tool_context.follow_job_callback
+        if cb:
+            try:
+                cb(job_id)
+            except Exception:
+                pass
+
         return f"Job submitted: {job_id} (type={job_type}, priority={priority})"
 
     except RuntimeError as e:

@@ -143,6 +143,15 @@ def _build_pool_mcp_server():
             target_repo=args.get("target_repo"),
         )
         job_id = await pool.submit(job)
+
+        # Register for inline chat following if callback is set
+        cb = tool_context.follow_job_callback
+        if cb:
+            try:
+                cb(job_id)
+            except Exception:
+                pass
+
         return {"content": [{"type": "text", "text": f"Job submitted: {job_id} (type={args['job_type']}, priority={args.get('priority', 'normal')})"}]}
 
     @tool(
@@ -397,6 +406,7 @@ class GrimClient:
         self._turn_count: int = 0
         self._system_prompt: str = ""
         self._started: bool = False
+        self._pending_context: str | None = None  # injected before first user msg
 
         # Skill matching (loaded at start)
         self._skill_registry: SkillRegistry | None = None
@@ -509,6 +519,15 @@ class GrimClient:
             "GrimClient stopped: %d turns, cost=$%.4f",
             self._turn_count, self._total_cost,
         )
+
+    def set_pending_context(self, context: str) -> None:
+        """Queue context to be prepended to the next user message.
+
+        Used by SessionManager to inject conversation recaps without
+        an extra API round-trip. The context is consumed on the first
+        call to send() or send_streaming().
+        """
+        self._pending_context = context
 
     async def send(self, message: str) -> GrimResponse:
         """Send a message and get the full response.
@@ -637,7 +656,16 @@ class GrimClient:
         If a skill matches, its protocol is prepended as context so the
         SDK agent can follow the skill's instructions. This replaces the
         LangGraph skill_match → router → companion pipeline.
+
+        On the first message after session resume, prepends any pending
+        context (conversation recap) so no extra API round-trip is needed.
         """
+        # Inject pending context (conversation recap) on first message
+        if self._pending_context:
+            ctx = self._pending_context
+            self._pending_context = None
+            message = f"{ctx}\n\n---\n\n{message}"
+
         if not self._skill_registry:
             return message
 
