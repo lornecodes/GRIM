@@ -363,34 +363,63 @@ class ContextBuilder:
         if not dep_ids:
             return ""
 
-        # Look up each dependency in the pipeline for research results
+        # Look up each dependency — try pipeline DB first, then vault notes
         parts: list[str] = []
         total = 0
 
         for dep_id in dep_ids:
+            summary = ""
+
+            # Try pipeline DB first (fast, has result_summary)
             try:
                 item = self._get_pipeline_item_sync(dep_id)
-                if item is None:
-                    continue
-                # Only include research results (assignee=research with a result_summary)
-                if getattr(item, "assignee", "") != "research":
-                    continue
-                summary = getattr(item, "result_summary", "")
-                if not summary:
-                    continue
-                entry = f"### Research: {dep_id}\n{summary}"
-                if total + len(entry) > MAX_RESEARCH_CONTEXT_CHARS - 50:
-                    break
-                parts.append(entry)
-                total += len(entry)
+                if item is not None:
+                    summary = getattr(item, "result_summary", "")
             except Exception:
-                logger.debug("Could not fetch research context for dep %s", dep_id)
+                logger.debug("Could not fetch pipeline item for dep %s", dep_id)
+
+            # Fallback: search vault notes for persisted job results
+            if not summary:
+                summary = self._get_vault_note_result(dep_id)
+
+            if not summary:
                 continue
+
+            entry = f"### Prior: {dep_id}\n{summary}"
+            if total + len(entry) > MAX_RESEARCH_CONTEXT_CHARS - 50:
+                break
+            parts.append(entry)
+            total += len(entry)
 
         if not parts:
             return ""
 
         return "## Prior Research\n\n" + "\n\n".join(parts)
+
+    def _get_vault_note_result(self, story_id: str) -> str:
+        """Search vault notes for a persisted job result by story ID tag.
+
+        Returns the note body or empty string if not found. This is the
+        fallback when the pipeline DB doesn't have the result (e.g., after
+        a DB wipe or restart).
+        """
+        try:
+            from kronos_mcp.server import handle_notes_recent
+
+            result = handle_notes_recent({
+                "tags": [story_id],
+                "days": 90,
+                "max_entries": 1,
+            })
+
+            import json as _json
+            data = _json.loads(result) if isinstance(result, str) else result
+            entries = data.get("entries", [])
+            if entries:
+                return entries[0].get("body", "")
+        except Exception:
+            logger.debug("Could not fetch vault note for %s", story_id)
+        return ""
 
     def _get_pipeline_item_sync(self, story_id: str):
         """Synchronously fetch a pipeline item by story ID.

@@ -123,12 +123,13 @@ class SessionManager:
             # (no extra API round-trip — context piggybacks on the next query)
             if self.store:
                 try:
-                    prior_turns = await self.store.get_messages(session_id, limit=10)
-                    if prior_turns:
-                        recap = self._build_recap(prior_turns)
+                    prior_turns = await self.store.get_messages(session_id, limit=50)
+                    knowledge = await self.store.get_knowledge(session_id)
+                    if prior_turns or knowledge:
+                        recap = self._build_recap(prior_turns, knowledge)
                         client.set_pending_context(recap)
-                        logger.info("Session %s: queued recap of %d prior turns",
-                                    session_id, len(prior_turns))
+                        logger.info("Session %s: queued recap of %d turns + %d knowledge entries",
+                                    session_id, len(prior_turns), len(knowledge))
                 except Exception as e:
                     logger.warning("Failed to load session context %s: %s",
                                    session_id, e)
@@ -151,22 +152,63 @@ class SessionManager:
             return client
 
     @staticmethod
-    def _build_recap(turns: list[dict]) -> str:
-        """Build a conversation recap from stored turns for context restoration."""
+    def _build_recap(
+        turns: list[dict],
+        knowledge: list[dict] | None = None,
+    ) -> str:
+        """Build a conversation recap from stored turns for context restoration.
+
+        Recent turns (last 10) get full content (1500 chars each).
+        Older turns get compressed summaries (200 chars each).
+        Session knowledge FDOs are listed so the agent knows what it was working with.
+        """
         lines = [
             "[CONTEXT RESTORATION] This continues a prior conversation. "
-            "Here is a summary of the recent exchange — absorb this context "
-            "but do NOT respond to it. Wait for the user's next message.\n"
+            "Absorb this context but do NOT respond to it — wait for the "
+            "user's next message.\n"
         ]
-        for t in turns:
-            user = (t.get("user_message") or "")[:300]
-            asst = (t.get("assistant_message") or "")[:300]
+
+        # Session knowledge — FDOs the agent was working with
+        if knowledge:
+            lines.append("## Active Knowledge Context")
+            for k in knowledge[:20]:
+                fdo_id = k.get("fdo_id", "?")
+                title = k.get("fdo_title") or fdo_id
+                domain = k.get("fdo_domain") or "?"
+                hits = k.get("hit_count", 1)
+                lines.append(f"- `{fdo_id}` ({domain}) — {title} [referenced {hits}x]")
+            lines.append("")
+
+        if not turns:
+            return "\n".join(lines)
+
+        # Split into older (compressed) and recent (full) turns
+        recent_count = min(10, len(turns))
+        older = turns[:-recent_count] if len(turns) > recent_count else []
+        recent = turns[-recent_count:]
+
+        if older:
+            lines.append(f"## Earlier Context ({len(older)} turns, compressed)")
+            for t in older:
+                user = (t.get("user_message") or "")[:200]
+                asst = (t.get("assistant_message") or "")[:200]
+                lines.append(f"- User: {user}")
+                if asst:
+                    lines.append(f"  → {asst}")
+            lines.append("")
+
+        lines.append(f"## Recent Conversation ({len(recent)} turns)")
+        for t in recent:
+            user = (t.get("user_message") or "")[:1500]
+            asst = (t.get("assistant_message") or "")[:1500]
             tools = t.get("tools_used") or []
-            lines.append(f"- User: {user}")
+            lines.append(f"### User\n{user}")
             if tools:
-                lines.append(f"  Tools used: {', '.join(tools[:8])}")
+                lines.append(f"Tools used: {', '.join(tools[:12])}")
             if asst:
-                lines.append(f"  Assistant: {asst}")
+                lines.append(f"### Assistant\n{asst}")
+            lines.append("")
+
         return "\n".join(lines)
 
     async def destroy(self, session_id: str) -> bool:

@@ -346,7 +346,7 @@ def format_daemon_event(event: dict) -> str | None:
 
     Returns formatted string or None if event type is not display-worthy.
     """
-    event_type = event.get("type", event.get("event_type", ""))
+    event_type = event.get("event_type", event.get("type", ""))
     data = event.get("data", event)  # data might be nested or flat
 
     if event_type == "daemon_nudge":
@@ -453,6 +453,11 @@ DAEMON_EVENT_TYPES = frozenset({
 
 
 def is_daemon_event(event: dict) -> bool:
-    """Check if an event is a daemon event that should route to the daemon channel."""
-    event_type = event.get("type", event.get("event_type", ""))
+    """Check if an event is a daemon event that should route to the daemon channel.
+
+    Note: _broadcast_pool_event wraps events with ``type: "pool_event"`` so the
+    original event type lives in ``event_type`` (from PoolEvent.to_dict()).
+    We check ``event_type`` first to avoid the wrapper shadowing the real type.
+    """
+    event_type = event.get("event_type", event.get("type", ""))
     return event_type in DAEMON_EVENT_TYPES

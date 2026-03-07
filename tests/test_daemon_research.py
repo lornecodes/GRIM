@@ -184,8 +184,8 @@ class TestResearchContext:
         assert "story-research-001" in result
         assert "JWT" in result
 
-    def test_non_research_dep_excluded(self, builder):
-        """Non-research dependencies are skipped."""
+    def test_non_research_dep_included(self, builder):
+        """All dependency results are included regardless of assignee type."""
         mock_item = MagicMock()
         mock_item.assignee = "code"
         mock_item.result_summary = "Some code result"
@@ -193,22 +193,26 @@ class TestResearchContext:
         builder._get_pipeline_item_sync = MagicMock(return_value=mock_item)
 
         result = builder._resolve_research_context({"depends_on": '["story-code-001"]'})
-        assert result == ""
+        assert "## Prior Research" in result
+        assert "story-code-001" in result
+        assert "Some code result" in result
 
     def test_no_result_summary_excluded(self, builder):
-        """Research dep without result_summary is skipped."""
+        """Dep without result_summary (and no vault note) is skipped."""
         mock_item = MagicMock()
         mock_item.assignee = "research"
         mock_item.result_summary = ""
 
         builder._get_pipeline_item_sync = MagicMock(return_value=mock_item)
+        builder._get_vault_note_result = MagicMock(return_value="")
 
         result = builder._resolve_research_context({"depends_on": '["story-research-001"]'})
         assert result == ""
 
     def test_pipeline_item_not_found(self, builder):
-        """Missing pipeline item is gracefully handled."""
+        """Missing pipeline item (and no vault note) is gracefully handled."""
         builder._get_pipeline_item_sync = MagicMock(return_value=None)
+        builder._get_vault_note_result = MagicMock(return_value="")
 
         result = builder._resolve_research_context({"depends_on": '["story-missing"]'})
         assert result == ""
@@ -262,6 +266,7 @@ class TestResearchContext:
     def test_exception_in_lookup_handled(self, builder):
         """Exceptions during pipeline lookup are handled gracefully."""
         builder._get_pipeline_item_sync = MagicMock(side_effect=Exception("DB error"))
+        builder._get_vault_note_result = MagicMock(return_value="")
 
         result = builder._resolve_research_context({"depends_on": '["story-r1"]'})
         assert result == ""

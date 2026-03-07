@@ -168,6 +168,12 @@ class GrimDiscordBot:
         self._total_messages = 0
         self.store: ConversationStore | None = None
 
+        # Phase 5A: Daemon command handler + dedicated channel
+        self._daemon_channel_id = int(
+            os.environ.get("GRIM_DAEMON_CHANNEL_ID", "0")
+        )
+        self._daemon_handler: Any = None  # lazy-initialized DaemonCommandHandler
+
     async def init_store(self, db_path: str | None = None) -> None:
         """Initialize the conversation store for persistence across restarts."""
         from pathlib import Path
@@ -473,18 +479,29 @@ class GrimDiscordBot:
         return None
 
     async def handle_pool_event(self, event: dict) -> dict[int, str] | None:
-        """Route a pool event to the originating channel.
+        """Route a pool event to the originating channel or daemon channel.
+
+        Daemon events (escalation, nudge, etc.) route to the dedicated daemon
+        channel if configured. Pool events route to the originating channel.
 
         Returns {channel_id: formatted_message} for each channel that should
         receive the event, or None if no channels matched.
         """
-        job_id = event.get("job_id", "")
-        event_type = event.get("type", "")
+        event_type = event.get("event_type", event.get("type", ""))
 
+        # Phase 5A: daemon events → dedicated daemon channel
+        from clients.daemon_commands import is_daemon_event, format_daemon_event
+        if is_daemon_event(event) and self._daemon_channel_id:
+            formatted = format_daemon_event(event)
+            if formatted:
+                return {self._daemon_channel_id: formatted}
+            return None
+
+        # Standard pool events → originating channel
+        job_id = event.get("job_id", "")
         if not job_id or not event_type:
             return None
 
-        # Find the originating channel
         channel_id = self.find_channel_for_job(job_id)
         if channel_id is None:
             return None
@@ -600,6 +617,9 @@ def split_message(text: str, max_chars: int = DISCORD_SAFE_CHARS) -> list[str]:
 
 # Pattern for clarification replies: "@GRIM clarify <job_id> <answer>"
 CLARIFY_PATTERN = re.compile(r"clarify\s+([\w-]+)\s+(.+)", re.IGNORECASE | re.DOTALL)
+# Patterns for FDO approval: "@GRIM approve <job_id>" / "@GRIM deny <job_id> [reason]"
+APPROVE_PATTERN = re.compile(r"approve\s+([\w-]+)", re.IGNORECASE)
+DENY_PATTERN = re.compile(r"deny\s+([\w-]+)(?:\s+(.+))?", re.IGNORECASE | re.DOTALL)
 
 
 def format_pool_event(event: dict) -> str | None:
@@ -628,6 +648,25 @@ def format_pool_event(event: dict) -> str | None:
 
     elif event_type == "job_blocked":
         question = event.get("question", "")
+        # Check if this is an FDO approval request (contains approval_required JSON)
+        if "approval_required" in question:
+            try:
+                proposed = json.loads(question)
+                domain = proposed.get("domain", "?")
+                action = proposed.get("proposed", {}).get("action", "?")
+                fdo_id = proposed.get("proposed", {}).get("id", "?")
+                fields = proposed.get("proposed", {}).get("fields", {})
+                fields_preview = json.dumps(fields, indent=2)[:500] if fields else ""
+                parts = [
+                    f"**FDO Approval Needed** `{job_id}`",
+                    f"Domain: `{domain}` | FDO: `{fdo_id}` | Action: `{action}`",
+                ]
+                if fields_preview:
+                    parts.append(f"```json\n{fields_preview}\n```")
+                parts.append(f"*Reply: `@GRIM approve {job_id}` or `@GRIM deny {job_id} reason`*")
+                return "\n".join(parts)
+            except (json.JSONDecodeError, KeyError):
+                pass  # Fall through to normal blocked format
         return (
             f"**Job Needs Input** `{job_id}`\n{question}\n\n"
             f"*Reply: `@GRIM clarify {job_id} your answer`*"
@@ -1156,6 +1195,68 @@ def run_bot(
                     f"Error sending clarification: {e}", mention_author=False,
                 )
             return
+
+        # Check for FDO approval pattern: "approve <job_id>" or "deny <job_id> [reason]"
+        approve_match = APPROVE_PATTERN.search(content)
+        deny_match = DENY_PATTERN.search(content) if not approve_match else None
+        if approve_match or deny_match:
+            if not bot.is_owner(message.author.id):
+                await message.reply("Only the owner can approve/deny FDO changes.", mention_author=False)
+                return
+            server_url = os.environ.get("GRIM_SERVER_URL", "http://localhost:8080")
+            if approve_match:
+                job_id = approve_match.group(1)
+                action_str = "approve"
+            else:
+                job_id = deny_match.group(1)
+                action_str = "deny"
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    # Fetch the job to get the proposed change from clarification_question
+                    job_resp = await client.get(f"{server_url}/api/pool/jobs/{job_id}")
+                    if job_resp.status_code != 200:
+                        await message.reply(f"Could not find job `{job_id}`.", mention_author=False)
+                        return
+                    job_data = job_resp.json()
+                    question = job_data.get("clarification_question", "")
+                    proposed = None
+                    if question:
+                        try:
+                            parsed = json.loads(question)
+                            proposed = parsed.get("proposed")
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+
+                    body = {"action": action_str}
+                    if proposed:
+                        body["proposed"] = proposed
+                    if deny_match and deny_match.group(2):
+                        body["reason"] = deny_match.group(2).strip()
+
+                    resp = await client.post(
+                        f"{server_url}/api/pool/jobs/{job_id}/approve",
+                        json=body,
+                    )
+                    if resp.status_code == 200:
+                        emoji = "Approved" if action_str == "approve" else "Denied"
+                        await message.reply(f"{emoji} for `{job_id}`.", mention_author=False)
+                    else:
+                        await message.reply(f"Failed: {resp.text}", mention_author=False)
+            except Exception as e:
+                await message.reply(f"Error: {e}", mention_author=False)
+            return
+
+        # Phase 5A: daemon commands (status, backlog, own) — owner only
+        if bot.is_owner(message.author.id):
+            if bot._daemon_handler is None:
+                from clients.daemon_commands import DaemonCommandHandler
+                server_url = os.environ.get("GRIM_SERVER_URL", "http://localhost:8080")
+                bot._daemon_handler = DaemonCommandHandler(server_url)
+            daemon_response = await bot._daemon_handler.try_handle(content)
+            if daemon_response is not None:
+                await message.reply(daemon_response, mention_author=False)
+                return
 
         # React to acknowledge receipt
         try:

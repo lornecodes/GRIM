@@ -66,6 +66,7 @@ class ManagementEngine:
 
         # Scanner
         _vault_path = vault_path or getattr(config, "vault_path", Path("../kronos-vault"))
+        self._vault_path = _vault_path
         project_filter = getattr(config, "daemon_project_filter", []) or []
         self._scanner = ProjectScanner(_vault_path, project_filter or None)
 
@@ -786,13 +787,127 @@ class ManagementEngine:
         return "\n".join(parts)
 
     def _update_vault_story_status(self, story_id: str, status: str) -> None:
-        """Update story status in vault (best-effort)."""
+        """Update story status in vault and sync board (best-effort).
+
+        When a story moves to resolved/closed, also checks if any downstream
+        stories (that depend on this one) can be auto-activated.
+        """
         if not self._ensure_task_engine():
             return
         try:
             self._task_engine.update_item(story_id, {"status": status})
         except Exception:
             logger.warning("Failed to update vault story %s status to %s", story_id, status)
+
+        # Sync board.yaml to reflect the status change
+        self._sync_board_status(story_id, status)
+
+        # Auto-activate downstream stories whose deps are now satisfied
+        if status in ("resolved", "closed"):
+            self._auto_activate_dependents(story_id)
+
+    def _sync_board_status(self, story_id: str, status: str) -> None:
+        """Move story to the matching board column (best-effort).
+
+        Maps vault statuses to board columns. If the story isn't on the
+        board yet, adds it to the appropriate column.
+        """
+        status_to_column = {
+            "new": "new",
+            "active": "active",
+            "in_progress": "in_progress",
+            "resolved": "resolved",
+            "closed": "closed",
+        }
+        column = status_to_column.get(status)
+        if not column:
+            return
+
+        if not self._ensure_task_engine():
+            return
+
+        try:
+            from kronos_mcp.board import BoardEngine
+            board = BoardEngine(str(self._vault_path), self._task_engine)
+            board.move_story(story_id, column)
+            logger.debug("Board sync: %s → %s", story_id, column)
+        except Exception:
+            logger.debug("Board sync failed for %s → %s", story_id, column)
+
+    def _auto_activate_dependents(self, resolved_story_id: str) -> None:
+        """Check all stories that depend on resolved_story_id.
+
+        If all their dependencies are now resolved/closed, activate them
+        (change status from 'new' to 'active') so the scanner picks them up.
+        """
+        if not self._ensure_task_engine():
+            return
+
+        try:
+            all_stories = self._task_engine.list_items()
+        except Exception:
+            logger.debug("Could not list stories for auto-activate")
+            return
+
+        # Build status map for dependency checking
+        status_map = {s.get("id", ""): s.get("status", "") for s in all_stories}
+
+        satisfied_statuses = {"resolved", "closed"}
+
+        for story in all_stories:
+            story_id = story.get("id", "")
+            story_status = story.get("status", "")
+            deps = story.get("depends_on") or []
+
+            # Only activate stories that are currently 'new'
+            if story_status != "new":
+                continue
+
+            # Must depend on the just-resolved story
+            if resolved_story_id not in deps:
+                continue
+
+            # Check if ALL dependencies are satisfied
+            all_satisfied = all(
+                status_map.get(dep_id, "") in satisfied_statuses
+                for dep_id in deps
+            )
+
+            if all_satisfied:
+                try:
+                    self._task_engine.update_item(story_id, {"status": "active"})
+                    self._sync_board_status(story_id, "active")
+                    logger.info("Auto-activated %s (all deps satisfied)", story_id)
+                except Exception:
+                    logger.warning("Failed to auto-activate %s", story_id)
+
+    def _persist_result_to_vault(self, story_id: str, job_id: str, result_text: str) -> None:
+        """Save job result as a vault note for durable persistence.
+
+        Results stored in pipeline DB are ephemeral (lost on DB wipe/restart).
+        Vault notes survive indefinitely and can be referenced by downstream
+        stories via the research context builder.
+        """
+        if not result_text:
+            return
+
+        try:
+            from kronos_mcp.server import handle_note_append
+
+            # Truncate to 3000 chars for vault note
+            body = result_text[:3000]
+            if len(result_text) > 3000:
+                body += "\n\n*(truncated — full result in pool job)*"
+
+            handle_note_append({
+                "title": f"Job result: {story_id} ({job_id})",
+                "body": body,
+                "tags": ["daemon", "job-result", story_id],
+                "related": [story_id],
+            })
+            logger.info("Persisted result to vault note: %s", story_id)
+        except Exception:
+            logger.debug("Could not persist result to vault note for %s", story_id)
 
     async def approve_item(self, item_id: str) -> Any:
         """Approve a REVIEW item: merge PR, merge workspace, advance to MERGED."""
@@ -1276,6 +1391,9 @@ class ManagementEngine:
                 await self._store.update_fields(item.id, result_summary=truncated_summary)
             except Exception:
                 logger.warning("Could not store result_summary for %s", item.story_id)
+
+            # Phase 6: Persist result to vault note (durable, survives DB wipes)
+            self._persist_result_to_vault(item.story_id, job_id, result_text)
 
         # Phase 5D: Research-specific handling
         if item.assignee == "research":
