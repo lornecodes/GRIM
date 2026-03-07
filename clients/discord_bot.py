@@ -328,7 +328,7 @@ class GrimDiscordBot:
             client = GrimClient(
                 self.config,
                 allowed_tools=tools,
-                max_turns=12 if self.is_owner(user_id) else 6,
+                max_turns=25 if self.is_owner(user_id) else 6,
                 caller_id=caller,
                 system_prompt_prefix=DISCORD_VOICE_PREAMBLE,
                 system_prompt_suffix=DISCORD_FORMAT_ADDENDUM,
@@ -377,11 +377,12 @@ class GrimDiscordBot:
             )
             return []
 
-        if self.is_rate_limited(user_id):
-            return ["Slow down — I need a moment between messages."]
-
-        if self.is_cost_exceeded(channel_id):
-            return ["I've reached my daily usage limit for this channel. Try again tomorrow."]
+        # Owner bypasses all guardrails
+        if not self.is_owner(user_id):
+            if self.is_rate_limited(user_id):
+                return ["Slow down — I need a moment between messages."]
+            if self.is_cost_exceeded(channel_id):
+                return ["I've reached my daily usage limit for this channel. Try again tomorrow."]
 
         # Track user identity and ensure vault profile
         if username:
