@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from clients.discord_bot import (
-    DISCORD_ALLOWED_TOOLS,
+    DISCORD_GUEST_TOOLS,
+    DISCORD_OWNER_TOOLS,
     DISCORD_FORMAT_ADDENDUM,
     DISCORD_VOICE_PREAMBLE,
-    OWNER_ONLY_TOOLS,
     ChannelSession,
     GrimDiscordBot,
     format_pool_event,
@@ -42,10 +42,12 @@ def bot(config):
 # ── Owner-only tool enforcement ──────────────────────────────────
 
 
-def test_owner_only_tools_in_allowed():
-    """Owner-only tools are included in the full allowed tools list."""
-    for tool in OWNER_ONLY_TOOLS:
-        assert tool in DISCORD_ALLOWED_TOOLS
+def test_owner_only_tools_in_owner_list():
+    """Owner-exclusive tools are in owner list but not guest list."""
+    assert "mcp__pool__pool_submit" in DISCORD_OWNER_TOOLS
+    assert "mcp__pool__pool_cancel" in DISCORD_OWNER_TOOLS
+    assert "mcp__pool__pool_submit" not in DISCORD_GUEST_TOOLS
+    assert "mcp__pool__pool_cancel" not in DISCORD_GUEST_TOOLS
 
 
 def test_get_allowed_tools_owner(bot):

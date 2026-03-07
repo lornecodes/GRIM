@@ -36,25 +36,31 @@ from server.conversation_store import ConversationStore
 
 logger = logging.getLogger(__name__)
 
-# Discord-safe tool list — NO write/execute tools
-DISCORD_ALLOWED_TOOLS = [
+# Guest tool list — read-only Kronos + pool status
+DISCORD_GUEST_TOOLS = [
     t for t in KRONOS_TOOLS
     if "create" not in t and "update" not in t and "note_append" not in t
+    and "memory_update" not in t and "task_move" not in t
 ] + [
-    # Pool: read tools (available to all users)
     "mcp__pool__pool_status",
     "mcp__pool__pool_list_jobs",
     "mcp__pool__pool_job_status",
-    # Pool: write tools (owner only — enforced at runtime)
-    "mcp__pool__pool_submit",
-    "mcp__pool__pool_cancel",
 ]
 
-# Tools that only the owner can use
-OWNER_ONLY_TOOLS = {
+# Owner tool list — full Kronos + task management + pool control
+DISCORD_OWNER_TOOLS = list(KRONOS_TOOLS) + [
+    "mcp__pool__pool_status",
+    "mcp__pool__pool_list_jobs",
+    "mcp__pool__pool_job_status",
     "mcp__pool__pool_submit",
     "mcp__pool__pool_cancel",
-}
+    "mcp__kronos__kronos_task_dispatch",
+    "mcp__kronos__kronos_task_archive",
+    "mcp__kronos__kronos_calendar_add",
+    "mcp__kronos__kronos_calendar_update",
+    "mcp__kronos__kronos_calendar_sync",
+    "mcp__kronos__kronos_memory_update",
+]
 
 # Discord message limit
 DISCORD_MAX_CHARS = 2000
@@ -311,7 +317,7 @@ class GrimDiscordBot:
 
         If user_id is provided, owner-only tools are enforced.
         """
-        tools = self.get_allowed_tools(user_id) if user_id else DISCORD_ALLOWED_TOOLS
+        tools = self.get_allowed_tools(user_id) if user_id else DISCORD_GUEST_TOOLS
         if channel_id not in self.sessions:
             caller = "peter" if self.is_owner(user_id) else "discord"
             client = GrimClient(
@@ -447,10 +453,10 @@ class GrimDiscordBot:
         }
 
     def get_allowed_tools(self, user_id: int) -> list[str]:
-        """Get the tool list for a user — strips owner-only tools for non-owners."""
+        """Get the tool list for a user — owner gets full write access, guests read-only."""
         if self.is_owner(user_id):
-            return DISCORD_ALLOWED_TOOLS
-        return [t for t in DISCORD_ALLOWED_TOOLS if t not in OWNER_ONLY_TOOLS]
+            return DISCORD_OWNER_TOOLS
+        return DISCORD_GUEST_TOOLS
 
     def find_channel_for_job(self, job_id: str) -> int | None:
         """Find which channel submitted a job."""
@@ -727,28 +733,53 @@ def _create_people_fdo(fdo_path: Any, profile: PeopleProfile) -> None:
 
 # ── Health check server ──────────────────────────────────────────
 
-async def run_health_server(bot: GrimDiscordBot, port: int = 8081) -> asyncio.AbstractServer:
-    """Start a tiny HTTP health check server for Docker."""
+async def run_health_server(
+    bot: GrimDiscordBot,
+    discord_client: Any = None,
+    port: int = 8081,
+) -> asyncio.AbstractServer:
+    """Start HTTP server for health checks + internal Discord API.
+
+    Endpoints:
+        GET  /health         — container health check
+        GET  /api/channels   — list channels the bot can see
+        POST /api/send       — send a message to a Discord channel
+    """
 
     async def handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         # Read the request line
         request_line = await reader.readline()
-        # Drain remaining headers
+        # Read headers
+        headers: dict[str, str] = {}
         while True:
             line = await reader.readline()
             if line in (b"\r\n", b"\n", b""):
                 break
+            decoded = line.decode().strip()
+            if ":" in decoded:
+                key, val = decoded.split(":", 1)
+                headers[key.strip().lower()] = val.strip()
 
-        path = request_line.decode().split(" ")[1] if request_line else "/"
+        method_path = request_line.decode().split(" ") if request_line else ["GET", "/"]
+        method = method_path[0] if len(method_path) > 0 else "GET"
+        path = method_path[1] if len(method_path) > 1 else "/"
+
+        # Read body if present
+        body_bytes = b""
+        content_length = int(headers.get("content-length", "0"))
+        if content_length > 0:
+            body_bytes = await reader.readexactly(content_length)
 
         if path == "/health":
             body = json.dumps({"status": "ok", **bot.metrics})
-            response = (
-                f"HTTP/1.1 200 OK\r\n"
-                f"Content-Type: application/json\r\n"
-                f"Content-Length: {len(body)}\r\n"
-                f"\r\n{body}"
-            )
+            response = _json_response(200, body)
+
+        elif path == "/api/channels" and method == "GET":
+            response = _handle_channels(discord_client)
+
+        elif path == "/api/send" and method == "POST":
+            response = await _handle_send(discord_client, body_bytes)
+
         else:
             response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
 
@@ -759,6 +790,57 @@ async def run_health_server(bot: GrimDiscordBot, port: int = 8081) -> asyncio.Ab
     server = await asyncio.start_server(handle_request, "0.0.0.0", port)
     logger.info("Health check server on port %d", port)
     return server
+
+
+def _json_response(status: int, body: str) -> str:
+    phrase = {200: "OK", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error"}.get(status, "OK")
+    return (
+        f"HTTP/1.1 {status} {phrase}\r\n"
+        f"Content-Type: application/json\r\n"
+        f"Content-Length: {len(body.encode())}\r\n"
+        f"\r\n{body}"
+    )
+
+
+def _handle_channels(discord_client: Any) -> str:
+    """List text channels visible to the bot."""
+    if discord_client is None:
+        return _json_response(500, json.dumps({"error": "Discord client not available"}))
+    channels = []
+    for guild in discord_client.guilds:
+        for ch in guild.text_channels:
+            channels.append({
+                "id": str(ch.id),
+                "name": ch.name,
+                "guild": guild.name,
+                "guild_id": str(guild.id),
+            })
+    return _json_response(200, json.dumps({"channels": channels}))
+
+
+async def _handle_send(discord_client: Any, body_bytes: bytes) -> str:
+    """Send a message to a Discord channel."""
+    if discord_client is None:
+        return _json_response(500, json.dumps({"error": "Discord client not available"}))
+    try:
+        payload = json.loads(body_bytes)
+    except (json.JSONDecodeError, ValueError):
+        return _json_response(400, json.dumps({"error": "Invalid JSON"}))
+
+    channel_id = payload.get("channel_id")
+    message = payload.get("message", "")
+    if not channel_id or not message:
+        return _json_response(400, json.dumps({"error": "channel_id and message required"}))
+
+    try:
+        channel = discord_client.get_channel(int(channel_id))
+        if channel is None:
+            return _json_response(404, json.dumps({"error": f"Channel {channel_id} not found"}))
+        await channel.send(message[:DISCORD_MAX_CHARS])
+        return _json_response(200, json.dumps({"ok": True, "channel_id": str(channel_id)}))
+    except Exception as e:
+        logger.error("Failed to send Discord message: %s", e)
+        return _json_response(500, json.dumps({"error": str(e)}))
 
 
 # ── Discord.py integration ───────────────────────────────────────
@@ -869,8 +951,8 @@ def run_bot(
             logger.info("Allowed channels: %s", channel_ids)
         # Initialize conversation store for persistence
         await bot.init_store()
-        # Start health check server
-        health_server = await run_health_server(bot, port=health_port)
+        # Start health check + internal API server
+        health_server = await run_health_server(bot, discord_client=dc, port=health_port)
         # Start pool event listener
         if pool_ws_task is None or pool_ws_task.done():
             pool_ws_task = asyncio.create_task(_pool_event_listener())

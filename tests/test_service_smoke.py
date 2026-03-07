@@ -171,10 +171,11 @@ class TestToolLists:
         from core.client import POOL_TOOLS
         assert len(POOL_TOOLS) >= 1, f"Only {len(POOL_TOOLS)} pool tools"
 
-    def test_discord_allowed_tools_populated(self):
-        """DISCORD_ALLOWED_TOOLS should filter correctly."""
-        from clients.discord_bot import DISCORD_ALLOWED_TOOLS
-        assert len(DISCORD_ALLOWED_TOOLS) >= 3, f"Only {len(DISCORD_ALLOWED_TOOLS)} Discord tools"
+    def test_discord_tools_populated(self):
+        """Discord guest and owner tool lists should be populated."""
+        from clients.discord_bot import DISCORD_GUEST_TOOLS, DISCORD_OWNER_TOOLS
+        assert len(DISCORD_GUEST_TOOLS) >= 3, f"Only {len(DISCORD_GUEST_TOOLS)} guest tools"
+        assert len(DISCORD_OWNER_TOOLS) > len(DISCORD_GUEST_TOOLS), "Owner should have more tools than guests"
 
     def test_no_ironclaw_tools_remain(self):
         """No ironclaw tool references should remain in active tool lists."""

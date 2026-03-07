@@ -2641,6 +2641,47 @@ async def api_pool_workspace_restore(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Discord integration endpoints
+# ---------------------------------------------------------------------------
+
+def _discord_base_url() -> str:
+    """Discord bot internal API base URL (same Docker network)."""
+    return os.environ.get("GRIM_DISCORD_URL", "http://grim-discord:8081")
+
+
+@app.get("/api/discord/channels")
+async def get_discord_channels():
+    """List Discord channels visible to the bot."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{_discord_base_url()}/api/channels")
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"error": f"Discord bot unreachable: {e}"}, status_code=503)
+
+
+@app.post("/api/discord/send")
+async def post_discord_send(request: Request):
+    """Send a message to a Discord channel (proxy to bot internal API)."""
+    import httpx
+    body = await request.json()
+    channel_id = body.get("channel_id")
+    message = body.get("message")
+    if not channel_id or not message:
+        return JSONResponse({"error": "channel_id and message required"}, status_code=400)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{_discord_base_url()}/api/send",
+                json={"channel_id": channel_id, "message": message},
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except Exception as e:
+        return JSONResponse({"error": f"Discord bot unreachable: {e}"}, status_code=503)
+
+
+# ---------------------------------------------------------------------------
 # Daemon endpoints (Project Mewtwo)
 # ---------------------------------------------------------------------------
 

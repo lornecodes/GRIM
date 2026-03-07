@@ -83,6 +83,11 @@ POOL_TOOLS = [
     "mcp__pool__pool_list_jobs",
 ]
 
+DISCORD_TOOLS = [
+    "mcp__discord__discord_send",
+    "mcp__discord__discord_channels",
+]
+
 
 # ── Pool MCP server (in-process) ────────────────────────────────
 
@@ -193,6 +198,82 @@ def _build_pool_mcp_server():
     )
 
 
+# ── Discord MCP server (in-process) ──────────────────────────────
+
+def _build_discord_mcp_server():
+    """Build in-process Discord MCP server for sending messages to Discord.
+
+    Calls the Discord bot's internal HTTP API (grim-discord:8081).
+    """
+    from claude_agent_sdk import tool, create_sdk_mcp_server
+
+    @tool(
+        name="discord_send",
+        description="Send a message to a Discord channel. Use this to notify people or post updates.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Discord channel ID to send to. Use discord_channels to find IDs.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message content (max 2000 chars, supports Discord markdown).",
+                },
+            },
+            "required": ["channel_id", "message"],
+        },
+    )
+    async def discord_send(args):
+        import httpx
+
+        discord_url = os.environ.get("GRIM_DISCORD_URL", "http://grim-discord:8081")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{discord_url}/api/send",
+                    json={"channel_id": args["channel_id"], "message": args["message"]},
+                )
+                data = resp.json()
+                if resp.status_code == 200:
+                    return {"content": [{"type": "text", "text": f"Message sent to channel {args['channel_id']}"}]}
+                return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown error')}"}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Discord bot unreachable: {e}"}]}
+
+    @tool(
+        name="discord_channels",
+        description="List Discord channels the bot can see. Returns channel IDs, names, and guilds.",
+        input_schema={"type": "object", "properties": {}},
+    )
+    async def discord_channels(args):
+        import httpx
+
+        discord_url = os.environ.get("GRIM_DISCORD_URL", "http://grim-discord:8081")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{discord_url}/api/channels")
+                data = resp.json()
+                if resp.status_code != 200:
+                    return {"content": [{"type": "text", "text": f"[ERROR] {data.get('error', 'Unknown error')}"}]}
+                channels = data.get("channels", [])
+                if not channels:
+                    return {"content": [{"type": "text", "text": "No channels visible."}]}
+                lines = []
+                for ch in channels:
+                    lines.append(f"{ch['id']}  #{ch['name']}  ({ch['guild']})")
+                return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"[ERROR] Discord bot unreachable: {e}"}]}
+
+    return create_sdk_mcp_server(
+        name="discord",
+        version="0.1.0",
+        tools=[discord_send, discord_channels],
+    )
+
+
 # ── GrimClient ───────────────────────────────────────────────────
 
 class GrimClient:
@@ -296,12 +377,19 @@ class GrimClient:
             except Exception as e:
                 logger.warning("Could not build pool MCP server: %s", e)
 
+        # Discord MCP (in-process) — available when discord bot is reachable
+        try:
+            mcp_servers["discord"] = _build_discord_mcp_server()
+        except Exception as e:
+            logger.warning("Could not build discord MCP server: %s", e)
+
         # 4. Build allowed tools list
         tools = self._allowed_tools
         if tools is None:
             tools = list(KRONOS_TOOLS)
             if self.config.pool_enabled:
                 tools.extend(POOL_TOOLS)
+            tools.extend(DISCORD_TOOLS)
 
         # 5. Build permission callback (audit gate)
         permission_cb = _make_grim_permission_callback()

@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from clients.discord_bot import (
-    DISCORD_ALLOWED_TOOLS,
+    DISCORD_GUEST_TOOLS,
+    DISCORD_OWNER_TOOLS,
     DISCORD_MAX_CHARS,
     DISCORD_SAFE_CHARS,
     GrimDiscordBot,
@@ -97,27 +98,37 @@ class TestDiscordSecurity:
         )
         assert result == []
 
-    def test_discord_tools_no_write(self):
-        """Discord tool list must NOT include write/create/update tools."""
-        for t in DISCORD_ALLOWED_TOOLS:
-            assert "create" not in t, f"Write tool in Discord list: {t}"
-            assert "update" not in t, f"Write tool in Discord list: {t}"
-            assert "note_append" not in t, f"Write tool in Discord list: {t}"
+    def test_guest_tools_no_write(self):
+        """Guest tool list must NOT include write/create/update tools."""
+        for t in DISCORD_GUEST_TOOLS:
+            assert "create" not in t, f"Write tool in guest list: {t}"
+            assert "update" not in t, f"Write tool in guest list: {t}"
+            assert "note_append" not in t, f"Write tool in guest list: {t}"
 
-    def test_discord_tools_no_bash(self):
-        """No Bash or file-write tools for Discord."""
-        tool_names = {t.split("__")[-1] for t in DISCORD_ALLOWED_TOOLS}
+    def test_guest_tools_no_bash(self):
+        """No Bash or file-write tools for guests."""
+        tool_names = {t.split("__")[-1] for t in DISCORD_GUEST_TOOLS}
         assert "Bash" not in tool_names
         assert "Write" not in tool_names
         assert "Edit" not in tool_names
 
-    def test_discord_tools_has_read_tools(self):
-        """Discord should have search/get/list (read-only Kronos)."""
-        tool_names = {t.split("__")[-1] for t in DISCORD_ALLOWED_TOOLS}
+    def test_guest_tools_has_read_tools(self):
+        """Guests should have search/get/list (read-only Kronos)."""
+        tool_names = {t.split("__")[-1] for t in DISCORD_GUEST_TOOLS}
         assert "kronos_search" in tool_names
         assert "kronos_get" in tool_names
         assert "kronos_list" in tool_names
         assert "kronos_graph" in tool_names
+
+    def test_owner_tools_has_write_tools(self):
+        """Owner tool list includes vault write + task management tools."""
+        tool_names = {t.split("__")[-1] for t in DISCORD_OWNER_TOOLS}
+        assert "kronos_create" in tool_names
+        assert "kronos_update" in tool_names
+        assert "kronos_note_append" in tool_names
+        assert "kronos_task_create" in tool_names
+        assert "kronos_task_move" in tool_names
+        assert "pool_submit" in tool_names
 
 
 # ── Identity ────────────────────────────────────────────────────
