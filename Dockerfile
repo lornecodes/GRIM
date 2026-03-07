@@ -48,6 +48,7 @@ RUN pip install --no-cache-dir ".[server,cache,pool,dev]" && \
 # ── Application ─────────────────────────────────────────────
 COPY core/ core/
 COPY server/ server/
+COPY clients/ clients/
 COPY config/ config/
 COPY identity/ identity/
 COPY skills/ skills/

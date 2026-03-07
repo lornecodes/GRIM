@@ -1117,7 +1117,7 @@ def run_bot(
                                 try:
                                     data = json.loads(msg.data)
                                     event_type = data.get("event_type", data.get("type", "?"))
-                                    logger.debug("WS event received: %s (job=%s)", event_type, data.get("job_id", "?"))
+                                    logger.info("WS event received: %s (job=%s)", event_type, data.get("job_id", "?"))
                                     result = await bot.handle_pool_event(data)
                                     if result:
                                         for ch_id, text in result.items():
