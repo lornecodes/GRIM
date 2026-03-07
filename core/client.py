@@ -676,6 +676,7 @@ class GrimClient:
 
         # Append SDK-specific instructions
         pool_instructions = ""
+        has_pool_proxy = "pool_proxy" in self._extra_mcp_servers
         if self.config.pool_enabled:
             pool_instructions = (
                 "- You have an execution pool with coding agents. Use pool_submit to dispatch jobs.\n"
@@ -690,6 +691,17 @@ class GrimClient:
                 "- Use pool_get_job to check on a specific job — see its status, result, transcript, and cost.\n"
                 "- Use pool_list_jobs to show all jobs when asked.\n"
                 "- Use pool_status to check slot utilization."
+            )
+        elif has_pool_proxy:
+            pool_instructions = (
+                "- You have an execution pool available via proxy. Use pool_submit to dispatch coding jobs.\n"
+                "- When the user asks you to build, create, write, fix, or modify code/files, "
+                "submit it as a pool job using pool_submit. Do NOT write code in chat.\n"
+                "- Set target_repo to the repository the agent should work in "
+                "(e.g. 'GRIM', 'dawn-field-theory', 'fracton'). The agent gets an isolated git worktree.\n"
+                "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
+                "- Use pool_status to check slot utilization, pool_list_jobs to see the queue.\n"
+                "- Use pool_cancel to cancel a queued job."
             )
         else:
             pool_instructions = (
