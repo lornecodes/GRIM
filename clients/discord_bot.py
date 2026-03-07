@@ -328,7 +328,7 @@ class GrimDiscordBot:
             client = GrimClient(
                 self.config,
                 allowed_tools=tools,
-                max_turns=6,  # keep Discord responses snappy
+                max_turns=12 if self.is_owner(user_id) else 6,
                 caller_id=caller,
                 system_prompt_prefix=DISCORD_VOICE_PREAMBLE,
                 system_prompt_suffix=DISCORD_FORMAT_ADDENDUM,
