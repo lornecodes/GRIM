@@ -36,24 +36,15 @@ from server.conversation_store import ConversationStore
 
 logger = logging.getLogger(__name__)
 
-# Guest tool list — read-only Kronos + pool status
+# Guest tool list — read-only Kronos (no pool — bot has no pool MCP server)
 DISCORD_GUEST_TOOLS = [
     t for t in KRONOS_TOOLS
     if "create" not in t and "update" not in t and "note_append" not in t
     and "memory_update" not in t and "task_move" not in t
-] + [
-    "mcp__pool__pool_status",
-    "mcp__pool__pool_list_jobs",
-    "mcp__pool__pool_job_status",
 ]
 
-# Owner tool list — full Kronos + task management + pool control
+# Owner tool list — full Kronos + task management + Discord messaging
 DISCORD_OWNER_TOOLS = list(KRONOS_TOOLS) + [
-    "mcp__pool__pool_status",
-    "mcp__pool__pool_list_jobs",
-    "mcp__pool__pool_job_status",
-    "mcp__pool__pool_submit",
-    "mcp__pool__pool_cancel",
     "mcp__kronos__kronos_task_dispatch",
     "mcp__kronos__kronos_task_archive",
     "mcp__kronos__kronos_calendar_add",

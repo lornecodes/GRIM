@@ -42,33 +42,40 @@ def bot(config):
 # ── Owner-only tool enforcement ──────────────────────────────────
 
 
-def test_owner_only_tools_in_owner_list():
-    """Owner-exclusive tools are in owner list but not guest list."""
-    assert "mcp__pool__pool_submit" in DISCORD_OWNER_TOOLS
-    assert "mcp__pool__pool_cancel" in DISCORD_OWNER_TOOLS
-    assert "mcp__pool__pool_submit" not in DISCORD_GUEST_TOOLS
-    assert "mcp__pool__pool_cancel" not in DISCORD_GUEST_TOOLS
+def test_owner_has_write_tools():
+    """Owner has vault write + task tools that guests don't."""
+    assert "mcp__kronos__kronos_create" in DISCORD_OWNER_TOOLS
+    assert "mcp__kronos__kronos_task_dispatch" in DISCORD_OWNER_TOOLS
+    assert "mcp__kronos__kronos_create" not in DISCORD_GUEST_TOOLS
+    assert "mcp__kronos__kronos_task_dispatch" not in DISCORD_GUEST_TOOLS
+
+
+def test_no_pool_tools_in_discord():
+    """Discord bot has no pool MCP server — pool tools must not be listed."""
+    all_discord_tools = DISCORD_GUEST_TOOLS + DISCORD_OWNER_TOOLS
+    pool_tools = [t for t in all_discord_tools if "pool" in t]
+    assert pool_tools == [], f"Pool tools found in Discord lists: {pool_tools}"
 
 
 def test_get_allowed_tools_owner(bot):
     tools = bot.get_allowed_tools(12345)
-    assert "mcp__pool__pool_submit" in tools
-    assert "mcp__pool__pool_cancel" in tools
+    assert "mcp__kronos__kronos_create" in tools
+    assert "mcp__kronos__kronos_task_dispatch" in tools
 
 
 def test_get_allowed_tools_non_owner(bot):
     tools = bot.get_allowed_tools(99999)
-    assert "mcp__pool__pool_submit" not in tools
-    assert "mcp__pool__pool_cancel" not in tools
-    assert "mcp__pool__pool_status" in tools
-    assert "mcp__pool__pool_list_jobs" in tools
+    assert "mcp__kronos__kronos_create" not in tools
+    assert "mcp__kronos__kronos_update" not in tools
+    assert "mcp__kronos__kronos_search" in tools
+    assert "mcp__kronos__kronos_get" in tools
 
 
-def test_get_allowed_tools_includes_read_tools(bot):
+def test_get_allowed_tools_guest_has_read_tools(bot):
     tools = bot.get_allowed_tools(99999)
-    assert "mcp__pool__pool_status" in tools
-    assert "mcp__pool__pool_list_jobs" in tools
-    assert "mcp__pool__pool_job_status" in tools
+    assert "mcp__kronos__kronos_search" in tools
+    assert "mcp__kronos__kronos_get" in tools
+    assert "mcp__kronos__kronos_list" in tools
 
 
 # ── Discord formatting & caller_id ──────────────────────────────

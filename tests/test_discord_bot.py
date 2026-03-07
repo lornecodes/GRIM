@@ -128,7 +128,7 @@ class TestDiscordSecurity:
         assert "kronos_note_append" in tool_names
         assert "kronos_task_create" in tool_names
         assert "kronos_task_move" in tool_names
-        assert "pool_submit" in tool_names
+        assert "kronos_task_dispatch" in tool_names
 
 
 # ── Identity ────────────────────────────────────────────────────
