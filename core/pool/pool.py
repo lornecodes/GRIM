@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -73,6 +74,7 @@ class ExecutionPool:
         # Build Kronos MCP config — prefer SSE URL over stdio command
         self._kronos_mcp_url = getattr(config, "pool_kronos_url", "") or ""
         self._kronos_mcp_command = getattr(config, "kronos_mcp_command", "")
+        self._kronos_mcp_args: list[str] = getattr(config, "kronos_mcp_args", ["-m", "kronos_mcp"])
         self._kronos_mcp_env: dict[str, str] = {}
         vault_path = getattr(config, "vault_path", None)
         skills_path = getattr(config, "skills_path", None)
@@ -83,28 +85,43 @@ class ExecutionPool:
         if workspace_root:
             self._kronos_mcp_env["KRONOS_WORKSPACE_ROOT"] = str(workspace_root)
 
+        # Managed Kronos SSE subprocess (auto-started if no external URL)
+        self._kronos_process: Optional[asyncio.subprocess.Process] = None
+        self._kronos_sse_port: int = 8319
+
     async def start(self) -> None:
         """Initialize queue, refresh caches, warm Kronos, and start dispatch loop."""
         import time as _time
 
         await self._queue.initialize()
 
-        # Initialize codebase caches (non-blocking — failures are logged, not fatal)
-        if self._codebase_mgr:
-            try:
-                await self._codebase_mgr.load_manifest()
-                results = await self._codebase_mgr.refresh_all()
-                refreshed = sum(1 for v in results.values() if v)
-                logger.info("Codebase caches refreshed: %d/%d", refreshed, len(results))
-            except Exception:
-                logger.exception("Failed to refresh codebase caches — continuing without")
-
-        # Warm Kronos MCP — verify SSE server or pre-check stdio availability
         warm_on_start = getattr(self._config, "pool_warm_on_start", True)
-        if warm_on_start:
+
+        # Auto-start a local Kronos SSE server if no external URL is configured.
+        # This is the single biggest perf win: all slots share one warm Kronos
+        # instead of each spawning its own stdio subprocess + engine init.
+        if warm_on_start and not self._kronos_mcp_url and self._kronos_mcp_command:
             t0 = _time.time()
-            await self._warm_kronos()
-            logger.info("Kronos warm-up complete in %.1fs", _time.time() - t0)
+            await self._start_kronos_sse()
+            logger.info("Kronos SSE auto-started in %.1fs", _time.time() - t0)
+
+        # Run codebase refresh + Kronos health check concurrently (both independent)
+        startup_tasks: list[asyncio.Task] = []
+
+        if self._codebase_mgr:
+            startup_tasks.append(asyncio.create_task(
+                self._refresh_codebase(), name="pool-codebase-refresh",
+            ))
+
+        if warm_on_start and self._kronos_mcp_url:
+            startup_tasks.append(asyncio.create_task(
+                self._warm_kronos(), name="pool-kronos-warmup",
+            ))
+
+        if startup_tasks:
+            t0 = _time.time()
+            await asyncio.gather(*startup_tasks, return_exceptions=True)
+            logger.info("Pool startup tasks complete in %.1fs", _time.time() - t0)
 
         # Create agent slots
         num_slots = getattr(self._config, "pool_num_slots", 2)
@@ -121,12 +138,11 @@ class ExecutionPool:
             for i in range(num_slots)
         ]
 
-        # Pre-warm slot subprocesses so first job is instant
+        # Pre-warm ALL slot subprocesses in parallel so first job is instant
         if warm_on_start:
             t1 = _time.time()
-            for slot in self._slots:
-                await slot.warm()
-            logger.info("Slot subprocesses warmed in %.1fs", _time.time() - t1)
+            await asyncio.gather(*(slot.warm() for slot in self._slots))
+            logger.info("Slot subprocesses warmed in %.1fs (%d slots)", _time.time() - t1, num_slots)
 
         self._running = True
         self._loop_task = asyncio.create_task(self._main_loop())
@@ -147,7 +163,7 @@ class ExecutionPool:
         # Wait for running jobs to finish (with timeout)
         if self._tasks:
             logger.info("Waiting for %d running jobs to finish...", len(self._tasks))
-            timeout = getattr(self._config, "pool_job_timeout_secs", 300)
+            timeout = getattr(self._config, "pool_job_timeout_secs", 900)
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*self._tasks.values(), return_exceptions=True),
@@ -163,6 +179,9 @@ class ExecutionPool:
         # Shutdown persistent slot subprocesses
         for slot in self._slots:
             await slot.shutdown()
+
+        # Stop managed Kronos SSE server
+        await self._stop_kronos_sse()
 
         # Cleanup remaining workspaces
         if self._workspace_mgr:
@@ -214,6 +233,98 @@ class ExecutionPool:
             "active_workspaces": self._workspace_mgr.active_count if self._workspace_mgr else 0,
             "resource_locks": self._resource_lock.status(),
         }
+
+    # ── Managed Kronos SSE server ──────────────────────────────
+
+    async def _start_kronos_sse(self) -> None:
+        """Spawn a local Kronos SSE server and wait until it's healthy.
+
+        This eliminates the biggest bottleneck: each slot's claude.exe would
+        otherwise spawn its own Kronos MCP stdio subprocess, each loading
+        engines (~30-60s). With SSE, engines load once and all slots share it.
+        """
+        import subprocess as _sp
+
+        cmd = [self._kronos_mcp_command] + self._kronos_mcp_args + [
+            "--sse", "--port", str(self._kronos_sse_port),
+        ]
+        env = {**os.environ, **self._kronos_mcp_env}
+
+        logger.info("Starting Kronos SSE: %s", " ".join(cmd))
+        self._kronos_process = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Wait for health endpoint to come up (engines need time to warm)
+        url = f"http://127.0.0.1:{self._kronos_sse_port}"
+        health_url = f"{url}/health"
+        max_wait = 120  # seconds — semantic model can take 60s+
+        poll = 0.5
+        waited = 0.0
+
+        import httpx as _httpx
+
+        while waited < max_wait:
+            # Check if process died
+            if self._kronos_process.returncode is not None:
+                stderr = ""
+                if self._kronos_process.stderr:
+                    stderr = (await self._kronos_process.stderr.read()).decode(errors="replace")
+                logger.error("Kronos SSE process died (rc=%s): %s", self._kronos_process.returncode, stderr[:500])
+                self._kronos_process = None
+                return
+
+            try:
+                async with _httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(health_url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("engines_initialized"):
+                            logger.info(
+                                "Kronos SSE healthy at %s (engines warm)", url,
+                            )
+                            self._kronos_mcp_url = url
+                            return
+                        else:
+                            logger.debug("Kronos SSE up but engines still loading...")
+            except Exception:
+                pass  # Server not ready yet
+
+            await asyncio.sleep(poll)
+            waited += poll
+
+        logger.warning(
+            "Kronos SSE did not become healthy within %ds — falling back to stdio", max_wait,
+        )
+        await self._stop_kronos_sse()
+
+    async def _stop_kronos_sse(self) -> None:
+        """Kill the managed Kronos SSE subprocess if it's running."""
+        if self._kronos_process and self._kronos_process.returncode is None:
+            logger.info("Stopping managed Kronos SSE server")
+            self._kronos_process.terminate()
+            try:
+                await asyncio.wait_for(self._kronos_process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self._kronos_process.kill()
+                await self._kronos_process.wait()
+            logger.info("Kronos SSE server stopped")
+        self._kronos_process = None
+
+    # ── Startup helpers ─────────────────────────────────────────
+
+    async def _refresh_codebase(self) -> None:
+        """Refresh codebase caches (non-blocking — failures logged, not fatal)."""
+        try:
+            await self._codebase_mgr.load_manifest()
+            results = await self._codebase_mgr.refresh_all()
+            refreshed = sum(1 for v in results.values() if v)
+            logger.info("Codebase caches refreshed: %d/%d", refreshed, len(results))
+        except Exception:
+            logger.exception("Failed to refresh codebase caches — continuing without")
 
     # ── Kronos warm-up ─────────────────────────────────────────
 
@@ -378,10 +489,18 @@ class ExecutionPool:
         if not slot.cwd and self._workspace_root:
             slot.cwd = str(self._workspace_root)
 
+        # Warm the agent subprocess before starting the job timeout clock.
+        # SDK init (subprocess spawn + MCP connect) can take 10-30s and
+        # shouldn't eat into the job's execution budget.
+        try:
+            await slot.warm(job.job_type)
+        except Exception as e:
+            logger.warning("Slot %s warm failed (will retry in execute): %s", slot.slot_id, e)
+
         try:
             result = await asyncio.wait_for(
                 slot.execute(job, on_message=self._on_agent_message),
-                timeout=getattr(self._config, "pool_job_timeout_secs", 300),
+                timeout=getattr(self._config, "pool_job_timeout_secs", 900),
             )
         except ClarificationNeeded as e:
             await self._queue.request_clarification(job.id, e.question)

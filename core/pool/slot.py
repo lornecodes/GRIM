@@ -194,35 +194,45 @@ class AgentSlot:
             }
         return mcp_servers
 
-    def _build_options(self, job_type: JobType) -> Any:
-        """Build ClaudeAgentOptions for a given job type."""
-        config = AGENT_CONFIGS[job_type]
-        permission_cb = _make_permission_callback(
-            allow_writes=config.get("allow_writes", False),
-            allow_bash=config.get("allow_bash", False),
-        )
+    def _build_options(self) -> Any:
+        """Build universal ClaudeAgentOptions usable for any job type.
+
+        Uses the superset of all tools and the most capable model (Opus).
+        Per-job restrictions are enforced by the dynamic permission callback,
+        and role-specific instructions are injected into the query prompt.
+        This avoids tearing down and respawning the subprocess on job type change.
+        """
+        # Union of all tool lists
+        all_tools = sorted({
+            tool for cfg in AGENT_CONFIGS.values()
+            for tool in cfg["allowed_tools"]
+        })
+
         mcp_servers = self._build_mcp_servers()
         return ClaudeAgentOptions(
-            system_prompt=config["system_prompt"],
+            system_prompt=(
+                "You are an agent for the Dawn Field Institute. "
+                "Follow the role-specific instructions in each task prompt."
+            ),
             mcp_servers=mcp_servers if mcp_servers else None,
-            allowed_tools=config["allowed_tools"],
-            can_use_tool=permission_cb,
+            allowed_tools=all_tools,
+            can_use_tool=_make_dynamic_permission_callback(self),
             max_turns=self.max_turns,
-            model=config.get("model"),
+            model="claude-opus-4-6",
             cwd=self.cwd,
             add_dirs=self.add_dirs if self.add_dirs else [],
         )
 
-    async def _ensure_client(self, job_type: JobType) -> None:
-        """Ensure a live client exists for the given job type.
+    async def _ensure_client(self) -> None:
+        """Ensure a live client subprocess exists.
 
-        Reuses the existing subprocess if the job type matches. Otherwise
-        tears down and respawns with the new config.
+        The subprocess is type-agnostic: any job type can run on it without
+        teardown. If the subprocess has died, it is respawned.
         """
         import time as _time
 
-        # Reuse if warm and same job type
-        if self._client and self._warm and self._client_job_type == job_type:
+        # Reuse if warm
+        if self._client and self._warm:
             return
 
         # Tear down old client if it exists
@@ -230,7 +240,7 @@ class AgentSlot:
 
         # Spawn new subprocess
         t0 = _time.time()
-        options = self._build_options(job_type)
+        options = self._build_options()
 
         # Must unset CLAUDECODE to spawn child sessions from Claude Code
         self._saved_claudecode = os.environ.pop("CLAUDECODE", None)
@@ -238,11 +248,10 @@ class AgentSlot:
         client = ClaudeSDKClient(options=options)
         await client.connect()
         self._client = client
-        self._client_job_type = job_type
         self._warm = True
         logger.info(
-            "Slot %s subprocess started for %s in %.1fs",
-            self.slot_id, job_type.value, _time.time() - t0,
+            "Slot %s subprocess started in %.1fs",
+            self.slot_id, _time.time() - t0,
         )
 
     async def _teardown_client(self) -> None:
@@ -261,16 +270,15 @@ class AgentSlot:
             os.environ["CLAUDECODE"] = self._saved_claudecode
             self._saved_claudecode = None
 
-    async def warm(self, job_type: JobType = JobType.RESEARCH) -> None:
+    async def warm(self) -> None:
         """Pre-start the subprocess so the first job is instant.
 
-        Called by ExecutionPool.start(). Defaults to RESEARCH (most common
-        pool job type). The subprocess will be recycled if the first real
-        job has a different type.
+        Called by ExecutionPool.start(). The subprocess is type-agnostic —
+        any job type can run on it without teardown.
         """
         try:
-            await self._ensure_client(job_type)
-            logger.info("Slot %s warmed (%s)", self.slot_id, job_type.value)
+            await self._ensure_client()
+            logger.info("Slot %s warmed", self.slot_id)
         except Exception as e:
             logger.warning("Slot %s warm failed: %s", self.slot_id, e)
             # Not fatal — execute() will retry
@@ -304,8 +312,10 @@ class AgentSlot:
         self._job_counter += 1
 
         try:
-            # Ensure subprocess is alive for this job type
-            await self._ensure_client(job.job_type)
+            # Ensure subprocess is alive (type-agnostic — no teardown on switch)
+            await self._ensure_client()
+            # Track current job type for dynamic permission callback
+            self._client_job_type = job.job_type
 
             prompt = _build_prompt(job)
             # Use unique session_id per job so conversations don't bleed
@@ -391,6 +401,40 @@ def _make_permission_callback(
     return _permission_handler
 
 
+def _make_dynamic_permission_callback(slot: AgentSlot):
+    """Build a dynamic permission callback that checks the CURRENT job's type.
+
+    Unlike _make_permission_callback which bakes in permissions at client
+    creation, this reads the slot's current job type at each tool call,
+    allowing a single subprocess to serve different job types.
+    """
+    async def _dynamic_permission_handler(tool_name, tool_input, context):
+        job_type = slot._client_job_type or JobType.RESEARCH
+        config = AGENT_CONFIGS.get(job_type, AGENT_CONFIGS[JobType.RESEARCH])
+
+        # Check if tool is in this job type's allowed list
+        if tool_name not in config["allowed_tools"]:
+            return PermissionResultDeny(
+                behavior="deny",
+                message=f"Tool '{tool_name}' not allowed for {job_type.value} jobs",
+            )
+
+        result = can_use_tool(
+            tool_name,
+            tool_input if isinstance(tool_input, dict) else {},
+            allow_writes=config.get("allow_writes", False),
+            allow_bash=config.get("allow_bash", False),
+        )
+        if result.verdict == ToolVerdict.ALLOW:
+            return PermissionResultAllow()
+        return PermissionResultDeny(
+            behavior="deny",
+            message=f"Audit gate denied: {result.reason}",
+        )
+
+    return _dynamic_permission_handler
+
+
 def _build_system_prompt(job: Job, base_prompt: str) -> str:
     """Build full system prompt with Kronos context."""
     parts = [base_prompt]
@@ -412,8 +456,19 @@ def _build_system_prompt(job: Job, base_prompt: str) -> str:
 
 
 def _build_prompt(job: Job) -> str:
-    """Build the user-facing prompt from job instructions + context."""
-    parts = [job.instructions]
+    """Build the user-facing prompt from job instructions + context.
+
+    Includes role-specific instructions since the subprocess is type-agnostic
+    (system prompt is generic, per-job role is injected here).
+    """
+    parts = []
+
+    # Inject role instructions for this job type
+    role_prompt = _SYSTEM_PROMPTS.get(job.job_type)
+    if role_prompt:
+        parts.append(f"## Role\n{role_prompt}\n")
+
+    parts.append(job.instructions)
 
     if job.plan:
         parts.append(f"\n## Implementation Plan\n{job.plan}")

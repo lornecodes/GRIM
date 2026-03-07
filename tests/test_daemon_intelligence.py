@@ -703,7 +703,8 @@ class TestEngineCompleteHandler:
         await eng._handle_pool_event(event)
 
         updated = await eng.store.get_by_job("job-pass")
-        assert updated.status == PipelineStatus.REVIEW
+        # Job passes review → _handle_review auto-merges non-code jobs
+        assert updated.status == PipelineStatus.MERGED
 
     @pytest.mark.asyncio
     async def test_complete_fail_retries(self, engine):
@@ -1161,7 +1162,8 @@ class TestHandlerEdgeCases:
         ))
 
         updated = await eng.store.get_by_job("job-no-ac")
-        assert updated.status.value == "review"
+        # No AC → skip validation → _handle_review auto-merges (mock job_type != "code")
+        assert updated.status.value == "merged"
 
     @pytest.mark.asyncio
     async def test_complete_partial_verdict_escalates(self, engine_with_intelligence):
@@ -1186,7 +1188,8 @@ class TestHandlerEdgeCases:
         ))
 
         updated = await eng.store.get_by_job("job-partial")
-        assert updated.status.value == "review"  # still advances
+        # Partial → advances to review → _handle_review auto-merges (mock job_type != "code")
+        assert updated.status.value == "merged"
 
         # Should have emitted escalation
         if eng._intelligence:

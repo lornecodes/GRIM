@@ -385,18 +385,18 @@ class TestAgentSlot:
             yield mock_result_msg
 
         mock_client = AsyncMock()
+        mock_client.connect = AsyncMock()
+        mock_client.disconnect = AsyncMock()
         mock_client.query = AsyncMock()
         mock_client.receive_response = mock_receive
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client):
-            with patch("claude_agent_sdk.ClaudeAgentOptions"):
-                with patch("claude_agent_sdk.AssistantMessage", type(mock_assistant_msg)):
-                    with patch("claude_agent_sdk.ResultMessage", type(mock_result_msg)):
-                        with patch("claude_agent_sdk.TextBlock", type(mock_text_block)):
-                            job = _make_job()
-                            result = await slot.execute(job)
+        with patch("core.pool.slot.ClaudeSDKClient", return_value=mock_client), \
+             patch("core.pool.slot.ClaudeAgentOptions", return_value=MagicMock()), \
+             patch("core.pool.slot.AssistantMessage", type(mock_assistant_msg)), \
+             patch("core.pool.slot.ResultMessage", type(mock_result_msg)), \
+             patch("core.pool.slot.TextBlock", type(mock_text_block)):
+            job = _make_job()
+            result = await slot.execute(job)
 
         assert busy_during is True
         assert slot.busy is False
@@ -408,13 +408,13 @@ class TestAgentSlot:
         slot = AgentSlot(slot_id="slot-0", kronos_mcp_command="")
 
         mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(side_effect=RuntimeError("SDK crash"))
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.connect = AsyncMock(side_effect=RuntimeError("SDK crash"))
+        mock_client.disconnect = AsyncMock()
 
-        with patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client):
-            with patch("claude_agent_sdk.ClaudeAgentOptions"):
-                job = _make_job()
-                result = await slot.execute(job)
+        with patch("core.pool.slot.ClaudeSDKClient", return_value=mock_client), \
+             patch("core.pool.slot.ClaudeAgentOptions", return_value=MagicMock()):
+            job = _make_job()
+            result = await slot.execute(job)
 
         assert result.success is False
         assert "SDK crash" in result.error
@@ -991,7 +991,9 @@ class TestWorkspaceIdPersistence:
             mock_mgr.get = MagicMock(return_value=mock_ws)
             pool._workspace_mgr = mock_mgr
 
-            # Mock slot execution
+            # Mock slot execution — warm() must be mocked to avoid spawning
+            # a real Claude Code subprocess in tests
+            slot.warm = AsyncMock()
             slot.execute = AsyncMock(return_value=JobResult(
                 job_id="test", success=True, result="done",
                 transcript=[], cost_usd=0.01, num_turns=1,
@@ -1060,6 +1062,8 @@ class TestWorkspaceIdPersistence:
 
             pool._workspace_mgr = AsyncMock()
 
+            # Mock warm() to avoid spawning real subprocess
+            slot.warm = AsyncMock()
             slot.execute = AsyncMock(return_value=JobResult(
                 job_id="test", success=True, result="done",
                 transcript=[], cost_usd=0.01, num_turns=1,

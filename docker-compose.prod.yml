@@ -62,11 +62,7 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # Discord bot excluded from prod — run locally for testing.
-  # To include: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d grim-discord
   grim-discord:
-    profiles:
-      - discord   # Only starts with --profile discord
     environment:
       - GRIM_ENV=production
     restart: always
