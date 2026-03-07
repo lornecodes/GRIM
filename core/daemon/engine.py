@@ -1512,6 +1512,16 @@ class ManagementEngine:
                     item.id, PipelineStatus.FAILED,
                     error=f"Validation failed after {item.daemon_retries} retries: {verdict.reasoning}",
                 )
+                # Escalate — validation exhausted all retries
+                from core.pool.events import PoolEvent, PoolEventType
+                await self._pool_events.emit(PoolEvent(
+                    type=PoolEventType.DAEMON_ESCALATION,
+                    job_id=job_id,
+                    data={
+                        "story_id": item.story_id,
+                        "reason": f"Validation failed after {item.daemon_retries} retries: {verdict.reasoning}",
+                    },
+                ))
                 logger.warning("Job %s validation FAIL → FAILED (%s): %s",
                               job_id, item.story_id, verdict.reasoning)
 
