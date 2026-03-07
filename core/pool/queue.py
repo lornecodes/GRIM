@@ -285,6 +285,26 @@ class JobQueue:
         )
         logger.info("Clarification provided, job re-queued: %s", job_id)
 
+    async def recover_orphans(self) -> int:
+        """Mark abandoned 'running' jobs as failed on startup.
+
+        When the container restarts, any job still in 'running' status was
+        abandoned mid-execution. Mark them as failed with a clear error
+        message so the daemon can detect and re-dispatch them.
+        """
+        db = await self._conn()
+        cursor = await db.execute(
+            "UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE status = ?",
+            ("failed", "Orphaned by process restart — will be re-dispatched",
+             datetime.now(timezone.utc).isoformat(), "running"),
+        )
+        count = cursor.rowcount
+        await db.commit()
+
+        if count > 0:
+            logger.warning("Recovered %d orphaned running jobs", count)
+        return count
+
     async def prune_completed(self, days: int = 30) -> int:
         """Delete terminal jobs (complete/failed/cancelled) older than `days`.
 

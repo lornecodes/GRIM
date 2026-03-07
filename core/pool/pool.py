@@ -96,6 +96,13 @@ class ExecutionPool:
 
         await self._queue.initialize()
 
+        # Recover orphaned jobs from previous runs — any job still "running"
+        # in the DB was abandoned when the container restarted. Mark as failed
+        # so the daemon can re-dispatch them.
+        orphaned = await self._queue.recover_orphans()
+        if orphaned:
+            logger.warning("Recovered %d orphaned jobs from previous run", orphaned)
+
         # Clean up stale worktrees from previous runs in the BACKGROUND.
         # Bind-mount I/O on Docker Desktop is very slow for large repos
         # (10K files → 2+ min to delete), so this must not block startup.

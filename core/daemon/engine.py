@@ -130,6 +130,51 @@ class ManagementEngine:
         """Access the health monitor (for endpoints)."""
         return self._health
 
+    async def _recover_orphaned_items(self) -> None:
+        """Reset orphaned pipeline items so they re-enter the dispatch cycle.
+
+        On startup:
+        1. DISPATCHED items whose pool job is dead/missing → FAILED → READY
+        2. FAILED items with orphan errors (from previous partial recovery) → READY
+        """
+        try:
+            items = await self._store.list_items()
+            recovered = 0
+
+            for item in items:
+                # Case 1: DISPATCHED with dead/missing pool job
+                if item.status == PipelineStatus.DISPATCHED and item.job_id:
+                    try:
+                        job = await self._pool_queue.get(item.job_id)
+                        if job and job.status.value in ("running", "queued"):
+                            continue  # Job is alive, skip
+                    except Exception:
+                        pass
+
+                    try:
+                        await self._store.advance(item.id, PipelineStatus.FAILED,
+                                                  error="Orphaned by process restart")
+                        await self._store.advance(item.id, PipelineStatus.READY)
+                        logger.warning("Recovered orphaned DISPATCHED → READY: %s (job=%s)",
+                                       item.story_id, item.job_id)
+                        recovered += 1
+                    except Exception:
+                        logger.debug("Could not recover orphan %s", item.story_id)
+
+                # Case 2: FAILED with orphan error (from previous partial recovery)
+                elif item.status == PipelineStatus.FAILED and item.error and "Orphaned" in item.error:
+                    try:
+                        await self._store.advance(item.id, PipelineStatus.READY)
+                        logger.warning("Recovered orphaned FAILED → READY: %s", item.story_id)
+                        recovered += 1
+                    except Exception:
+                        logger.debug("Could not recover orphan %s", item.story_id)
+
+            if recovered:
+                logger.info("Recovered %d orphaned pipeline items → READY for re-dispatch", recovered)
+        except Exception:
+            logger.warning("Orphan recovery failed", exc_info=True)
+
     def _ensure_task_engine(self) -> bool:
         """Lazy-init the TaskEngine. Returns True if available."""
         if self._task_engine is not None:
@@ -152,6 +197,12 @@ class ManagementEngine:
     async def start(self) -> None:
         """Initialize store and start the main loop."""
         await self._store.initialize()
+
+        # Recover orphaned pipeline items from previous runs.
+        # Jobs left in DISPATCHED with a failed/orphaned pool job should
+        # be reset so they can be re-dispatched.
+        await self._recover_orphaned_items()
+
         self._pool_events.subscribe(self._event_callback)
         self._running = True
         self._loop_task = asyncio.create_task(self._main_loop())
