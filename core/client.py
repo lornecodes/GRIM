@@ -655,15 +655,22 @@ class GrimClient:
         """Build the system prompt using the existing prompt builder."""
         field_state = load_field_state(self.config.identity_personality_path)
 
-        # Load working memory if available
+        # Load working memory from vault (direct file read — no MCP needed)
         working_memory = None
-        try:
-            from core.tools.context import tool_context
-            if tool_context.mcp_available:
-                # Memory will be loaded dynamically via Kronos tools
-                pass
-        except Exception:
-            pass
+        vault_path = (
+            getattr(self.config, "vault_path", None)
+            or os.environ.get("KRONOS_VAULT_PATH")
+            or os.environ.get("GRIM_VAULT_PATH")
+        )
+        if vault_path:
+            mem_path = Path(vault_path) / "memory.md"
+            try:
+                if mem_path.exists():
+                    raw = mem_path.read_text(encoding="utf-8")
+                    working_memory = raw[:4000] + "\n...(truncated)" if len(raw) > 4000 else raw
+                    logger.info("Loaded working memory: %d chars from %s", len(raw), mem_path)
+            except Exception as e:
+                logger.warning("Failed to load working memory: %s", e)
 
         parts = build_system_prompt_parts(
             prompt_path=self.config.identity_prompt_path,
@@ -694,9 +701,11 @@ class GrimClient:
             )
         elif has_pool_proxy:
             pool_instructions = (
-                "- You have an execution pool available via proxy. Use pool_submit to dispatch coding jobs.\n"
-                "- When the user asks you to build, create, write, fix, or modify code/files, "
-                "submit it as a pool job using pool_submit. Do NOT write code in chat.\n"
+                "- You have an execution pool available via proxy. The pool IS online and working.\n"
+                "- Your pool tools: mcp__pool_proxy__pool_submit, mcp__pool_proxy__pool_status, "
+                "mcp__pool_proxy__pool_list_jobs, mcp__pool_proxy__pool_cancel.\n"
+                "- When the user asks you to submit a job, build, create, write, fix, or modify code/files, "
+                "ALWAYS call mcp__pool_proxy__pool_submit immediately. Do NOT say pool is offline or unavailable.\n"
                 "- Set target_repo to the repository the agent should work in "
                 "(e.g. 'GRIM', 'dawn-field-theory', 'fracton'). The agent gets an isolated git worktree.\n"
                 "- For pool_submit, set job_type to 'code' for coding tasks, 'research' for research, 'audit' for reviews.\n"
