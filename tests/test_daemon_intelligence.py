@@ -1334,3 +1334,118 @@ class TestInferTargetRepo:
     def test_unknown_project(self):
         from core.daemon.engine import ManagementEngine
         assert ManagementEngine._PROJECT_REPO_MAP.get("proj-unknown") is None
+
+
+class TestHandlePoolEventJobReview:
+    """Tests for JOB_REVIEW event handling in daemon."""
+
+    @pytest.mark.asyncio
+    async def test_job_review_updates_workspace_id(self):
+        """JOB_REVIEW event should update workspace_id on pipeline item."""
+        from core.daemon.engine import ManagementEngine
+        from core.daemon.models import PipelineStatus
+        from core.pool.events import PoolEvent, PoolEventType
+
+        engine = ManagementEngine.__new__(ManagementEngine)
+
+        # Mock store
+        mock_item = MagicMock()
+        mock_item.id = "item-1"
+        mock_item.story_id = "story-001"
+        mock_item.status = PipelineStatus.REVIEW
+        mock_item.workspace_id = None
+
+        engine._store = AsyncMock()
+        engine._store.get_by_job = AsyncMock(return_value=mock_item)
+        engine._store.get = AsyncMock(return_value=mock_item)
+        engine._store.update_fields = AsyncMock()
+        engine._health = MagicMock()
+        engine._health.record_error = MagicMock()
+
+        event = PoolEvent(
+            type=PoolEventType.JOB_REVIEW,
+            job_id="job-abc",
+            data={"workspace_id": "ws-review-123"},
+        )
+
+        await engine._handle_pool_event(event)
+
+        engine._store.update_fields.assert_called_once_with(
+            "item-1", workspace_id="ws-review-123",
+        )
+
+    @pytest.mark.asyncio
+    async def test_job_review_skips_if_workspace_already_set(self):
+        """JOB_REVIEW should not update if item already has workspace_id."""
+        from core.daemon.engine import ManagementEngine
+        from core.daemon.models import PipelineStatus
+        from core.pool.events import PoolEvent, PoolEventType
+
+        engine = ManagementEngine.__new__(ManagementEngine)
+
+        mock_item = MagicMock()
+        mock_item.id = "item-1"
+        mock_item.story_id = "story-001"
+        mock_item.status = PipelineStatus.REVIEW
+        mock_item.workspace_id = "ws-already-set"
+
+        engine._store = AsyncMock()
+        engine._store.get_by_job = AsyncMock(return_value=mock_item)
+        engine._store.get = AsyncMock(return_value=mock_item)
+        engine._store.update_fields = AsyncMock()
+        engine._health = MagicMock()
+        engine._health.record_error = MagicMock()
+
+        event = PoolEvent(
+            type=PoolEventType.JOB_REVIEW,
+            job_id="job-abc",
+            data={"workspace_id": "ws-new"},
+        )
+
+        await engine._handle_pool_event(event)
+
+        # Should NOT call update_fields since workspace_id already set
+        engine._store.update_fields.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_job_complete_passes_workspace_id(self):
+        """JOB_COMPLETE data should include workspace_id for _handle_complete."""
+        from core.daemon.engine import ManagementEngine
+        from core.daemon.models import PipelineStatus
+        from core.pool.events import PoolEvent, PoolEventType
+
+        engine = ManagementEngine.__new__(ManagementEngine)
+
+        mock_item = MagicMock()
+        mock_item.id = "item-1"
+        mock_item.story_id = "story-001"
+        mock_item.status = PipelineStatus.DISPATCHED
+        mock_item.daemon_retries = 0
+
+        engine._store = AsyncMock()
+        engine._store.get_by_job = AsyncMock(return_value=mock_item)
+        engine._store.advance = AsyncMock()
+        engine._intelligence = None
+        engine._validate_output = False
+        engine._health = MagicMock()
+        engine._health.record_error = MagicMock()
+
+        # Mock _handle_review to capture what workspace_id is passed
+        captured_ws_id = []
+        async def mock_review(item, ws_id):
+            captured_ws_id.append(ws_id)
+        engine._handle_review = mock_review
+
+        event = PoolEvent(
+            type=PoolEventType.JOB_COMPLETE,
+            job_id="job-abc",
+            data={
+                "workspace_id": "ws-from-complete",
+                "result_preview": "done",
+                "cost_usd": 0.05,
+            },
+        )
+
+        await engine._handle_pool_event(event)
+
+        assert captured_ws_id == ["ws-from-complete"]

@@ -169,7 +169,8 @@ class JobQueue:
 
         # Map field names to column updates
         for key, value in fields.items():
-            if key in ("result", "error", "assigned_slot", "clarification_question", "clarification_answer"):
+            if key in ("result", "error", "assigned_slot", "workspace_id",
+                       "clarification_question", "clarification_answer"):
                 sets.append(f"{key} = ?")
                 params.append(value)
             elif key == "retry_count":

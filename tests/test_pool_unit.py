@@ -845,3 +845,247 @@ class TestTargetRepo:
         job = Job(job_type=JobType.CODE, instructions="test")
         prompt = _build_system_prompt(job, "Base prompt.")
         assert "worktree" not in prompt
+
+
+class TestWorkspaceIdPersistence:
+    """Tests for workspace_id persistence to SQLite and event emission."""
+
+    @pytest.mark.asyncio
+    async def test_update_status_persists_workspace_id(self, tmp_path):
+        """update_status with workspace_id= should persist to DB."""
+        db_path = tmp_path / "test.db"
+        queue = JobQueue(db_path)
+        await queue.initialize()
+
+        job = Job(job_type=JobType.CODE, instructions="test")
+        await queue.submit(job)
+
+        await queue.update_status(job.id, JobStatus.RUNNING, workspace_id="ws-abc123")
+
+        fetched = await queue.get(job.id)
+        assert fetched is not None
+        assert fetched.workspace_id == "ws-abc123"
+
+    @pytest.mark.asyncio
+    async def test_workspace_id_roundtrip(self, tmp_path):
+        """Submit with no workspace_id, update it, then get — should roundtrip."""
+        db_path = tmp_path / "test.db"
+        queue = JobQueue(db_path)
+        await queue.initialize()
+
+        job = Job(job_type=JobType.CODE, instructions="build")
+        assert job.workspace_id is None
+        await queue.submit(job)
+
+        # Update workspace_id
+        await queue.update_status(job.id, JobStatus.RUNNING, workspace_id="ws-xyz789")
+
+        # Verify persistence
+        fetched = await queue.get(job.id)
+        assert fetched.workspace_id == "ws-xyz789"
+        assert fetched.status == JobStatus.RUNNING
+
+    @pytest.mark.asyncio
+    async def test_pool_dispatch_persists_workspace_id(self):
+        """Pool should persist workspace_id to SQLite after worktree creation."""
+        from core.pool.pool import ExecutionPool
+        from core.pool.slot import AgentSlot
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_root = Path(td)
+            (ws_root / "GRIM").mkdir()
+
+            config = MagicMock()
+            config.pool_enabled = True
+            config.pool_num_slots = 1
+            config.pool_poll_interval = 60
+            config.pool_job_timeout_secs = 30
+            config.pool_max_turns_per_job = 10
+            config.workspace_root = str(ws_root)
+            config.pool_db_path = ws_root / "pool.db"
+            config.pool_discord_webhook_url = None
+            config.pool_kronos_url = ""
+            config.kronos_mcp_command = ""
+            config.vault_path = None
+            config.skills_path = None
+
+            queue = JobQueue(config.pool_db_path)
+            await queue.initialize()
+
+            pool = ExecutionPool(queue, config)
+
+            slot = AgentSlot(slot_id="slot-0")
+            pool._slots = [slot]
+            pool._running = True
+
+            # Mock workspace manager
+            mock_ws = MagicMock()
+            mock_ws.id = "workspace-persist-test"
+            mock_ws.worktree_path = ws_root / ".grim" / "worktrees" / "workspace-persist-test"
+            pool._workspace_mgr = AsyncMock()
+            pool._workspace_mgr.create = AsyncMock(return_value=mock_ws)
+
+            # Mock slot execution
+            slot.execute = AsyncMock(return_value=JobResult(
+                job_id="test", success=True, result="done",
+                transcript=[], cost_usd=0.01, num_turns=1,
+            ))
+
+            # Submit job
+            job = Job(job_type=JobType.CODE, instructions="fix", target_repo="GRIM")
+            await queue.submit(job)
+
+            await pool._dispatch_cycle()
+            await asyncio.sleep(0.5)
+
+            # workspace_id should be persisted in SQLite
+            fetched = await queue.get(job.id)
+            assert fetched is not None
+            assert fetched.workspace_id == "workspace-persist-test"
+
+            pool._running = False
+
+    @pytest.mark.asyncio
+    async def test_job_complete_event_includes_workspace_id(self):
+        """JOB_COMPLETE event data should include workspace_id."""
+        from core.pool.events import PoolEvent, PoolEventType
+        from core.pool.pool import ExecutionPool
+        from core.pool.slot import AgentSlot
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_root = Path(td)
+            (ws_root / "GRIM").mkdir()
+
+            config = MagicMock()
+            config.pool_enabled = True
+            config.pool_num_slots = 1
+            config.pool_poll_interval = 60
+            config.pool_job_timeout_secs = 30
+            config.pool_max_turns_per_job = 10
+            config.workspace_root = str(ws_root)
+            config.pool_db_path = ws_root / "pool.db"
+            config.pool_discord_webhook_url = None
+            config.pool_kronos_url = ""
+            config.kronos_mcp_command = ""
+            config.vault_path = None
+            config.skills_path = None
+
+            queue = JobQueue(config.pool_db_path)
+            await queue.initialize()
+
+            pool = ExecutionPool(queue, config)
+
+            slot = AgentSlot(slot_id="slot-0")
+            pool._slots = [slot]
+            pool._running = True
+
+            # Mock workspace manager
+            mock_ws = MagicMock()
+            mock_ws.id = "workspace-event-test"
+            mock_ws.worktree_path = ws_root / ".grim" / "worktrees" / "workspace-event-test"
+            mock_ws.status = "active"
+            mock_mgr = MagicMock()
+            mock_mgr.create = AsyncMock(return_value=mock_ws)
+            mock_mgr.get_branch_diff = AsyncMock(return_value="1 file changed")
+            mock_mgr.list_changed_files = AsyncMock(return_value=["test.py"])
+            mock_mgr.get = MagicMock(return_value=mock_ws)
+            pool._workspace_mgr = mock_mgr
+
+            # Mock slot execution
+            slot.execute = AsyncMock(return_value=JobResult(
+                job_id="test", success=True, result="done",
+                transcript=[], cost_usd=0.01, num_turns=1,
+            ))
+
+            # Capture emitted events
+            captured_events: list[PoolEvent] = []
+            original_emit = pool.events.emit
+
+            async def capture_emit(event):
+                captured_events.append(event)
+                await original_emit(event)
+
+            pool.events.emit = capture_emit
+
+            # Submit and run the job directly (not via dispatch cycle background task)
+            job = Job(job_type=JobType.CODE, instructions="fix", target_repo="GRIM")
+            await queue.submit(job)
+
+            # Pull job from queue and run it directly
+            queued_job = await queue.next()
+            assert queued_job is not None
+            await pool._run_job(slot, queued_job)
+
+            # Find JOB_COMPLETE event
+            complete_events = [
+                e for e in captured_events if e.type == PoolEventType.JOB_COMPLETE
+            ]
+            assert len(complete_events) == 1
+            assert complete_events[0].data["workspace_id"] == "workspace-event-test"
+
+            pool._running = False
+
+    @pytest.mark.asyncio
+    async def test_job_complete_event_workspace_id_none_without_workspace(self):
+        """JOB_COMPLETE event should have workspace_id=None when no workspace."""
+        from core.pool.events import PoolEvent, PoolEventType
+        from core.pool.pool import ExecutionPool
+        from core.pool.slot import AgentSlot
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_root = Path(td)
+
+            config = MagicMock()
+            config.pool_enabled = True
+            config.pool_num_slots = 1
+            config.pool_poll_interval = 60
+            config.pool_job_timeout_secs = 30
+            config.pool_max_turns_per_job = 10
+            config.workspace_root = str(ws_root)
+            config.pool_db_path = ws_root / "pool.db"
+            config.pool_discord_webhook_url = None
+            config.pool_kronos_url = ""
+            config.kronos_mcp_command = ""
+            config.vault_path = None
+            config.skills_path = None
+
+            queue = JobQueue(config.pool_db_path)
+            await queue.initialize()
+
+            pool = ExecutionPool(queue, config)
+
+            slot = AgentSlot(slot_id="slot-0")
+            pool._slots = [slot]
+            pool._running = True
+
+            pool._workspace_mgr = AsyncMock()
+
+            slot.execute = AsyncMock(return_value=JobResult(
+                job_id="test", success=True, result="done",
+                transcript=[], cost_usd=0.01, num_turns=1,
+            ))
+
+            captured_events: list[PoolEvent] = []
+            original_emit = pool.events.emit
+
+            async def capture_emit(event):
+                captured_events.append(event)
+                await original_emit(event)
+
+            pool.events.emit = capture_emit
+
+            # Research job — no workspace
+            job = Job(job_type=JobType.RESEARCH, instructions="look up X")
+            await queue.submit(job)
+
+            queued_job = await queue.next()
+            assert queued_job is not None
+            await pool._run_job(slot, queued_job)
+
+            complete_events = [
+                e for e in captured_events if e.type == PoolEventType.JOB_COMPLETE
+            ]
+            assert len(complete_events) == 1
+            assert complete_events[0].data["workspace_id"] is None
+
+            pool._running = False

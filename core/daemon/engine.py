@@ -688,6 +688,14 @@ class ManagementEngine:
                 # Try auto-resolution
                 await self._handle_blocked(item, job_id, question)
 
+            elif event.type == PoolEventType.JOB_REVIEW:
+                # Fallback: if workspace_id wasn't in JOB_COMPLETE, pick it up here
+                workspace_id = event.data.get("workspace_id")
+                fresh = await self._store.get(item.id)
+                if fresh and fresh.status == PipelineStatus.REVIEW and not fresh.workspace_id and workspace_id:
+                    await self._store.update_fields(item.id, workspace_id=workspace_id)
+                    logger.info("Job %s workspace_id updated via JOB_REVIEW: %s", job_id, workspace_id)
+
         except Exception:
             logger.exception("Failed to handle pool event for job %s", job_id)
             self._health.record_error(f"Event handler failed: {event.type} for {job_id}")

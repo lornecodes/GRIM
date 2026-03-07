@@ -363,6 +363,9 @@ class ExecutionPool:
                 ws = await self._workspace_mgr.create(job.id, repo_path)
                 workspace_id = ws.id
                 self._job_workspace_map[job.id] = ws.id
+                await self._queue.update_status(
+                    job.id, JobStatus.RUNNING, workspace_id=ws.id,
+                )
                 slot.cwd = str(ws.worktree_path)
                 # Give CODE agents read access to full workspace alongside their worktree
                 if self._workspace_root:
@@ -444,6 +447,7 @@ class ExecutionPool:
                     "num_turns": result.num_turns,
                     "diff_stat": diff_stat,
                     "changed_files": changed_files,
+                    "workspace_id": workspace_id,
                 },
             ))
             logger.info("Job %s complete", job.id)
