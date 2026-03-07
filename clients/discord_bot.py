@@ -149,14 +149,16 @@ class GrimDiscordBot:
         allowed_guild_ids: list[int] | None = None,
         allowed_channel_ids: list[int] | None = None,
         owner_user_id: int | None = None,
-        daily_cost_cap: float = 1.0,
+        daily_cost_cap: float | None = None,
         max_response_chars: int = DISCORD_SAFE_CHARS,
     ):
         self.config = config
         self.allowed_guild_ids = set(allowed_guild_ids) if allowed_guild_ids else None
         self.allowed_channel_ids = set(allowed_channel_ids) if allowed_channel_ids else None
         self.owner_user_id = owner_user_id
-        self.daily_cost_cap = daily_cost_cap
+        self.daily_cost_cap = daily_cost_cap or float(
+            os.environ.get("GRIM_DISCORD_DAILY_CAP", "5.0")
+        )
         self.max_response_chars = max_response_chars
 
         self.sessions: dict[int, ChannelSession] = {}
